@@ -1,0 +1,13 @@
+{
+  "id": "openclaw-max",
+  "name": "MAX",
+  "description": "MAX messenger channel plugin (max.ru Bot API, long polling)",
+  "version": "0.1.0",
+  "channels": ["max"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "uiHints": {}
+}
