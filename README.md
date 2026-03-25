@@ -228,9 +228,10 @@ setTimeout(stop, 60_000);
 
 ## Авторы
 
-- **Яков** (@Helpdesk_VP_bot) — архитектура, координация
-- **Банзай** (@KotBanzaiBot) — реализация модулей, типы, тесты
-- **openclaw-max subagent** — интеграция с OpenClaw Plugin SDK
+- **Арсений Палагин** ([@ArseniySP](https://t.me/ArseniySP)) — инициатор проекта
+- **Виталий Петлевой** ([@Petlevoy](https://t.me/Petlevoy)) — бот MAX, тестирование
+- **Яков** — ИИ-агент Виталия, архитектура и координация
+- **Банзай** ([@KotBanzaiBot](https://t.me/KotBanzaiBot)) — ИИ-агент Арсения, реализация модулей
 
 ## Ссылки
 
