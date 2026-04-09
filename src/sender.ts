@@ -11,6 +11,7 @@ import {
   sendMessage,
   uploadFile,
   type SendMessageBody,
+  type UploadedAttachmentPayload,
 } from "./api.js";
 
 const MIME_MAP: Record<string, string> = {
@@ -38,6 +39,16 @@ function getUploadType(mimeType: string): "image" | "file" | "video" | "audio" {
   return "file";
 }
 
+/** Options for sendText */
+export interface SendTextOptions {
+  /** Reply to a specific message */
+  replyTo?: string;
+  /** Text format: "html" (default), "markdown", or "plain" */
+  format?: "html" | "markdown" | "plain";
+  /** Disable link preview */
+  disableLinkPreview?: boolean;
+}
+
 /**
  * Send a plain-text or HTML message. Returns message_id.
  */
@@ -45,11 +56,19 @@ export async function sendText(
   token: string,
   chatId: number,
   text: string,
+  options?: SendTextOptions,
 ): Promise<string> {
-  const result = await sendMessage(token, chatId, {
+  const body: SendMessageBody = {
     text,
-    format: "html",
-  });
+    format: options?.format ?? "html",
+  };
+  if (options?.replyTo) {
+    body.link = { type: "reply", mid: options.replyTo };
+  }
+  if (options?.disableLinkPreview) {
+    body.disable_link_preview = true;
+  }
+  const result = await sendMessage(token, chatId, body);
   return result.message_id;
 }
 
@@ -76,6 +95,41 @@ export async function removeMessage(token: string, messageId: string): Promise<v
 }
 
 /**
+ * Forward a message to another chat.
+ * Uses the link.type: "forward" mechanism.
+ * Returns the sent message_id.
+ */
+export async function forwardMessage(
+  token: string,
+  chatId: number,
+  originalMid: string,
+): Promise<string> {
+  const body: SendMessageBody = {
+    link: { type: "forward", mid: originalMid },
+  };
+  const result = await sendMessage(token, chatId, body);
+  return result.message_id;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildAttachmentPayload(
+  uploadType: "image" | "file" | "video" | "audio",
+  payload: UploadedAttachmentPayload,
+  filename: string,
+): Record<string, unknown> {
+  const normalized: Record<string, unknown> = { ...payload };
+
+  if (uploadType === "file" && !normalized.filename) {
+    normalized.filename = filename;
+  }
+
+  return normalized;
+}
+
+/**
  * Upload a local file and send it with an optional text caption.
  * Returns the sent message_id.
  */
@@ -84,19 +138,16 @@ export async function sendLocalFile(
   chatId: number,
   filePath: string,
   caption?: string,
+  replyTo?: string,
 ): Promise<string> {
   const mimeType = getMimeType(filePath);
   const uploadType = getUploadType(mimeType);
   const filename = path.basename(filePath);
 
-  // Step 1: obtain upload URL
   const uploadInfo = await getUploadUrl(token, uploadType);
-
-  // Step 2: PUT the file content
   const fileContent = fs.readFileSync(filePath);
-  await uploadFile(uploadInfo.url, fileContent, mimeType);
+  const uploadPayload = await uploadFile(token, uploadInfo.url, fileContent, filename, mimeType);
 
-  // Step 3: send message referencing the uploaded token
   const attachmentType =
     uploadType === "image"
       ? "image"
@@ -106,19 +157,34 @@ export async function sendLocalFile(
           ? "audio"
           : "file";
 
-  const body: SendMessageBody = {
-    attachments: [
-      {
-        type: attachmentType,
-        payload: {
-          token: uploadInfo.token ?? uploadInfo.url,
-          filename,
-        },
-      },
-    ],
-  };
-  if (caption) body.text = caption;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (attempt > 0) {
+      await sleep(500 * 2 ** (attempt - 1));
+    }
 
-  const result = await sendMessage(token, chatId, body);
-  return result.message_id;
+    const body: SendMessageBody = {
+      attachments: [
+        {
+          type: attachmentType,
+          payload: buildAttachmentPayload(uploadType, uploadPayload, filename),
+        },
+      ],
+    };
+    if (caption) body.text = caption;
+    if (replyTo) body.link = { type: "reply", mid: replyTo };
+
+    try {
+      const result = await sendMessage(token, chatId, body);
+      return result.message_id;
+    } catch (err) {
+      lastError = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes("attachment.not.ready") || attempt === 3) {
+        throw err;
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }

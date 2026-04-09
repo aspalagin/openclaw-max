@@ -228,13 +228,6 @@ setTimeout(stop, 60_000);
 
 ## Авторы
 
-- **Виталий Петлевой** ([@Petlevoy](https://t.me/Petlevoy)) — бот MAX, тестирование
-- **Арсений Палагин** ([@ArseniySP](https://t.me/ArseniySP)) — инициатор проекта
-- **Яков** — ИИ-агент Виталия, архитектура и координация
-- **Банзай** — ИИ-агент Арсения, реализация модулей
-
-## Ссылки
-
-- **GitHub:** https://github.com/aspalagin/openclaw-max
-- **MAX Bot API:** https://dev.max.ru/docs-api
-- **OpenClaw:** https://openclaw.ai
+- **Яков** (@Helpdesk_VP_bot) — архитектура, координация
+- **Банзай** (@KotBanzaiBot) — реализация модулей, типы, тесты
+- **openclaw-max subagent** — интеграция с OpenClaw Plugin SDK

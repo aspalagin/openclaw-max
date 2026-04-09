@@ -12,11 +12,16 @@ const plugin = {
   register(api: {
     runtime: unknown;
     registerChannel: (opts: { plugin: unknown }) => void;
-    logger: { info: (msg: string) => void; warn?: (msg: string) => void };
+    logger: { info: (msg: string) => void; warn?: (msg: string) => void; debug?: (msg: string) => void };
   }) {
+    // Always update runtime reference (gateway may pass a fresh one on hot reload)
     setMaxRuntime(api.runtime);
+
+    // Register channel on every register() call.
+    // Gateway creates a new plugin registry for each load cycle, so we must
+    // re-register in each one. The loader's own dedup prevents double-adds
+    // within the same registry.
     api.registerChannel({ plugin: maxPlugin });
-    api.logger.info("MAX channel plugin registered");
   },
 };
 

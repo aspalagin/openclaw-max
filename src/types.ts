@@ -318,6 +318,12 @@ export interface MaxAccountConfig {
   allowFrom?: Array<string | number>;
   dmPolicy?: "pairing" | "allowlist" | "open" | "disabled";
   streaming?: "off" | "partial" | "block";
+  /** Require @mention in group chats (default: true) */
+  requireMention?: boolean;
+  /** Group chat policy */
+  groupPolicy?: "allowlist" | "open" | "disabled";
+  /** Allowed group chat IDs */
+  allowGroups?: Array<string | number>;
 }
 
 export interface MaxChannelConfig {
@@ -330,6 +336,12 @@ export interface MaxChannelConfig {
   allowFrom?: Array<string | number>;
   dmPolicy?: "pairing" | "allowlist" | "open" | "disabled";
   streaming?: "off" | "partial" | "block";
+  /** Transport mode: "polling" (default) or "webhook" */
+  transport?: "polling" | "webhook";
+  /** Public URL for webhook endpoint */
+  webhookUrl?: string;
+  /** Port for webhook HTTP server (default: 8443) */
+  webhookPort?: number;
 }
 
 export interface ResolvedMaxAccount {

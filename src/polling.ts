@@ -21,10 +21,14 @@ const POLL_TIMEOUT_SEC = 30;
 const RETRY_DELAY_NETWORK = 5_000;
 const RETRY_DELAY_RATE_LIMIT = 60_000;  // 1 min — MAX rate limit window
 const RETRY_DELAY_SERVER_ERROR = 15_000;
+const POLL_CYCLE_DELAY_MS = 250;
 
 // ─── Types ──────────────────────────────────────────────────────
 
 export type MessageHandler = (update: MessageCreatedUpdate) => Promise<void>;
+
+/** Generic handler for any update type */
+export type UpdateHandler = (update: Update) => Promise<void>;
 
 export interface PollingOptions {
   /** Filter update types (default: ["message_created"]) */
@@ -33,6 +37,8 @@ export interface PollingOptions {
   limit?: number;
   /** Long-poll timeout in seconds 0-90 (default: 30) */
   timeout?: number;
+  /** Generic handler for non-message_created updates (callbacks, edits, etc.) */
+  onUpdate?: UpdateHandler;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────
@@ -70,6 +76,7 @@ async function pollLoop(
   onMessage: MessageHandler,
   signal: AbortSignal,
   opts: PollingOptions,
+  onUpdate?: UpdateHandler,
 ): Promise<void> {
   let marker: number | null = null;
   const types = opts.types ?? ["message_created", "bot_started", "message_callback"];
@@ -163,6 +170,16 @@ async function pollLoop(
             } catch (err) {
               log(`Handler error: ${err instanceof Error ? err.message : String(err)}`);
             }
+          } else if (onUpdate) {
+            try {
+              await onUpdate(update);
+            } catch (err) {
+              log(`Update handler error: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
+
+          if (!signal.aborted) {
+            await sleep(POLL_CYCLE_DELAY_MS, signal).catch(() => undefined);
           }
         }
       }
@@ -202,7 +219,7 @@ export function startPolling(
   const controller = new AbortController();
 
   // Fire and forget — errors are handled inside the loop
-  pollLoop(token, onMessage, controller.signal, opts).catch((err) => {
+  pollLoop(token, onMessage, controller.signal, opts, opts.onUpdate).catch((err) => {
     if (!controller.signal.aborted) {
       log(`Fatal polling error: ${err instanceof Error ? err.message : String(err)}`);
     }
