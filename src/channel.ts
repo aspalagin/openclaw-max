@@ -2,16 +2,11 @@
  * MAX channel plugin — OpenClaw channel adapter
  * Uses types.ts + polling.ts from Банзай, api.ts + sender.ts from openclaw-max
  */
-import {
-  createDefaultChannelRuntimeState,
-  DEFAULT_ACCOUNT_ID,
-  emptyPluginConfigSchema,
-  formatPairingApproveHint,
-  mapAllowFromEntries,
-} from "openclaw/plugin-sdk/nostr";
-import {
-  dispatchInboundDirectDmWithRuntime,
-} from "openclaw/plugin-sdk/nostr";
+import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk/account-id";
+import { emptyPluginConfigSchema, formatPairingApproveHint } from "openclaw/plugin-sdk/channel-plugin-common";
+import { mapAllowFromEntries } from "openclaw/plugin-sdk/channel-config-helpers";
+import { createDefaultChannelRuntimeState } from "openclaw/plugin-sdk/channel-status";
+import { dispatchInboundDirectDmWithRuntime } from "openclaw/plugin-sdk/direct-dm";
 
 import * as os from "node:os";
 import * as path from "node:path";

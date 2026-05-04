@@ -11,9 +11,7 @@
     "noImplicitAny": false,
     "resolveJsonModule": true,
     "paths": {
-      "openclaw/plugin-sdk/nostr": ["/usr/lib/node_modules/openclaw/dist/plugin-sdk/nostr.js"],
-      "openclaw/plugin-sdk/compat": ["/usr/lib/node_modules/openclaw/dist/plugin-sdk/compat.js"],
-      "openclaw/plugin-sdk/core": ["/usr/lib/node_modules/openclaw/dist/plugin-sdk/core.js"]
+      "openclaw/*": ["/usr/lib/node_modules/openclaw/dist/*", "/usr/lib/node_modules/openclaw/dist/plugin-sdk/src/*"]
     }
   },
   "include": ["**/*.ts"],

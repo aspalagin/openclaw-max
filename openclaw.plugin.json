@@ -3,6 +3,118 @@
   "name": "MAX",
   "description": "MAX messenger channel plugin (max.ru Bot API, long polling)",
   "version": "0.1.0",
-  "channels": ["max"],
-  "configSchema": {}
+  "channels": [
+    "max"
+  ],
+  "channelConfigs": {
+    "max": {
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "botToken": {
+            "type": "string"
+          },
+          "dmPolicy": {
+            "type": "string",
+            "enum": [
+              "pairing",
+              "allowlist",
+              "open",
+              "disabled"
+            ],
+            "default": "pairing"
+          },
+          "allowFrom": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            }
+          },
+          "streaming": {
+            "type": "string",
+            "enum": [
+              "off",
+              "partial",
+              "block"
+            ]
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "polling",
+              "webhook"
+            ]
+          },
+          "webhookUrl": {
+            "type": "string"
+          },
+          "webhookPort": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "accounts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "botToken": {
+                  "type": "string"
+                },
+                "dmPolicy": {
+                  "type": "string",
+                  "enum": [
+                    "pairing",
+                    "allowlist",
+                    "open",
+                    "disabled"
+                  ]
+                },
+                "allowFrom": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "defaultAccount": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "label": "MAX",
+      "description": "MAX messenger channel (max.ru Bot API)."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
 }

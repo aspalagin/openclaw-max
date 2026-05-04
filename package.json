@@ -11,8 +11,16 @@
   },
   "openclaw": {
     "extensions": [
-      "./index.ts"
-    ]
+      "./dist/index.js"
+    ],
+    "channel": {
+      "id": "openclaw-max",
+      "label": "MAX",
+      "selectionLabel": "MAX (max.ru)",
+      "docsPath": "/channels/max",
+      "docsLabel": "max",
+      "blurb": "MAX messenger channel (max.ru Bot API)."
+    }
   },
   "devDependencies": {
     "@types/node": "^25.5.0",

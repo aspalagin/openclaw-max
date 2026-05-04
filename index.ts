@@ -1,5 +1,6 @@
 import { maxPlugin, setMaxRuntime } from "./src/channel.js";
 
+// Для OpenClaw 2026.5.3 плагин может экспортировать channel напрямую
 const plugin = {
   id: "openclaw-max",
   name: "MAX",
@@ -9,20 +10,10 @@ const plugin = {
     additionalProperties: false,
     properties: {},
   },
-  register(api: {
-    runtime: unknown;
-    registerChannel: (opts: { plugin: unknown }) => void;
-    logger: { info: (msg: string) => void; warn?: (msg: string) => void; debug?: (msg: string) => void };
-  }) {
-    // Always update runtime reference (gateway may pass a fresh one on hot reload)
+  register(api: any) {
     setMaxRuntime(api.runtime);
-
-    // Register channel on every register() call.
-    // Gateway creates a new plugin registry for each load cycle, so we must
-    // re-register in each one. The loader's own dedup prevents double-adds
-    // within the same registry.
     api.registerChannel({ plugin: maxPlugin });
-  },
+  }
 };
 
 export default plugin;

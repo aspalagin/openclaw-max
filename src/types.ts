@@ -318,6 +318,12 @@ export interface MaxAccountConfig {
   allowFrom?: Array<string | number>;
   dmPolicy?: "pairing" | "allowlist" | "open" | "disabled";
   streaming?: "off" | "partial" | "block";
+  /** Transport mode for receiving updates */
+  transport?: "polling" | "webhook";
+  /** Webhook URL (used when transport === "webhook") */
+  webhookUrl?: string;
+  /** Webhook server port (default: 9400) */
+  webhookPort?: number;
   /** Require @mention in group chats (default: true) */
   requireMention?: boolean;
   /** Group chat policy */

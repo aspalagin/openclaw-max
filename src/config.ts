@@ -4,9 +4,9 @@
  */
 import type { MaxAccountConfig, MaxChannelConfig, ResolvedMaxAccount } from "./types.js";
 
-export { ResolvedMaxAccount };
+import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk/account-id";
 
-export const DEFAULT_ACCOUNT_ID = "default";
+export { ResolvedMaxAccount, DEFAULT_ACCOUNT_ID };
 
 function getMaxChannelConfig(cfg: Record<string, unknown>): MaxChannelConfig | undefined {
   const channels = cfg.channels as Record<string, unknown> | undefined;
