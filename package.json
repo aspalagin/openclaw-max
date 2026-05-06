@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "build": "tsc --noEmit && echo 'TypeScript check passed (jiti loads TS directly)'",
+    "build": "rm -rf dist-ts dist/src && tsc --noEmit false --noEmitOnError false --outDir dist-ts && mkdir -p dist/src && cp dist-ts/index.js dist/index.js && cp dist-ts/src/*.js dist/src/",
     "typecheck": "tsc --noEmit",
     "test:api": "node --input-type=module ./scripts/test-api.mjs"
   },

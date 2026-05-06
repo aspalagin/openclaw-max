@@ -85,9 +85,11 @@ export async function sendMessage(
   token: string,
   chatId: number,
   body: SendMessageBody,
+  targetMode: "chat" | "user" = "chat",
 ): Promise<SendMessageResponse> {
+  const targetParam = targetMode === "user" ? "user_id" : "chat_id";
   const response = await fetchWithRetry(
-    `${BASE_URL}/messages?chat_id=${chatId}`,
+    `${BASE_URL}/messages?${targetParam}=${chatId}`,
     {
       method: "POST",
       headers: makeHeaders(token),
@@ -154,6 +156,7 @@ export interface UploadResponse {
 export interface UploadedAttachmentPayload {
   token?: string;
   url?: string;
+  fileId?: number;
   file_id?: number;
   photo_id?: number;
   filename?: string;

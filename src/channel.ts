@@ -6,7 +6,13 @@ import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk/account-id";
 import { emptyPluginConfigSchema, formatPairingApproveHint } from "openclaw/plugin-sdk/channel-plugin-common";
 import { mapAllowFromEntries } from "openclaw/plugin-sdk/channel-config-helpers";
 import { createDefaultChannelRuntimeState } from "openclaw/plugin-sdk/channel-status";
-import { dispatchInboundDirectDmWithRuntime } from "openclaw/plugin-sdk/direct-dm";
+import { dispatchInboundDirectDmWithRuntime, resolveInboundDirectDmAccessWithRuntime } from "openclaw/plugin-sdk/direct-dm";
+import { resolveCommandAuthorizedFromAuthorizers, shouldComputeCommandAuthorized } from "openclaw/plugin-sdk/command-auth";
+
+const directDmCommandAuthRuntime = {
+  shouldComputeCommandAuthorized,
+  resolveCommandAuthorizedFromAuthorizers,
+};
 
 import * as os from "node:os";
 import * as path from "node:path";
@@ -21,13 +27,17 @@ import { editText, removeMessage, sendLocalFile, sendText } from "./sender.js";
 import type {
   Attachment,
   AudioAttachment,
+  ContactAttachment,
   FileAttachment,
+  LocationAttachment,
   MaxChannelConfig,
   Message,
   MessageCallbackUpdate,
   MessageCreatedUpdate,
   PhotoAttachment,
   ResolvedMaxAccount,
+  ShareAttachment,
+  StickerAttachment,
   Update,
   VideoAttachment,
 } from "./types.js";
@@ -264,14 +274,18 @@ export const maxPlugin: any = {
         throw new Error(`MAX account ${account.accountId} not configured`);
       }
 
-      // Resolve chatId: try cached userId→chatId, then parse directly
-      const chatId = userIdToChatId.get(to) ?? Number(to);
+      const fallbackTo = String((cfg.channels as any)?.max?.allowFrom?.[0] ?? "").trim();
+      const target = to === "default" && fallbackTo ? fallbackTo : to;
+
+      const targetMode = userIdToChatId.has(target) ? "chat" : "user";
+      const chatId = userIdToChatId.get(target) ?? Number(target);
       if (isNaN(chatId)) throw new Error(`Invalid MAX chat_id: ${to}`);
 
       const msgId = await sendText(account.botToken, chatId, text ?? "", {
         replyTo: replyTo ?? undefined,
+        targetMode,
       });
-      return { channel: "max" as const, to, messageId: msgId };
+      return { channel: "max" as const, to: target, messageId: msgId };
     },
 
     sendMedia: async ({
@@ -280,28 +294,33 @@ export const maxPlugin: any = {
       text,
       mediaUrl,
       accountId,
+      replyTo,
     }: {
       cfg: Record<string, unknown>;
       to: string;
       text?: string | null;
       mediaUrl?: string | null;
       accountId?: string | null;
+      replyTo?: string | null;
     }) => {
       const account = resolveMaxAccount({ cfg, accountId });
       if (!account.configured) {
         throw new Error(`MAX account ${account.accountId} not configured`);
       }
 
-      // Resolve chatId: try cached userId→chatId, then parse directly
-      const chatId = userIdToChatId.get(to) ?? Number(to);
+      const fallbackTo = String((cfg.channels as any)?.max?.allowFrom?.[0] ?? "").trim();
+      const target = to === "default" && fallbackTo ? fallbackTo : to;
+
+      const targetMode = userIdToChatId.has(target) ? "chat" : "user";
+      const chatId = userIdToChatId.get(target) ?? Number(target);
       if (isNaN(chatId)) throw new Error(`Invalid MAX chat_id: ${to}`);
 
       if (!mediaUrl) throw new Error("sendMedia called without mediaUrl");
 
       // Local file path
       if (!mediaUrl.startsWith("http")) {
-        const msgId = await sendLocalFile(account.botToken, chatId, mediaUrl, text ?? undefined);
-        return { channel: "max" as const, to, messageId: msgId };
+        const msgId = await sendLocalFile(account.botToken, chatId, mediaUrl, text ?? undefined, replyTo ?? undefined, targetMode);
+        return { channel: "max" as const, to: target, messageId: msgId };
       }
 
       // Remote URL — download then send
@@ -315,8 +334,8 @@ export const maxPlugin: any = {
       try {
         const buf = await downloadFile(mediaUrl, account.botToken);
         fs.writeFileSync(tmpPath, buf);
-        const msgId = await sendLocalFile(account.botToken, chatId, tmpPath, text ?? undefined);
-        return { channel: "max" as const, to, messageId: msgId };
+        const msgId = await sendLocalFile(account.botToken, chatId, tmpPath, text ?? undefined, replyTo ?? undefined, targetMode);
+        return { channel: "max" as const, to: target, messageId: msgId };
       } finally {
         try {
           if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
@@ -338,12 +357,14 @@ export const maxPlugin: any = {
       text,
       accountId,
       sessionKey,
+      replyTo,
     }: {
       cfg: Record<string, unknown>;
       to: string;
       text: string;
       accountId?: string | null;
       sessionKey?: string | null;
+      replyTo?: string | null;
     }) => {
       const account = resolveMaxAccount({ cfg, accountId });
       if (!account.configured) return;
@@ -360,7 +381,9 @@ export const maxPlugin: any = {
         if (existingId) {
           await editText(account.botToken, existingId, text + " ▍");
         } else {
-          const msgId = await sendText(account.botToken, chatId, text + " ▍");
+          const msgId = await sendText(account.botToken, chatId, text + " ▍", {
+            replyTo: replyTo ?? undefined,
+          });
           setBoundedMapEntry(streamingMessages, key, msgId);
         }
       } catch {
@@ -522,6 +545,46 @@ export const maxPlugin: any = {
           }
         }
 
+        // ─── DM access check (allowlist / pairing) ────────
+        if (!isGroup) {
+          const cfg = ((_runtime as any)?.config?.loadConfig?.() ?? {}) as Record<string, unknown>;
+          const dmAccess = await resolveInboundDirectDmAccessWithRuntime({
+            cfg: cfg as any,
+            channel: "max",
+            accountId: account.accountId,
+            dmPolicy: account.config.dmPolicy ?? "pairing",
+            allowFrom: account.config.allowFrom ?? [],
+            senderId,
+            rawBody: text,
+            isSenderAllowed: (sid: string, allowList: string[]) =>
+              allowList.some((entry) => String(entry) === sid),
+            runtime: directDmCommandAuthRuntime as any,
+          });
+
+          if (dmAccess.access.decision === "block") {
+            ctx.log?.info?.(
+              `[max:${account.accountId}] DM blocked from=${senderId} reason=${dmAccess.access.reasonCode}`,
+            );
+            return;
+          }
+
+          if (dmAccess.access.decision === "pairing") {
+            ctx.log?.info?.(
+              `[max:${account.accountId}] DM pairing challenge for from=${senderId}`,
+            );
+            try {
+              await sendText(
+                account.botToken,
+                chatId,
+                `🔒 Запрос на сопряжение отправлен. Ваш MAX ID: ${senderId}\nОжидайте подтверждения.`,
+              );
+            } catch {
+              // Non-critical
+            }
+            return;
+          }
+        }
+
         // Cache userId → chatId mapping for outbound delivery
         if (senderId && chatId) {
           setBoundedMapEntry(userIdToChatId, senderId, chatId);
@@ -551,6 +614,31 @@ export const maxPlugin: any = {
               .map((a) => a.type);
             const label = isForward ? "Forwarded" : "Attached";
             bodyForAgent = `[${label} ${mediaTypes.join(", ") || "media"}]`;
+          }
+
+          // Enrich bodyForAgent with special attachment descriptions
+          const specialParts: string[] = [];
+          for (const att of attachments) {
+            if (att.type === "sticker") {
+              specialParts.push(`[Sticker: ${(att as StickerAttachment).payload.code}]`);
+            } else if (att.type === "location") {
+              const loc = (att as LocationAttachment).payload;
+              specialParts.push(`[Location: ${loc.latitude}, ${loc.longitude}]`);
+            } else if (att.type === "contact") {
+              const contact = (att as ContactAttachment).payload;
+              const name = contact.max_info
+                ? [contact.max_info.first_name, contact.max_info.last_name].filter(Boolean).join(" ")
+                : "unknown";
+              specialParts.push(`[Contact: ${name}]`);
+            } else if (att.type === "share") {
+              const share = (att as ShareAttachment).payload;
+              if (share.url) specialParts.push(`[Share: ${share.url}]`);
+            }
+          }
+          if (specialParts.length > 0) {
+            bodyForAgent = bodyForAgent
+              ? `${bodyForAgent}\n${specialParts.join("\n")}`
+              : specialParts.join("\n");
           }
 
           // Use SDK pipeline to route and dispatch inbound message
@@ -615,6 +703,27 @@ export const maxPlugin: any = {
       // ─── Shared: generic update handler (callbacks, etc.) ──────
 
       const handleUpdate = async (update: Update) => {
+        // Handle edited messages — re-dispatch as a new inbound message
+        if (update.update_type === "message_edited") {
+          const edited = update as unknown as MessageCreatedUpdate; // same shape as message_created
+          const msg = edited.message;
+          const editedText = msg.body.text?.trim();
+          if (!editedText) return;
+
+          const editSenderId = String(msg.sender?.user_id ?? 0);
+          const editChatId = resolveChatId(msg);
+          ctx.log?.info?.(
+            `[max:${account.accountId}] edited from=${editSenderId} chat=${editChatId} text="${editedText.slice(0, 60)}"`,
+          );
+
+          // Re-use handleMessage to process edited message like a new one
+          await handleMessage({
+            ...update,
+            update_type: "message_created",
+          } as unknown as MessageCreatedUpdate);
+          return;
+        }
+
         if (update.update_type === "message_callback") {
           const cbUpdate = update as MessageCallbackUpdate;
           const cb = cbUpdate.callback;
@@ -690,7 +799,7 @@ export const maxPlugin: any = {
 
       // ─── Start transport ───────────────────────────────────────
 
-      const updateTypes = ["message_created", "bot_started", "message_callback"];
+      const updateTypes = ["message_created", "message_edited", "bot_started", "message_callback"];
 
       // Return a Promise that stays alive until abortSignal fires
       return new Promise<void>((resolve) => {

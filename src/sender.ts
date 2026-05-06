@@ -4,6 +4,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fetch } from "undici";
 import {
   deleteMessage,
   editMessage,
@@ -47,6 +48,8 @@ export interface SendTextOptions {
   format?: "html" | "markdown" | "plain";
   /** Disable link preview */
   disableLinkPreview?: boolean;
+  /** Send to chat_id (default) or user_id */
+  targetMode?: "chat" | "user";
 }
 
 /**
@@ -60,7 +63,7 @@ export async function sendText(
 ): Promise<string> {
   const body: SendMessageBody = {
     text,
-    format: options?.format ?? "html",
+    format: options?.format ?? "markdown",
   };
   if (options?.replyTo) {
     body.link = { type: "reply", mid: options.replyTo };
@@ -68,7 +71,7 @@ export async function sendText(
   if (options?.disableLinkPreview) {
     body.disable_link_preview = true;
   }
-  const result = await sendMessage(token, chatId, body);
+  const result = await sendMessage(token, chatId, body, options?.targetMode);
   return result.message_id;
 }
 
@@ -80,7 +83,7 @@ export async function editText(
   messageId: string,
   text: string,
 ): Promise<void> {
-  await editMessage(token, messageId, { text, format: "html" });
+  await editMessage(token, messageId, { text, format: "markdown" });
 }
 
 /**
@@ -122,11 +125,71 @@ function buildAttachmentPayload(
 ): Record<string, unknown> {
   const normalized: Record<string, unknown> = { ...payload };
 
+  if (typeof normalized.fileId === "number" && normalized.file_id === undefined) {
+    normalized.file_id = normalized.fileId;
+  }
+
+  delete normalized.fileId;
+
   if (uploadType === "file" && !normalized.filename) {
     normalized.filename = filename;
   }
 
   return normalized;
+}
+
+async function waitForUploadedAttachment(
+  token: string,
+  chatId: number,
+  attachmentType: string,
+  payload: Record<string, unknown>,
+  filename: string,
+  targetMode: "chat" | "user" = "chat",
+): Promise<void> {
+  const body: SendMessageBody = {
+    attachments: [
+      {
+        type: attachmentType,
+        payload: {
+          ...payload,
+          filename,
+        },
+      },
+    ],
+    notify: false,
+  };
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (attempt > 0) {
+      await sleep(750 * 2 ** Math.min(attempt - 1, 3));
+    }
+
+    const response = await fetch(
+      `https://platform-api.max.ru/messages?${targetMode === "user" ? "user_id" : "chat_id"}=${chatId}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: token,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+
+    if (response.ok) {
+      const data = await response.json().catch(() => null) as { message_id?: string } | null;
+      if (data?.message_id) {
+        await removeMessage(token, data.message_id);
+      }
+      return;
+    }
+
+    const text = await response.text().catch(() => "");
+    if (!text.includes("attachment.not.ready")) {
+      return;
+    }
+  }
 }
 
 /**
@@ -139,6 +202,7 @@ export async function sendLocalFile(
   filePath: string,
   caption?: string,
   replyTo?: string,
+  targetMode: "chat" | "user" = "chat",
 ): Promise<string> {
   const mimeType = getMimeType(filePath);
   const uploadType = getUploadType(mimeType);
@@ -157,6 +221,9 @@ export async function sendLocalFile(
           ? "audio"
           : "file";
 
+  const attachmentPayload = buildAttachmentPayload(uploadType, uploadPayload, filename);
+  await waitForUploadedAttachment(token, chatId, attachmentType, attachmentPayload, filename, targetMode);
+
   let lastError: unknown;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     if (attempt > 0) {
@@ -167,7 +234,7 @@ export async function sendLocalFile(
       attachments: [
         {
           type: attachmentType,
-          payload: buildAttachmentPayload(uploadType, uploadPayload, filename),
+          payload: attachmentPayload,
         },
       ],
     };
@@ -175,7 +242,7 @@ export async function sendLocalFile(
     if (replyTo) body.link = { type: "reply", mid: replyTo };
 
     try {
-      const result = await sendMessage(token, chatId, body);
+      const result = await sendMessage(token, chatId, body, targetMode);
       return result.message_id;
     } catch (err) {
       lastError = err;
