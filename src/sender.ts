@@ -14,6 +14,62 @@ import {
   type SendMessageBody,
   type UploadedAttachmentPayload,
 } from "./api.js";
+import { toMaxMarkdown } from "./format.js";
+
+/**
+ * Разбивает текст на чанки не длиннее maxLen символов.
+ * Сначала по двойным переносам (параграфы), потом по одинарным, потом жёстко.
+ */
+export function splitText(text: string, maxLen: number = 4000): string[] {
+  if (text.length <= maxLen) return [text];
+
+  const chunks: string[] = [];
+  // Разбиваем по параграфам
+  const paragraphs = text.split(/\n\n/);
+  let current = "";
+
+  for (const para of paragraphs) {
+    const candidate = current ? current + "\n\n" + para : para;
+    if (candidate.length <= maxLen) {
+      current = candidate;
+    } else {
+      if (current) chunks.push(current);
+      // Параграф сам по себе может быть больше maxLen
+      if (para.length <= maxLen) {
+        current = para;
+      } else {
+        // Разбиваем длинный параграф по строкам
+        const lines = para.split(/\n/);
+        current = "";
+        for (const line of lines) {
+          const lineCand = current ? current + "\n" + line : line;
+          if (lineCand.length <= maxLen) {
+            current = lineCand;
+          } else {
+            if (current) chunks.push(current);
+            if (line.length <= maxLen) {
+              current = line;
+            } else {
+              // Жёсткая нарезка по maxLen
+              let pos = 0;
+              while (pos < line.length) {
+                chunks.push(line.slice(pos, pos + maxLen));
+                pos += maxLen;
+              }
+              current = "";
+              // Последний кусок возвращаем в current
+              if (chunks.length > 0 && chunks[chunks.length - 1].length < maxLen) {
+                current = chunks.pop()!;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.length > 0 ? chunks : [text.slice(0, maxLen)];
+}
 
 const MIME_MAP: Record<string, string> = {
   ".jpg": "image/jpeg",
@@ -61,9 +117,10 @@ export async function sendText(
   text: string,
   options?: SendTextOptions,
 ): Promise<string> {
+  const format = options?.format ?? "markdown";
   const body: SendMessageBody = {
-    text,
-    format: options?.format ?? "markdown",
+    text: format === "markdown" ? toMaxMarkdown(text) : text,
+    format,
   };
   if (options?.replyTo) {
     body.link = { type: "reply", mid: options.replyTo };

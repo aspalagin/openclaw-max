@@ -17,13 +17,13 @@ const directDmCommandAuthRuntime = {
 import * as os from "node:os";
 import * as path from "node:path";
 import type { SendMessageBody } from "./api.js";
-import { sendMessage, sendTypingAction } from "./api.js";
+import { sendMessage, sendTypingAction, getBotInfo, pinMessage, unpinMessage, subscribe, unsubscribe, getOrCreateDialog } from "./api.js";
 import { answerCallback } from "./buttons.js";
 import { listMaxAccountIds, resolveDefaultMaxAccountId, resolveMaxAccount } from "./config.js";
 import { downloadAttachment } from "./media.js";
 import { startPolling } from "./polling.js";
 import { startWebhook } from "./webhook.js";
-import { editText, removeMessage, sendLocalFile, sendText } from "./sender.js";
+import { editText, removeMessage, sendLocalFile, sendText, splitText } from "./sender.js";
 import type {
   Attachment,
   AudioAttachment,
@@ -39,6 +39,7 @@ import type {
   ShareAttachment,
   StickerAttachment,
   Update,
+  User,
   VideoAttachment,
 } from "./types.js";
 
@@ -57,7 +58,12 @@ export function getMaxRuntime(): unknown {
 // ─── Active polling handles ───────────────────────────────────────
 
 const activeStopFns = new Map<string, () => void>();
+const botInfoCache = new Map<string, User>();
 const MAX_TRACKED_ENTRIES = 10_000;
+
+export function getBotUser(accountId: string): User | undefined {
+  return botInfoCache.get(accountId);
+}
 
 // ─── userId → chatId mapping (populated from inbound messages) ───
 
@@ -196,6 +202,8 @@ export const maxPlugin: any = {
       name: account.name,
       enabled: account.enabled,
       configured: account.configured,
+      botUsername: botInfoCache.get(account.accountId)?.username ?? null,
+      botUserId: botInfoCache.get(account.accountId)?.user_id ?? null,
     }),
     resolveAllowFrom: ({
       cfg,
@@ -277,15 +285,61 @@ export const maxPlugin: any = {
       const fallbackTo = String((cfg.channels as any)?.max?.allowFrom?.[0] ?? "").trim();
       const target = to === "default" && fallbackTo ? fallbackTo : to;
 
+      // Если нет кэшированного chatId — пробуем получить через getOrCreateDialog
+      if (!userIdToChatId.has(target)) {
+        try {
+          const resolvedChatId = await getOrCreateDialog(account.botToken, Number(target));
+          setBoundedMapEntry(userIdToChatId, target, resolvedChatId);
+        } catch {
+          // Фоллбэк: отправим как user_id
+        }
+      }
+
       const targetMode = userIdToChatId.has(target) ? "chat" : "user";
       const chatId = userIdToChatId.get(target) ?? Number(target);
       if (isNaN(chatId)) throw new Error(`Invalid MAX chat_id: ${to}`);
 
-      const msgId = await sendText(account.botToken, chatId, text ?? "", {
-        replyTo: replyTo ?? undefined,
-        targetMode,
-      });
+      // Чанкование текста если > 4000 символов
+      const fullText = text ?? "";
+      const chunks = splitText(fullText, 4000);
+      let msgId = "";
+      for (let i = 0; i < chunks.length; i++) {
+        msgId = await sendText(account.botToken, chatId, chunks[i], {
+          replyTo: i === 0 ? (replyTo ?? undefined) : undefined,
+          targetMode,
+        });
+      }
       return { channel: "max" as const, to: target, messageId: msgId };
+    },
+
+    pinMessage: async ({
+      cfg,
+      chatId,
+      messageId,
+      accountId,
+    }: {
+      cfg: Record<string, unknown>;
+      chatId: string;
+      messageId: string;
+      accountId?: string | null;
+    }) => {
+      const account = resolveMaxAccount({ cfg, accountId });
+      if (!account.configured) throw new Error("not configured");
+      await pinMessage(account.botToken, Number(chatId), messageId);
+    },
+
+    unpinMessage: async ({
+      cfg,
+      chatId,
+      accountId,
+    }: {
+      cfg: Record<string, unknown>;
+      chatId: string;
+      accountId?: string | null;
+    }) => {
+      const account = resolveMaxAccount({ cfg, accountId });
+      if (!account.configured) throw new Error("not configured");
+      await unpinMessage(account.botToken, Number(chatId));
     },
 
     sendMedia: async ({
@@ -311,9 +365,20 @@ export const maxPlugin: any = {
       const fallbackTo = String((cfg.channels as any)?.max?.allowFrom?.[0] ?? "").trim();
       const target = to === "default" && fallbackTo ? fallbackTo : to;
 
+      // Если нет кэшированного chatId — пробуем получить через getOrCreateDialog
+      if (!userIdToChatId.has(target)) {
+        try {
+          const resolvedChatId = await getOrCreateDialog(account.botToken, Number(target));
+          setBoundedMapEntry(userIdToChatId, target, resolvedChatId);
+        } catch {
+          // Фоллбэк: отправим как user_id
+        }
+      }
+
       const targetMode = userIdToChatId.has(target) ? "chat" : "user";
       const chatId = userIdToChatId.get(target) ?? Number(target);
       if (isNaN(chatId)) throw new Error(`Invalid MAX chat_id: ${to}`);
+
 
       if (!mediaUrl) throw new Error("sendMedia called without mediaUrl");
 
@@ -415,9 +480,17 @@ export const maxPlugin: any = {
 
       try {
         if (existingId) {
-          await editText(account.botToken, existingId, text);
+          // Если текст > 4000, редактируем первое сообщение с первым чанком, остальные отправляем отдельно
+          const chunks = splitText(text, 4000);
+          await editText(account.botToken, existingId, chunks[0]);
+          for (let i = 1; i < chunks.length; i++) {
+            await sendText(account.botToken, chatId, chunks[i]);
+          }
         } else {
-          await sendText(account.botToken, chatId, text);
+          const chunks = splitText(text, 4000);
+          for (const chunk of chunks) {
+            await sendText(account.botToken, chatId, chunk);
+          }
         }
       } catch (err) {
         // Cleanup key on error too
@@ -457,7 +530,7 @@ export const maxPlugin: any = {
   // ─── Gateway: start/stop long polling ─────────────────────────
 
   gateway: {
-    startAccount: (ctx: {
+    startAccount: async (ctx: {
       account: ResolvedMaxAccount;
       abortSignal?: AbortSignal;
       runtime?: unknown;
@@ -474,6 +547,15 @@ export const maxPlugin: any = {
 
       if (!account.configured) {
         throw new Error("MAX bot token not configured");
+      }
+
+      // Получаем информацию о боте (username, user_id) для проверки mention
+      try {
+        const botUser = await getBotInfo(account.botToken);
+        botInfoCache.set(account.accountId, botUser);
+        ctx.log?.info(`[max:${account.accountId}] Bot info: @${botUser.username} (id=${botUser.user_id})`);
+      } catch (err) {
+        ctx.log?.warn?.(`[max:${account.accountId}] Не удалось получить bot info: ${err instanceof Error ? err.message : String(err)}`);
       }
 
       // Resolve transport mode from channel config
@@ -533,14 +615,24 @@ export const maxPlugin: any = {
           // ─── Bot mention check in groups ──────────────────────
           const requireMention = account.config.requireMention !== false;
           if (requireMention) {
-            // Check if message mentions bot or is a reply to bot
-            // We can't easily know bot's username without /me call,
-            // so we check for common patterns
-            const isReplyToBot = msg.link?.type === "reply" && msg.link?.sender?.is_bot;
-            const hasBotMention = /@\w+bot\b/i.test(text);
+            const botUser = botInfoCache.get(account.accountId);
+            const botUsername = botUser?.username;
+            const botUserId = botUser?.user_id;
+            const hasBotMention = botUsername
+              ? text.toLowerCase().includes(`@${botUsername.toLowerCase()}`)
+              : /@\w+bot\b/i.test(text);
+            const isReplyToBot = msg.link?.type === "reply" && (
+              botUserId
+                ? msg.link?.sender?.user_id === botUserId
+                : msg.link?.sender?.is_bot === true
+            );
             if (!isReplyToBot && !hasBotMention) {
               ctx.log?.debug?.(`[max:${account.accountId}] No bot mention in group, ignoring`);
               return;
+            }
+            // Вырезаем @username бота из текста перед отправкой в агент
+            if (botUsername && hasBotMention) {
+              text = text.replace(new RegExp(`@${botUsername}\\b`, "gi"), "").trim();
             }
           }
         }
@@ -801,6 +893,16 @@ export const maxPlugin: any = {
 
       const updateTypes = ["message_created", "message_edited", "bot_started", "message_callback"];
 
+      // Регистрируем webhook-подписку на стороне MAX перед запуском сервера
+      if (transport === "webhook" && maxChannelCfg?.webhookUrl) {
+        try {
+          await subscribe(account.botToken, maxChannelCfg.webhookUrl, updateTypes as import("./types.js").UpdateType[]);
+          ctx.log?.info(`[max:${account.accountId}] Subscribed to webhook: ${maxChannelCfg.webhookUrl}`);
+        } catch (err) {
+          ctx.log?.warn?.(`[max:${account.accountId}] Не удалось зарегистрировать webhook: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
       // Return a Promise that stays alive until abortSignal fires
       return new Promise<void>((resolve) => {
         let stopFn: () => void;
@@ -834,6 +936,10 @@ export const maxPlugin: any = {
           ctx.abortSignal.addEventListener("abort", () => {
             stopFn();
             activeStopFns.delete(account.accountId);
+            // Отписываемся от webhook при остановке
+            if (transport === "webhook" && maxChannelCfg?.webhookUrl) {
+              unsubscribe(account.botToken, maxChannelCfg.webhookUrl).catch(() => {});
+            }
             ctx.log?.info(`[max:${account.accountId}] MAX channel stopped.`);
             resolve();
           }, { once: true });

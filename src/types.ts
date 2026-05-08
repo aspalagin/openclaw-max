@@ -139,7 +139,7 @@ export interface InlineKeyboardAttachment {
 }
 
 export interface InlineButton {
-  type: "callback" | "link" | "request_contact" | "request_geo_location" | "open_app" | "message";
+  type: "callback" | "link" | "request_contact" | "request_geo_location" | "open_app" | "message" | "clipboard";
   text: string;
   payload?: string;
   url?: string;
@@ -307,6 +307,15 @@ export interface UpdatesResponse {
   updates: Update[];
   /** Pointer to next page — pass as marker on next request */
   marker: number | null;
+}
+
+// ─── Webhook subscription ─────────────────────────────────────
+
+export interface Subscription {
+  url: string;
+  time?: number;
+  update_types?: UpdateType[];
+  version?: string;
 }
 
 // ─── Account config (for OpenClaw plugin) ──────────────────────

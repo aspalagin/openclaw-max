@@ -2,9 +2,11 @@
  * MAX Bot API — HTTP client
  * Uses types from types.ts (Банзай)
  */
-import type { UpdatesResponse } from "./types.js";
+import type { Message, Subscription, UpdatesResponse, UpdateType, User } from "./types.js";
 
 export type { UpdatesResponse };
+export type { User };
+export type { Subscription };
 
 const BASE_URL = "https://platform-api.max.ru";
 const MAX_RETRY_ATTEMPTS = 3;
@@ -54,6 +56,38 @@ function makeHeaders(token: string): Record<string, string> {
     "Content-Type": "application/json",
     Accept: "application/json",
   };
+}
+
+// ─── Get or create dialog ────────────────────────────────────────
+
+/**
+ * Создать или получить существующий диалог с пользователем.
+ * POST /chats?peer_id=<userId> body: {"type":"dialog"}
+ * Возвращает chat_id диалога.
+ */
+export async function getOrCreateDialog(
+  token: string,
+  userId: number,
+): Promise<number> {
+  const response = await fetchWithRetry(
+    `${BASE_URL}/chats?peer_id=${userId}`,
+    {
+      method: "POST",
+      headers: makeHeaders(token),
+      body: JSON.stringify({ type: "dialog" }),
+    },
+  );
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`MAX getOrCreateDialog failed [${response.status}]: ${text}`);
+  }
+
+  const data = await response.json() as { chat_id?: number };
+  if (!data.chat_id) {
+    throw new Error(`MAX getOrCreateDialog: no chat_id in response`);
+  }
+  return data.chat_id;
 }
 
 // ─── Send message ────────────────────────────────────────────────
@@ -255,11 +289,11 @@ export async function sendTypingAction(
   }
 }
 
-// ─── Pin message ─────────────────────────────────────────────────
+// ─── Pin / Unpin message ─────────────────────────────────────────
 
 /**
- * Pin a message in a chat.
- * Equivalent to: PUT /chats/{chatId}/messages/pin {"message_id": "..."}
+ * Закрепить сообщение в чате.
+ * PUT /chats/{chatId}/messages/pin {"message_id": "..."}
  */
 export async function pinMessage(
   token: string,
@@ -279,6 +313,118 @@ export async function pinMessage(
     const text = await response.text().catch(() => "");
     throw new Error(`MAX pinMessage failed [${response.status}]: ${text}`);
   }
+}
+
+/**
+ * Открепить сообщение в чате.
+ * DELETE /chats/{chatId}/messages/pin
+ */
+export async function unpinMessage(token: string, chatId: number): Promise<void> {
+  const response = await fetchWithRetry(
+    `${BASE_URL}/chats/${chatId}/messages/pin`,
+    { method: "DELETE", headers: makeHeaders(token) },
+  );
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`MAX unpinMessage failed [${response.status}]: ${text}`);
+  }
+}
+
+// ─── Subscription management ────────────────────────────────────
+
+/**
+ * Получить список активных webhook-подписок.
+ * GET /subscriptions
+ */
+export async function getSubscriptions(token: string): Promise<Subscription[]> {
+  const response = await fetchWithRetry(
+    `${BASE_URL}/subscriptions`,
+    { method: "GET", headers: makeHeaders(token) },
+  );
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`MAX getSubscriptions failed [${response.status}]: ${text}`);
+  }
+  const data = await response.json() as { subscriptions?: Subscription[] };
+  return data.subscriptions ?? [];
+}
+
+/**
+ * Зарегистрировать webhook-подписку.
+ * POST /subscriptions
+ */
+export async function subscribe(
+  token: string,
+  url: string,
+  updateTypes: UpdateType[],
+): Promise<void> {
+  const response = await fetchWithRetry(
+    `${BASE_URL}/subscriptions`,
+    {
+      method: "POST",
+      headers: makeHeaders(token),
+      body: JSON.stringify({ url, update_types: updateTypes }),
+    },
+  );
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`MAX subscribe failed [${response.status}]: ${text}`);
+  }
+}
+
+/**
+ * Удалить webhook-подписку.
+ * DELETE /subscriptions?url=<encoded_url>
+ */
+export async function unsubscribe(token: string, url: string): Promise<void> {
+  const response = await fetchWithRetry(
+    `${BASE_URL}/subscriptions?url=${encodeURIComponent(url)}`,
+    { method: "DELETE", headers: makeHeaders(token) },
+  );
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`MAX unsubscribe failed [${response.status}]: ${text}`);
+  }
+}
+
+// ─── Download file ───────────────────────────────────────────────
+
+// ─── Get bot info ────────────────────────────────────────────────
+
+export async function getBotInfo(token: string): Promise<User> {
+  const response = await fetchWithRetry(
+    `${BASE_URL}/me`,
+    {
+      method: "GET",
+      headers: makeHeaders(token),
+    },
+  );
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`MAX getBotInfo failed [${response.status}]: ${text}`);
+  }
+
+  return response.json() as Promise<User>;
+}
+
+// ─── Get message ─────────────────────────────────────────────────
+
+/**
+ * Получить конкретное сообщение по ID.
+ * GET /messages/{messageId}
+ */
+export async function getMessage(token: string, messageId: string): Promise<Message> {
+  const response = await fetchWithRetry(
+    `${BASE_URL}/messages/${encodeURIComponent(messageId)}`,
+    { method: "GET", headers: makeHeaders(token) },
+  );
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`MAX getMessage failed [${response.status}]: ${text}`);
+  }
+  return response.json() as Promise<Message>;
 }
 
 // ─── Download file ───────────────────────────────────────────────

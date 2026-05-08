@@ -57,7 +57,7 @@ function buildInlineButton(def: ButtonDef): InlineButton {
     text: def.text,
   };
 
-  if (btn.type === "callback") {
+  if (btn.type === "callback" || btn.type === "clipboard") {
     btn.payload = def.payload ?? def.text;
   }
 
