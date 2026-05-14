@@ -349,6 +349,7 @@ export const maxPlugin: any = {
       mediaUrl,
       accountId,
       replyTo,
+      replyToId,
     }: {
       cfg: Record<string, unknown>;
       to: string;
@@ -356,6 +357,7 @@ export const maxPlugin: any = {
       mediaUrl?: string | null;
       accountId?: string | null;
       replyTo?: string | null;
+      replyToId?: string | null;
     }) => {
       const account = resolveMaxAccount({ cfg, accountId });
       if (!account.configured) {
@@ -382,9 +384,11 @@ export const maxPlugin: any = {
 
       if (!mediaUrl) throw new Error("sendMedia called without mediaUrl");
 
+      const effectiveReplyTo = replyTo ?? replyToId ?? undefined;
+
       // Local file path
       if (!mediaUrl.startsWith("http")) {
-        const msgId = await sendLocalFile(account.botToken, chatId, mediaUrl, text ?? undefined, replyTo ?? undefined, targetMode);
+        const msgId = await sendLocalFile(account.botToken, chatId, mediaUrl, text ?? undefined, effectiveReplyTo, targetMode);
         return { channel: "max" as const, to: target, messageId: msgId };
       }
 
@@ -399,7 +403,7 @@ export const maxPlugin: any = {
       try {
         const buf = await downloadFile(mediaUrl, account.botToken);
         fs.writeFileSync(tmpPath, buf);
-        const msgId = await sendLocalFile(account.botToken, chatId, tmpPath, text ?? undefined, replyTo ?? undefined, targetMode);
+        const msgId = await sendLocalFile(account.botToken, chatId, tmpPath, text ?? undefined, effectiveReplyTo, targetMode);
         return { channel: "max" as const, to: target, messageId: msgId };
       } finally {
         try {

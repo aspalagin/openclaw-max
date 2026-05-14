@@ -129,6 +129,7 @@ export async function sendText(
     body.disable_link_preview = true;
   }
   const result = await sendMessage(token, chatId, body, options?.targetMode);
+  if (!result.message_id) throw new Error("MAX sendMessage response did not include message_id");
   return result.message_id;
 }
 
@@ -168,6 +169,7 @@ export async function forwardMessage(
     link: { type: "forward", mid: originalMid },
   };
   const result = await sendMessage(token, chatId, body);
+  if (!result.message_id) throw new Error("MAX sendMessage response did not include message_id");
   return result.message_id;
 }
 
@@ -267,7 +269,7 @@ export async function sendLocalFile(
 
   const uploadInfo = await getUploadUrl(token, uploadType);
   const fileContent = fs.readFileSync(filePath);
-  const uploadPayload = await uploadFile(token, uploadInfo.url, fileContent, filename, mimeType);
+  const uploadPayload = await uploadFile(token, uploadInfo.url, fileContent, filename, mimeType, uploadInfo.token);
 
   const attachmentType =
     uploadType === "image"
@@ -300,6 +302,7 @@ export async function sendLocalFile(
 
     try {
       const result = await sendMessage(token, chatId, body, targetMode);
+      if (!result.message_id) throw new Error("MAX sendMessage response did not include message_id");
       return result.message_id;
     } catch (err) {
       lastError = err;

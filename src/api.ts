@@ -109,10 +109,11 @@ export interface SendMessageBody {
 }
 
 export interface SendMessageResponse {
-  message_id: string;
-  chat_id: number;
+  message_id?: string;
+  chat_id?: number;
   seq?: number;
   timestamp?: number;
+  message?: Message;
 }
 
 export async function sendMessage(
@@ -136,7 +137,14 @@ export async function sendMessage(
     throw new Error(`MAX sendMessage failed [${response.status}]: ${text}`);
   }
 
-  return response.json() as Promise<SendMessageResponse>;
+  const data = await response.json() as SendMessageResponse;
+  if (!data.message_id && data.message?.body?.mid) {
+    data.message_id = data.message.body.mid;
+  }
+  if (data.chat_id === undefined && data.message?.recipient?.chat_id !== undefined) {
+    data.chat_id = data.message.recipient.chat_id;
+  }
+  return data;
 }
 
 // ─── Edit message ────────────────────────────────────────────────
@@ -229,6 +237,7 @@ export async function uploadFile(
   content: Buffer,
   filename: string,
   mimeType: string,
+  uploadToken?: string,
 ): Promise<UploadedAttachmentPayload> {
   const form = new FormData();
   const bytes = new Uint8Array(content);
@@ -257,6 +266,13 @@ export async function uploadFile(
   try {
     return JSON.parse(text) as UploadedAttachmentPayload;
   } catch {
+    const match = text.match(/<retval>([^<]+)<\/retval>/i);
+    if (match) {
+      const id = Number(match[1]);
+      if (Number.isFinite(id)) {
+        return { token: uploadToken, file_id: id, fileId: id };
+      }
+    }
     throw new Error(`MAX file upload returned non-JSON response: ${text.slice(0, 300)}`);
   }
 }
