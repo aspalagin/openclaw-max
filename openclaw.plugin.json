@@ -2,10 +2,15 @@
   "id": "openclaw-max",
   "name": "MAX",
   "description": "MAX messenger channel plugin (max.ru Bot API, long polling)",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "channels": [
     "max"
   ],
+  "channelEnvVars": {
+    "max": [
+      "MAX_BOT_TOKEN"
+    ]
+  },
   "channelConfigs": {
     "max": {
       "schema": {
@@ -87,6 +92,52 @@
                   ]
                 },
                 "allowFrom": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  }
+                },
+                "streaming": {
+                  "type": "string",
+                  "enum": [
+                    "off",
+                    "partial",
+                    "block"
+                  ]
+                },
+                "transport": {
+                  "type": "string",
+                  "enum": [
+                    "polling",
+                    "webhook"
+                  ]
+                },
+                "webhookUrl": {
+                  "type": "string"
+                },
+                "webhookPort": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "requireMention": {
+                  "type": "boolean"
+                },
+                "groupPolicy": {
+                  "type": "string",
+                  "enum": [
+                    "allowlist",
+                    "open",
+                    "disabled"
+                  ]
+                },
+                "allowGroups": {
                   "type": "array",
                   "items": {
                     "anyOf": [

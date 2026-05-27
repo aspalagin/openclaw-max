@@ -1,20 +1,38 @@
 {
   "name": "openclaw-max",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MAX messenger channel plugin for OpenClaw",
   "type": "module",
   "main": "./dist/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aspalagin/openclaw-max.git"
+  },
+  "homepage": "https://github.com/aspalagin/openclaw-max#readme",
+  "bugs": {
+    "url": "https://github.com/aspalagin/openclaw-max/issues"
+  },
   "scripts": {
     "build": "rm -rf dist-ts dist/src && tsc --noEmit false --noEmitOnError false --outDir dist-ts && mkdir -p dist/src && cp dist-ts/index.js dist/index.js && cp dist-ts/src/*.js dist/src/",
+    "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
     "test:api": "node --input-type=module ./scripts/test-api.mjs"
   },
+  "files": [
+    "dist/",
+    "src/",
+    "scripts/",
+    "openclaw.plugin.json",
+    "README.md",
+    "SKILL.md",
+    "LICENSE"
+  ],
   "openclaw": {
     "extensions": [
       "./dist/index.js"
     ],
     "channel": {
-      "id": "openclaw-max",
+      "id": "max",
       "label": "MAX",
       "selectionLabel": "MAX (max.ru)",
       "docsPath": "/channels/max",
@@ -24,6 +42,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
+    "openclaw": "^2026.5.26",
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
