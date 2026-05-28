@@ -1,222 +1,183 @@
 /**
- * MAX Messenger Bot API — Webhook transport
- *
- * HTTP server that receives updates from MAX platform via POST requests.
- * Alternative to long polling for production environments.
- *
- * Uses: POST /subscriptions to register webhook URL with MAX API.
- * Node 18+ built-in http + fetch. Zero external dependencies.
+ * MAX webhook handler — HTTP endpoint for receiving webhook updates
  */
 
-import * as http from "node:http";
-import * as crypto from "node:crypto";
-import type { MessageCreatedUpdate, Update } from "./types.js";
-import type { MessageHandler, UpdateHandler } from "./polling.js";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
+import { readJsonBodyWithLimit } from "openclaw/plugin-sdk/infra-runtime";
+import { requestBodyErrorToText } from "openclaw/plugin-sdk/webhook-ingress";
+import type { MaxUpdate } from "./api.js";
+import type { ResolvedMaxAccount } from "./accounts.js";
+import { MaxApi } from "./api.js";
 
-// ─── Constants ──────────────────────────────────────────────────
-
-const API_BASE = "https://platform-api.max.ru";
-const DEFAULT_PORT = 8443;
-const MAX_WEBHOOK_BODY_SIZE = 10 * 1024 * 1024;
-
-// ─── Types ──────────────────────────────────────────────────────
-
-export interface WebhookOptions {
-  /** Public URL the MAX platform will POST updates to */
-  webhookUrl: string;
-  /** Local port to listen on (default: 8443) */
-  port?: number;
-  /** Update types to subscribe to */
-  types?: string[];
-  /**
-   * Secret token for authenticating inbound webhook requests.
-   * If omitted, a random UUID is generated automatically.
-   * Appended to webhookUrl as ?token=<secret> when registering with MAX API.
-   */
+export type MaxWebhookTarget = {
+  account: ResolvedMaxAccount;
+  config: OpenClawConfig;
+  path: string;
   secret?: string;
-}
+  onUpdate: (update: MaxUpdate) => Promise<void>;
+  log?: (message: string) => void;
+  error?: (message: string) => void;
+};
 
-// ─── Helpers ────────────────────────────────────────────────────
+const webhookTargets = new Map<string, MaxWebhookTarget[]>();
 
-function log(msg: string): void {
-  process.stderr.write(`[max-webhook] ${new Date().toISOString()} ${msg}\n`);
-}
-
-function isMessageCreated(u: Update): u is MessageCreatedUpdate {
-  return u.update_type === "message_created";
-}
-
-// ─── Subscription management ────────────────────────────────────
-
-/**
- * Register a webhook subscription with MAX API.
- */
-async function registerSubscription(
-  token: string,
-  url: string,
-  types: string[],
-): Promise<void> {
-  const response = await fetch(`${API_BASE}/subscriptions`, {
-    method: "POST",
-    headers: {
-      Authorization: token,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({ url, update_types: types }),
-  });
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`Failed to register webhook: HTTP ${response.status} — ${body.slice(0, 300)}`);
+function normalizeWebhookPath(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "/";
+  const withSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  if (withSlash.length > 1 && withSlash.endsWith("/")) {
+    return withSlash.slice(0, -1);
   }
-
-  log(`Webhook registered: ${url} for types: ${types.join(", ")}`);
+  return withSlash;
 }
 
-/**
- * Remove webhook subscription.
- */
-async function removeSubscription(token: string, url: string): Promise<void> {
-  try {
-    const response = await fetch(`${API_BASE}/subscriptions`, {
-      method: "DELETE",
-      headers: {
-        Authorization: token,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({ url }),
-    });
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      log(`Failed to remove webhook subscription: HTTP ${response.status} — ${body.slice(0, 200)}`);
-    } else {
-      log(`Webhook subscription removed: ${url}`);
-    }
-  } catch (err) {
-    log(`Error removing webhook: ${err instanceof Error ? err.message : String(err)}`);
+export function resolveMaxWebhookPath(webhookPath?: string, webhookUrl?: string): string {
+  const trimmedPath = webhookPath?.trim();
+  if (trimmedPath) {
+    return normalizeWebhookPath(trimmedPath);
   }
+  if (webhookUrl?.trim()) {
+    try {
+      const parsed = new URL(webhookUrl);
+      return normalizeWebhookPath(parsed.pathname || "/");
+    } catch {
+      return "/max";
+    }
+  }
+  return "/max";
 }
 
-// ─── Webhook server ─────────────────────────────────────────────
-
-/**
- * Start a webhook HTTP server that receives MAX bot updates.
- *
- * @param token      Bot API token
- * @param onMessage  Handler for message_created updates
- * @param opts       Webhook configuration
- * @param onUpdate   Optional handler for other update types
- * @returns          stop() function — call it to gracefully stop the server
- */
-export function startWebhook(
-  token: string,
-  onMessage: MessageHandler,
-  opts: WebhookOptions,
-  onUpdate?: UpdateHandler,
-): () => void {
-  const port = opts.port ?? DEFAULT_PORT;
-  const types = opts.types ?? ["message_created", "bot_started", "message_callback"];
-  const secret = opts.secret ?? crypto.randomUUID();
-  let stopped = false;
-
-  // Append secret token to webhook URL for registration
-  const webhookUrlWithToken = new URL(opts.webhookUrl);
-  webhookUrlWithToken.searchParams.set("token", secret);
-  const registrationUrl = webhookUrlWithToken.toString();
-
-  log(`Webhook secret token generated (first 8 chars): ${secret.slice(0, 8)}...`);
-
-  const server = http.createServer(async (req, res) => {
-    // Only accept POST requests
-    if (req.method !== "POST") {
-      res.writeHead(405, { "Content-Type": "text/plain" });
-      res.end("Method Not Allowed");
-      return;
-    }
-
-    // Verify secret token from query string
-    const reqUrl = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const reqToken = reqUrl.searchParams.get("token");
-    if (reqToken !== secret) {
-      log(`Rejected webhook request: invalid token (from ${req.socket.remoteAddress})`);
-      res.writeHead(403, { "Content-Type": "text/plain" });
-      res.end("Forbidden");
-      return;
-    }
-
-    const contentLength = Number(req.headers["content-length"] ?? 0);
-    if (Number.isFinite(contentLength) && contentLength > MAX_WEBHOOK_BODY_SIZE) {
-      res.writeHead(413, { "Content-Type": "text/plain" });
-      res.end("Payload Too Large");
-      return;
-    }
-
-    // Read body
-    const chunks: Buffer[] = [];
-    let totalSize = 0;
-    for await (const chunk of req) {
-      const buf = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
-      totalSize += buf.byteLength;
-      if (totalSize > MAX_WEBHOOK_BODY_SIZE) {
-        res.writeHead(413, { "Content-Type": "text/plain" });
-        res.end("Payload Too Large");
-        req.destroy();
-        return;
-      }
-      chunks.push(buf);
-    }
-
-    try {
-      const body = Buffer.concat(chunks).toString("utf-8");
-      const update = JSON.parse(body) as Update;
-
-      // Respond 200 immediately to acknowledge receipt
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end("{}");
-
-      // Process update asynchronously
-      if (isMessageCreated(update)) {
-        await onMessage(update).catch((err) => {
-          log(`Message handler error: ${err instanceof Error ? err.message : String(err)}`);
-        });
-      } else if (onUpdate) {
-        await onUpdate(update).catch((err) => {
-          log(`Update handler error: ${err instanceof Error ? err.message : String(err)}`);
-        });
-      }
-    } catch (err) {
-      log(`Webhook parse error: ${err instanceof Error ? err.message : String(err)}`);
-      if (!res.headersSent) {
-        res.writeHead(400, { "Content-Type": "text/plain" });
-        res.end("Bad Request");
-      }
-    }
-  });
-
-  // Start server and register subscription with secret token in URL
-  server.listen(port, async () => {
-    log(`Webhook server listening on port ${port}`);
-    try {
-      await registerSubscription(token, registrationUrl, types);
-    } catch (err) {
-      log(`Failed to register subscription: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  });
-
-  // Return stop function
+export function registerMaxWebhookTarget(target: MaxWebhookTarget): () => void {
+  const key = normalizeWebhookPath(target.path);
+  const normalizedTarget = { ...target, path: key };
+  const existing = webhookTargets.get(key) ?? [];
+  const next = [...existing, normalizedTarget];
+  webhookTargets.set(key, next);
+  
   return () => {
-    if (stopped) return;
-    stopped = true;
-    log("Webhook stop requested.");
-
-    // Remove subscription first, then close server
-    removeSubscription(token, registrationUrl).finally(() => {
-      server.close(() => {
-        log("Webhook server closed.");
-      });
-    });
+    const updated = (webhookTargets.get(key) ?? []).filter((entry) => entry !== normalizedTarget);
+    if (updated.length > 0) {
+      webhookTargets.set(key, updated);
+    } else {
+      webhookTargets.delete(key);
+    }
   };
+}
+
+export async function handleMaxWebhookRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<boolean> {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const path = normalizeWebhookPath(url.pathname);
+  const targets = webhookTargets.get(path);
+  
+  if (!targets || targets.length === 0) {
+    return false;
+  }
+
+  if (req.method !== "POST") {
+    res.statusCode = 405;
+    res.setHeader("Allow", "POST");
+    res.end("Method Not Allowed");
+    return true;
+  }
+
+  // Verify webhook secret
+  const webhookSecret = String(req.headers["x-max-bot-api-secret"] ?? "");
+  
+  const body = await readJsonBodyWithLimit(req, {
+    maxBytes: 1024 * 1024,
+    timeoutMs: 30_000,
+    emptyObjectOnEmpty: false,
+  });
+  
+  if (!body.ok) {
+    res.statusCode =
+      body.code === "PAYLOAD_TOO_LARGE" ? 413 : body.code === "REQUEST_BODY_TIMEOUT" ? 408 : 400;
+    res.end(
+      body.code === "REQUEST_BODY_TIMEOUT"
+        ? requestBodyErrorToText("REQUEST_BODY_TIMEOUT")
+        : body.error,
+    );
+    return true;
+  }
+
+  const raw = body.value;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    res.statusCode = 400;
+    res.end("invalid payload");
+    return true;
+  }
+
+  const update = raw as MaxUpdate;
+
+  // Find matching target by secret
+  let matchedTarget: MaxWebhookTarget | undefined;
+  for (const target of targets) {
+    if (target.secret && target.secret === webhookSecret) {
+      matchedTarget = target;
+      break;
+    } else if (!target.secret) {
+      matchedTarget = target;
+    }
+  }
+
+  if (!matchedTarget) {
+    res.statusCode = 401;
+    res.end("Unauthorized");
+    return true;
+  }
+
+  // Process update
+  try {
+    await matchedTarget.onUpdate(update);
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ ok: true }));
+  } catch (err) {
+    matchedTarget.error?.(`Webhook update processing failed: ${String(err)}`);
+    res.statusCode = 500;
+    res.end("Internal Server Error");
+  }
+
+  return true;
+}
+
+/**
+ * Subscribe to MAX webhook
+ */
+export async function subscribeMaxWebhook(params: {
+  api: MaxApi;
+  webhookUrl: string;
+  secret?: string;
+  updateTypes?: string[];
+}): Promise<void> {
+  const { api, webhookUrl, secret, updateTypes } = params;
+  
+  await api.subscribe({
+    url: webhookUrl,
+    update_types: updateTypes ?? [
+      "message_created",
+      "message_callback",
+      "message_edited",
+      "message_removed",
+      "bot_started",
+      "bot_added",
+      "bot_removed",
+    ],
+    secret,
+  });
+}
+
+/**
+ * Unsubscribe from MAX webhook
+ */
+export async function unsubscribeMaxWebhook(params: {
+  api: MaxApi;
+  webhookUrl: string;
+}): Promise<void> {
+  const { api, webhookUrl } = params;
+  await api.unsubscribe(webhookUrl);
 }
