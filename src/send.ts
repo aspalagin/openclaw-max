@@ -36,6 +36,15 @@ function resolveToken(opts: MaxSendOptions): string {
   throw new Error("MAX bot token not available");
 }
 
+function normalizeTargetId(to: string): number {
+  const normalized = to.startsWith("max:") ? to.slice(4) : to;
+  const chatId = Number(normalized);
+  if (Number.isNaN(chatId)) {
+    throw new Error(`Invalid MAX target: ${to}`);
+  }
+  return chatId;
+}
+
 /**
  * Send a text message to a MAX chat or user.
  */
@@ -47,8 +56,7 @@ export async function sendMaxMessage(
   const token = resolveToken(opts);
   const api = new MaxApi({ token });
 
-  const chatId = Number(to);
-  const isUserId = !Number.isNaN(chatId);
+  const chatId = normalizeTargetId(to);
 
   // Build message body
   const body: MaxNewMessageBody = {
@@ -87,13 +95,10 @@ export async function sendMaxMessage(
   // Determine params
   const params: { chat_id?: number; user_id?: number; disable_link_preview?: boolean } = {};
 
-  if (isUserId) {
-    // Could be either chat_id or user_id. For DMs, prefer chat_id if negative or large.
-    // MAX uses positive IDs for both users and chats.
-    // Convention: if we have a chat_id from an inbound message, use chat_id.
-    // For now, try chat_id first, fall back to user_id.
-    params.chat_id = chatId;
-  }
+  // Could be either chat_id or user_id. For DMs, prefer chat_id if negative or large.
+  // MAX uses positive IDs for both users and chats.
+  // Convention: if we have a chat_id from an inbound message, use chat_id.
+  params.chat_id = chatId;
 
   if (opts.disableLinkPreview) {
     params.disable_link_preview = true;
@@ -207,7 +212,7 @@ export async function sendMaxMediaMessage(
     body.link = { type: "reply", mid: opts.replyToMessageId };
   }
 
-  const chatId = Number(to);
+  const chatId = normalizeTargetId(to);
   const params: { chat_id?: number; user_id?: number; disable_link_preview?: boolean } = {
     chat_id: chatId,
   };
@@ -267,7 +272,7 @@ export async function sendMaxContact(
     body.link = { type: "reply", mid: opts.replyToMessageId };
   }
 
-  const chatId = Number(to);
+  const chatId = normalizeTargetId(to);
   const result = await api.sendMessage(body, { chat_id: chatId });
 
   return {
@@ -305,7 +310,7 @@ export async function sendMaxLocation(
     body.link = { type: "reply", mid: opts.replyToMessageId };
   }
 
-  const chatId = Number(to);
+  const chatId = normalizeTargetId(to);
   const result = await api.sendMessage(body, { chat_id: chatId });
 
   return {
@@ -340,7 +345,7 @@ export async function sendMaxSticker(
     body.link = { type: "reply", mid: opts.replyToMessageId };
   }
 
-  const chatId = Number(to);
+  const chatId = normalizeTargetId(to);
   const params: { chat_id?: number; disable_link_preview?: boolean } = {
     chat_id: chatId,
   };

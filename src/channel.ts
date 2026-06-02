@@ -286,12 +286,13 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
   messaging: {
     normalizeTarget: (raw) => {
       const trimmed = raw.trim();
+      const normalized = trimmed.startsWith("max:") ? trimmed.slice(4) : trimmed;
       // MAX uses numeric IDs
-      if (/^-?\d+$/.test(trimmed)) return trimmed;
+      if (/^-?\d+$/.test(normalized)) return normalized;
       return undefined;
     },
     targetResolver: {
-      looksLikeId: (raw) => /^-?\d+$/.test(raw.trim()),
+      looksLikeId: (raw) => /^-?\d+$/.test(raw.trim().replace(/^max:/, "")),
       hint: "<chatId|userId>",
     },
   },

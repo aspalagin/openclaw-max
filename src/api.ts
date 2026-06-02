@@ -147,6 +147,7 @@ export interface MaxSubscriptionsResponse {
 
 export interface MaxUploadUrlResponse {
   url: string;
+  token?: string;
 }
 
 export interface MaxUploadResult {
@@ -395,8 +396,12 @@ export class MaxApi {
     data: string | Buffer | Uint8Array,
     contentType?: string,
   ): Promise<{ token: string; url?: string }> {
-    // Step 1: Get upload URL
-    const { url: uploadUrl } = await this.getUploadUrl(type);
+    // Step 1: Get upload URL and attachment token.
+    // MAX returns the attachment token together with the upload URL. The
+    // following upload host may answer with XML like `<retval>1</retval>` and
+    // does not repeat that token.
+    const uploadInfo = await this.getUploadUrl(type);
+    const uploadUrl = uploadInfo.url;
 
     // Step 2: Load file if data is a path
     let fileBuffer: Buffer;
@@ -460,7 +465,7 @@ export class MaxApi {
     const result = (await uploadRes.json().catch(() => ({}))) as Record<string, unknown>;
 
     // Try to find token from nested response structure
-    let token = "";
+    let token = typeof uploadInfo.token === "string" ? uploadInfo.token : "";
     let url: string | undefined;
 
     if (result.photos && typeof result.photos === "object") {
