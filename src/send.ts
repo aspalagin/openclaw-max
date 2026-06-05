@@ -13,6 +13,13 @@ import {
 import { resolveMaxAccount } from "./accounts.js";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 
+export type MaxSendButton = {
+  text: string;
+  payload?: string;
+  callback_data?: string;
+  url?: string;
+};
+
 export interface MaxSendOptions {
   token?: string;
   accountId?: string;
@@ -21,7 +28,7 @@ export interface MaxSendOptions {
   format?: "markdown" | "html";
   disableLinkPreview?: boolean;
   notify?: boolean;
-  buttons?: Array<Array<{ text: string; payload?: string; url?: string }>>;
+  buttons?: MaxSendButton[][];
 }
 
 /**
@@ -45,20 +52,55 @@ function normalizeTargetId(to: string): number {
   return chatId;
 }
 
+export function readMaxChannelButtons(channelData: unknown): MaxSendButton[][] | undefined {
+  if (!channelData || typeof channelData !== "object" || Array.isArray(channelData)) return undefined;
+  const maxData = (channelData as Record<string, unknown>).max;
+  if (!maxData || typeof maxData !== "object" || Array.isArray(maxData)) return undefined;
+  const rawButtons = (maxData as Record<string, unknown>).buttons;
+  if (!Array.isArray(rawButtons)) return undefined;
+
+  const rows = rawButtons
+    .map((row) => {
+      const items = Array.isArray(row) ? row : [row];
+      return items
+        .filter((button): button is Record<string, unknown> => Boolean(button) && typeof button === "object" && !Array.isArray(button))
+        .map((button) => ({
+          text: String(button.text ?? button.label ?? ""),
+          payload: button.payload != null ? String(button.payload) : undefined,
+          callback_data: button.callback_data != null ? String(button.callback_data) : undefined,
+          url: button.url != null ? String(button.url) : undefined,
+        }))
+        .filter((button) => button.text.trim().length > 0);
+    })
+    .filter((row) => row.length > 0);
+
+  return rows.length > 0 ? rows : undefined;
+}
+
 /**
  * Send a text message to a MAX chat or user.
  */
-export async function sendMaxMessage(
-  to: string,
-  text: string,
-  opts: MaxSendOptions = {},
-): Promise<{ messageId: string; raw: MaxSendResult }> {
-  const token = resolveToken(opts);
-  const api = new MaxApi({ token });
+function buildInlineKeyboard(buttons: MaxSendButton[][]): MaxInlineKeyboardAttachment {
+  return {
+    type: "inline_keyboard",
+    payload: {
+      buttons: buttons.map((row) =>
+        row.map((btn) => {
+          if (btn.url) {
+            return { type: "link" as const, text: btn.text, url: btn.url };
+          }
+          return {
+            type: "callback" as const,
+            text: btn.text,
+            payload: btn.payload ?? btn.callback_data ?? btn.text,
+          };
+        }),
+      ),
+    },
+  };
+}
 
-  const chatId = normalizeTargetId(to);
-
-  // Build message body
+function buildMaxTextBody(text: string, opts: MaxSendOptions = {}): MaxNewMessageBody {
   const body: MaxNewMessageBody = {
     text: text || undefined,
     format: opts.format ?? undefined,
@@ -72,25 +114,24 @@ export async function sendMaxMessage(
 
   // Inline keyboard from buttons
   if (opts.buttons?.length) {
-    const keyboard: MaxInlineKeyboardAttachment = {
-      type: "inline_keyboard",
-      payload: {
-        buttons: opts.buttons.map((row) =>
-          row.map((btn) => {
-            if (btn.url) {
-              return { type: "link" as const, text: btn.text, url: btn.url };
-            }
-            return {
-              type: "callback" as const,
-              text: btn.text,
-              payload: btn.payload ?? btn.text,
-            };
-          }),
-        ),
-      },
-    };
-    body.attachments = [keyboard];
+    body.attachments = [buildInlineKeyboard(opts.buttons)];
   }
+
+  return body;
+}
+
+export async function sendMaxMessage(
+  to: string,
+  text: string,
+  opts: MaxSendOptions = {},
+): Promise<{ messageId: string; raw: MaxSendResult }> {
+  const token = resolveToken(opts);
+  const api = new MaxApi({ token });
+
+  const chatId = normalizeTargetId(to);
+
+  // Build message body
+  const body = buildMaxTextBody(text, opts);
 
   // Determine params
   const params: { chat_id?: number; user_id?: number; disable_link_preview?: boolean } = {};
@@ -110,6 +151,21 @@ export async function sendMaxMessage(
     messageId: result.message?.body?.mid ?? "",
     raw: result,
   };
+}
+
+/**
+ * Answer a MAX callback. Unlike /messages, /answers is scoped by callback_id
+ * and works even when the callback update does not expose a sendable chat_id.
+ */
+export async function answerMaxCallback(
+  callbackId: string,
+  text: string,
+  opts: MaxSendOptions = {},
+): Promise<void> {
+  const token = resolveToken(opts);
+  const api = new MaxApi({ token });
+  const body = buildMaxTextBody(text, opts);
+  await api.answerCallback(callbackId, { message: body });
 }
 
 /**
@@ -193,7 +249,7 @@ export async function sendMaxMediaMessage(
             return {
               type: "callback" as const,
               text: btn.text,
-              payload: btn.payload ?? btn.text,
+              payload: btn.payload ?? btn.callback_data ?? btn.text,
             };
           }),
         ),

@@ -31,12 +31,19 @@ import {
   type ResolvedMaxAccount,
 } from "./accounts.js";
 import { MaxApi, type MaxUser } from "./api.js";
-import { sendMaxMessage, sendMaxMediaMessage } from "./send.js";
+import { readMaxChannelButtons, sendMaxMessage, sendMaxMediaMessage } from "./send.js";
 import { startMaxPolling } from "./monitor.js";
 import { getMaxRuntime } from "./runtime.js";
 import { maxSetupWizard } from "./onboarding.js";
 import { MaxConfigSchema } from "./config-schema.js";
 import { maxMessageActions } from "./actions.js";
+import {
+  buildMaxModelBrowseChannelData,
+  buildMaxModelsAddProviderChannelData,
+  buildMaxModelsListChannelData,
+  buildMaxModelsMenuChannelData,
+  buildMaxModelsProviderChannelData,
+} from "./model-buttons.js";
 
 // ── MAX group policy helpers ──
 // These mirror resolveChannelGroupRequireMention/resolveChannelGroupToolsPolicy
@@ -149,6 +156,16 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
   },
 
   reload: { configPrefixes: ["channels.max"] },
+
+  commands: {
+    nativeCommandsAutoEnabled: true,
+    nativeSkillsAutoEnabled: true,
+    buildModelsMenuChannelData: buildMaxModelsMenuChannelData,
+    buildModelsProviderChannelData: buildMaxModelsProviderChannelData,
+    buildModelsAddProviderChannelData: buildMaxModelsAddProviderChannelData,
+    buildModelsListChannelData: buildMaxModelsListChannelData,
+    buildModelBrowseChannelData: buildMaxModelBrowseChannelData,
+  },
 
   agentPrompt: {
     messageToolHints: () => {
@@ -351,6 +368,40 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
     chunker: (text, limit) => getMaxRuntime().channel.text.chunkMarkdownText(text, limit),
     chunkerMode: "markdown",
     textChunkLimit: 4000,
+
+    sendPayload: async ({ to, text, payload, mediaUrl, accountId, replyToId }) => {
+      const cfg = await getMaxRuntime().config.loadConfig();
+      const account = resolveMaxAccount({ cfg, accountId });
+      if (!account.token) throw new Error("MAX bot token not configured");
+
+      const buttons = readMaxChannelButtons(payload.channelData);
+      const effectiveMediaUrl = mediaUrl ?? payload.mediaUrl ?? payload.mediaUrls?.[0];
+
+      if (effectiveMediaUrl) {
+        const result = await sendMaxMediaMessage(to, text, effectiveMediaUrl, {
+          token: account.token,
+          replyToMessageId: replyToId ?? undefined,
+          format: "markdown",
+          buttons,
+        });
+        return {
+          channel: "max",
+          messageId: result.messageId,
+        };
+      }
+
+      const result = await sendMaxMessage(to, text, {
+        token: account.token,
+        replyToMessageId: replyToId ?? undefined,
+        format: "markdown",
+        buttons,
+      });
+
+      return {
+        channel: "max",
+        messageId: result.messageId,
+      };
+    },
 
     sendText: async ({ to, text, accountId, replyToId }) => {
       const cfg = await getMaxRuntime().config.loadConfig();
