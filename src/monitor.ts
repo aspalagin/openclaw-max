@@ -10,7 +10,7 @@ import type { ChannelLogSink } from "openclaw/plugin-sdk/channel-runtime";
 import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-runtime";
 import { MaxApi, type MaxUpdate, type MaxMessage, type MaxUser, type MaxCallback } from "./api.js";
 import { resolveMaxAccount, type ResolvedMaxAccount } from "./accounts.js";
-import { sendMaxMessage, sendMaxMediaMessage, editMaxMessage } from "./send.js";
+import { answerMaxCallback, sendMaxMessage, sendMaxMediaMessage, editMaxMessage, readMaxChannelButtons } from "./send.js";
 import { getMaxRuntime } from "./runtime.js";
 import { rememberStickerCode } from "./sticker-cache.js";
 import {
@@ -295,6 +295,7 @@ export async function processIncomingMessage(
 
   const rawText = message.body.text ?? "";
   const messageId = message.body.mid;
+  const isCallbackCommand = (message as MaxMessage & { __maxCallback?: boolean }).__maxCallback === true;
   const attachments = message.body.attachments ?? [];
 
   log?.debug?.(`[${account.accountId}] Processing message: mid=${messageId} chatId=${message.recipient.chat_id} chatType=${message.recipient.chat_type} senderId=${message.sender?.user_id} text="${rawText.slice(0, 50)}" attachments=${attachments.length}`);
@@ -594,7 +595,8 @@ export async function processIncomingMessage(
   const streamMode = account.config.streamMode ?? "off";
   const useEditStreaming = streamMode === "partial";
   const useBlockStreaming = streamMode === "block";
-  const replyMid = messageId.replace(/_edited_\d+$/, "");
+  const replyMid = isCallbackCommand ? undefined : messageId.replace(/_edited_\d+$/, "");
+  const callbackId = isCallbackCommand ? messageId : undefined;
 
   // Draft stream for edit-streaming (like Telegram's partial reply approach)
   let draftMid: string | null = null;
@@ -691,6 +693,7 @@ export async function processIncomingMessage(
               account,
               chatId: chatIdStr,
               replyToId: replyMid,
+              callbackId,
               config,
               log,
               statusSink,
@@ -705,6 +708,7 @@ export async function processIncomingMessage(
           account,
           chatId: chatIdStr,
           replyToId: replyMid,
+          callbackId,
           config,
           log,
           statusSink,
@@ -736,8 +740,10 @@ async function processCallback(
   const payload = callback.payload ?? "";
   if (!payload.trim()) return;
 
-  // Synthesize as a regular message
-  const syntheticMessage: MaxMessage = {
+  // Synthesize as a regular message. callback_id is not a valid MAX message id,
+  // so replies to callback-originated commands must not use it as replyToMessageId.
+  const syntheticMessage: MaxMessage & { __maxCallback?: boolean } = {
+    __maxCallback: true,
     sender: callback.user,
     recipient: callback.message?.recipient ?? { chat_id: callback.user.user_id },
     timestamp: callback.timestamp,
@@ -772,34 +778,66 @@ async function processBotStarted(
 // ── Deliver reply ──
 
 async function deliverMaxReply(params: {
-  payload: { text?: string; mediaUrls?: string[]; mediaUrl?: string; replyToId?: string };
+  payload: { text?: string; mediaUrls?: string[]; mediaUrl?: string; replyToId?: string; channelData?: unknown };
   account: ResolvedMaxAccount;
   chatId: string;
   replyToId?: string;
+  callbackId?: string;
   config: OpenClawConfig;
   log?: ChannelLogSink;
   statusSink?: (patch: { lastInboundAt?: number; lastOutboundAt?: number }) => void;
 }): Promise<void> {
   const { payload, account, chatId, config, log, statusSink } = params;
   const core = getMaxRuntime();
+  const buttons = readMaxChannelButtons(payload.channelData);
+
+  if (params.callbackId && (payload.text || buttons?.length)) {
+    try {
+      await answerMaxCallback(params.callbackId, payload.text ?? "", {
+        token: account.token,
+        format: "markdown",
+        buttons,
+      });
+      statusSink?.({ lastOutboundAt: Date.now() });
+    } catch (err: unknown) {
+      const body = (err as { body?: unknown })?.body;
+      log?.error(`[${account.accountId}] MAX callback answer failed: ${String(err)}${body ? ` body=${JSON.stringify(body)}` : ""}`);
+    }
+    return;
+  }
 
   if (payload.text) {
     const chunkLimit = 4000; // MAX message limit
     const chunkMode = core.channel.text.resolveChunkMode(config, "max", account.accountId);
     const chunks = core.channel.text.chunkMarkdownTextWithMode(payload.text, chunkLimit, chunkMode);
 
-    for (const chunk of chunks) {
+    for (let index = 0; index < chunks.length; index += 1) {
+      const chunk = chunks[index];
       try {
         await sendMaxMessage(chatId, chunk, {
           token: account.token,
           replyToMessageId: params.replyToId,
           format: "markdown",
+          buttons: index === chunks.length - 1 ? buttons : undefined,
         });
         statusSink?.({ lastOutboundAt: Date.now() });
       } catch (err: unknown) {
         const body = (err as { body?: unknown })?.body;
         log?.error(`[${account.accountId}] MAX send failed: ${String(err)}${body ? ` body=${JSON.stringify(body)}` : ""}`);
       }
+    }
+  } else if (buttons?.length) {
+    try {
+      await sendMaxMessage(chatId, "", {
+        token: account.token,
+        replyToMessageId: params.replyToId,
+        format: "markdown",
+        buttons,
+      });
+      statusSink?.({ lastOutboundAt: Date.now() });
+    } catch (err: unknown) {
+      const body = (err as { body?: unknown })?.body;
+      log?.error(`[${account.accountId}] MAX send failed: ${String(err)}${body ? ` body=${JSON.stringify(body)}` : ""}`);
     }
   }
 
