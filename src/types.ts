@@ -359,11 +359,180 @@ export interface MaxChannelConfig {
   webhookPort?: number;
 }
 
-export interface ResolvedMaxAccount {
-  accountId: string;
-  name?: string;
-  enabled: boolean;
-  configured: boolean;
-  botToken: string;
-  config: MaxAccountConfig;
+// NOTE: ResolvedMaxAccount определён в accounts.ts (каноничный источник)
+
+// ─── MAX API Client Types (для api.ts) ────────────────────────
+
+export interface MaxUser {
+  user_id: number;
+  first_name: string;
+  last_name?: string | null;
+  username?: string | null;
+  is_bot: boolean;
+  last_activity_time?: number;
+  name?: string | null;
+  description?: string | null;
+  avatar_url?: string;
+  full_avatar_url?: string;
+  commands?: MaxBotCommand[] | null;
+}
+
+export interface MaxChat {
+  chat_id: number;
+  type: "dialog" | "chat" | "channel";
+  status: string;
+  title?: string | null;
+  icon?: { url?: string } | null;
+  last_event_time?: number;
+  participants_count?: number;
+  owner_id?: number;
+  participants?: Record<string, unknown>;
+  is_public?: boolean;
+  link?: string;
+  description?: string | null;
+  dialog_with_user?: MaxUser;
+  messages_count?: number;
+  chat_message_id?: string;
+  pinned_message?: MaxMessage | null;
+}
+
+export interface MaxRecipient {
+  chat_id?: number;
+  chat_type?: string;
+  user_id?: number;
+}
+
+export interface MaxMessageBody {
+  mid: string;
+  seq?: number;
+  text?: string | null;
+  attachments?: MaxAttachment[];
+  markup?: string | null;
+}
+
+export interface MaxAttachment {
+  type: string;
+  payload?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface MaxLinkedMessage {
+  type: "forward" | "reply";
+  sender?: MaxUser;
+  chat_id?: number;
+  message?: MaxMessage;
+}
+
+export interface MaxUpdatesResponse {
+  updates: MaxUpdate[];
+  marker: number | null;
+}
+
+export interface MaxUploadResult {
+  [key: string]: unknown;
+}
+
+export type MaxUpdateType =
+  | "message_created"
+  | "message_callback"
+  | "message_edited"
+  | "message_removed"
+  | "message_reaction_created"
+  | "message_reaction_updated"
+  | "bot_added"
+  | "bot_removed"
+  | "bot_started"
+  | "user_added"
+  | "user_removed"
+  | "chat_title_changed";
+
+export interface MaxUpdate {
+  update_type: MaxUpdateType;
+  timestamp: number;
+  message?: MaxMessage;
+  callback?: MaxCallback;
+  chat_id?: number;
+  user?: MaxUser;
+  inviter_id?: number;
+  user_locale?: string | null;
+  [key: string]: unknown;
+}
+
+export interface MaxInlineKeyboardButton {
+  type: "callback" | "link" | "request_contact" | "request_geo_location" | "open_app" | "message";
+  text: string;
+  payload?: string;
+  url?: string;
+  intent?: "default" | "positive" | "negative";
+}
+
+export interface MaxInlineKeyboardAttachment {
+  type: "inline_keyboard";
+  payload: {
+    buttons: MaxInlineKeyboardButton[][];
+  };
+}
+
+export interface MaxStickerAttachment {
+  type: "sticker";
+  payload: {
+    code: string;
+  };
+}
+
+export interface MaxNewMessageBody {
+  text?: string | null;
+  attachments?: (MaxAttachment | MaxInlineKeyboardAttachment | MaxStickerAttachment)[] | null;
+  link?: { type: "forward" | "reply"; mid: string } | null;
+  notify?: boolean;
+  format?: "markdown" | "html" | null;
+}
+
+export interface MaxBotCommand {
+  name: string;
+  description?: string;
+}
+
+export interface MaxMessage {
+  sender?: MaxUser;
+  recipient: MaxRecipient;
+  timestamp: number;
+  link?: MaxLinkedMessage | null;
+  body: MaxMessageBody;
+  stat?: { views?: number } | null;
+  url?: string | null;
+}
+
+export interface MaxCallback {
+  timestamp: number;
+  callback_id: string;
+  payload?: string;
+  user: MaxUser;
+  message?: MaxMessage;
+}
+
+export interface MaxSendResult {
+  message: MaxMessage;
+}
+
+export interface MaxSimpleResult {
+  success: boolean;
+  message?: string;
+}
+
+export interface MaxSubscription {
+  url: string;
+  time?: number;
+  update_types?: string[];
+  secret?: string;
+  version?: string;
+}
+
+export interface MaxSubscriptionsResponse {
+  subscriptions: MaxSubscription[];
+}
+
+export interface MaxUploadUrlResponse {
+  url: string;
+  token?: string;
 }

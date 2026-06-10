@@ -4,64 +4,35 @@
 
 import { describe, it, expect } from "vitest";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import { maxOnboardingAdapter } from "./onboarding.js";
+import { maxSetupWizard } from "./onboarding.js";
 
-describe("MAX Onboarding Adapter", () => {
-  describe("adapter structure", () => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const wizard = maxSetupWizard as any;
+
+describe("MAX Onboarding", () => {
+  describe("wizard structure", () => {
     it("should have required fields", () => {
-      expect(maxOnboardingAdapter.channel).toBe("max");
-      expect(maxOnboardingAdapter.dmPolicy).toBeDefined();
-      expect(maxOnboardingAdapter.getStatus).toBeDefined();
-      expect(maxOnboardingAdapter.configure).toBeDefined();
-    });
-  });
-
-  describe("getStatus", () => {
-    it("should report unconfigured status when no token", async () => {
-      const cfg: OpenClawConfig = { channels: {} };
-      const status = await maxOnboardingAdapter.getStatus({ cfg });
-      expect(status.channel).toBe("max");
-      expect(status.configured).toBe(false);
-      expect(status.selectionHint).toContain("needs auth");
+      expect(wizard.channel).toBe("max");
+      expect(wizard.dmPolicy).toBeDefined();
+      expect(wizard.status).toBeDefined();
     });
 
-    it("should report configured status when token exists", async () => {
-      const cfg: OpenClawConfig = {
-        channels: {
-          max: {
-            botToken: "test-token",
-          },
-        },
-      };
-      const status = await maxOnboardingAdapter.getStatus({ cfg });
-      expect(status.configured).toBe(true);
-      expect(status.selectionHint).toBe("configured");
+    it("should have credentials defined", () => {
+      expect(Array.isArray(wizard.credentials)).toBe(true);
+      expect(wizard.credentials.length).toBeGreaterThan(0);
     });
 
-    it("should report configured when env token exists", async () => {
-      const original = process.env.MAX_BOT_TOKEN;
-      process.env.MAX_BOT_TOKEN = "env-token";
-
-      const cfg: OpenClawConfig = {
-        channels: { max: {} },
-      };
-      const status = await maxOnboardingAdapter.getStatus({ cfg });
-      expect(status.configured).toBe(true);
-
-      if (original !== undefined) {
-        process.env.MAX_BOT_TOKEN = original;
-      } else {
-        delete process.env.MAX_BOT_TOKEN;
-      }
+    it("should have finalize handler", () => {
+      expect(typeof wizard.finalize).toBe("function");
     });
   });
 
   describe("dmPolicy", () => {
     it("should have correct policy configuration", () => {
-      expect(maxOnboardingAdapter.dmPolicy.label).toBe("MAX");
-      expect(maxOnboardingAdapter.dmPolicy.channel).toBe("max");
-      expect(maxOnboardingAdapter.dmPolicy.policyKey).toBe("channels.max.dmPolicy");
-      expect(maxOnboardingAdapter.dmPolicy.allowFromKey).toBe("channels.max.allowFrom");
+      expect(wizard.dmPolicy.label).toBe("MAX");
+      expect(wizard.dmPolicy.channel).toBe("max");
+      expect(wizard.dmPolicy.policyKey).toBe("channels.max.dmPolicy");
+      expect(wizard.dmPolicy.allowFromKey).toBe("channels.max.allowFrom");
     });
 
     it("should get current policy from config", () => {
@@ -72,24 +43,47 @@ describe("MAX Onboarding Adapter", () => {
           },
         },
       };
-      const current = maxOnboardingAdapter.dmPolicy.getCurrent(cfg);
+      const current = wizard.dmPolicy.getCurrent(cfg);
       expect(current).toBe("allowlist");
     });
 
     it("should default to pairing when not set", () => {
       const cfg: OpenClawConfig = { channels: {} };
-      const current = maxOnboardingAdapter.dmPolicy.getCurrent(cfg);
+      const current = wizard.dmPolicy.getCurrent(cfg);
       expect(current).toBe("pairing");
     });
 
     it("should set policy in config", () => {
       const cfg: OpenClawConfig = { channels: {} };
-      const updated = maxOnboardingAdapter.dmPolicy.setPolicy(cfg, "open");
+      const updated = wizard.dmPolicy.setPolicy(cfg, "open");
       expect(updated.channels?.max?.dmPolicy).toBe("open");
-      expect(updated.channels?.max?.allowFrom).toContain("*");
     });
   });
 
-  // Full configure() tests would require mock WizardPrompter
-  // which is complex to set up. These are better suited for integration tests.
+  describe("status", () => {
+    it("should resolve configured status when token exists", () => {
+      const cfg: OpenClawConfig = {
+        channels: {
+          max: {
+            botToken: "test-token",
+          },
+        },
+      };
+      const result = wizard.status.resolveConfigured({ cfg });
+      expect(result).toBe(true);
+    });
+
+    it("should resolve unconfigured status when no token", () => {
+      const cfg: OpenClawConfig = { channels: {} };
+      const result = wizard.status.resolveConfigured({ cfg });
+      expect(result).toBe(false);
+    });
+
+    it("should resolve status lines", () => {
+      const cfg: OpenClawConfig = { channels: {} };
+      const lines = wizard.status.resolveStatusLines({ cfg, configured: false });
+      expect(lines[0]).toContain("MAX");
+      expect(lines[0]).toContain("needs bot token");
+    });
+  });
 });

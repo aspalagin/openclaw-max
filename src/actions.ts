@@ -3,13 +3,8 @@
  */
 
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
-import type {
-  ChannelMessageActionAdapter,
-  ChannelMessageActionName,
-  ChannelMessageActionContext,
-  ChannelMessageActionDiscoveryContext,
-} from "openclaw/plugin-sdk/channel-runtime";
-import { createActionGate, jsonResult } from "openclaw/plugin-sdk/agent-runtime";
+import type { ChannelMessageActionAdapter } from "openclaw/plugin-sdk/channel-runtime";
+import { jsonResult } from "openclaw/plugin-sdk/agent-runtime";
 import { readStringParam } from "openclaw/plugin-sdk/param-readers";
 import { listMaxAccountIds, resolveMaxAccount } from "./accounts.js";
 import { getLastStickerCode } from "./sticker-cache.js";
@@ -25,14 +20,14 @@ function listEnabledAccounts(cfg: OpenClawConfig) {
 }
 
 export const maxMessageActions: ChannelMessageActionAdapter = {
-  describeMessageTool: ({ cfg }: ChannelMessageActionDiscoveryContext) => {
+  describeMessageTool: ({ cfg }) => {
     const accounts = listEnabledAccounts(cfg);
     if (accounts.length === 0) {
       return null;
     }
     return {
       actions: ["send", "edit", "delete", "sticker", "sendAttachment"],
-      capabilities: ["buttons"],
+      capabilities: ["buttons"] as unknown as readonly ("presentation" | "delivery-pin")[],
     };
   },
 
@@ -54,7 +49,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
     return { to, accountId };
   },
 
-  handleAction: async ({ action, params, cfg, accountId }: ChannelMessageActionContext) => {
+  handleAction: async ({ action, params, cfg, accountId }) => {
     const account = resolveMaxAccount({
       cfg,
       accountId,

@@ -16,6 +16,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { maxPlugin } from "./channel.js";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const plugin = maxPlugin as any;
+
 // ── Helpers to build config fixtures ──
 
 function makeConfig(maxOverrides: Record<string, unknown> = {}): OpenClawConfig {
@@ -69,7 +72,7 @@ function makeAccountConfig(
 
 describe("MAX Group Functionality", () => {
   describe("groups.resolveRequireMention", () => {
-    const resolve = maxPlugin.groups!.resolveRequireMention;
+    const resolve = plugin.groups!.resolveRequireMention;
 
     it("should default to requiring mention in groups", () => {
       const cfg = makeConfig();
@@ -178,7 +181,7 @@ describe("MAX Group Functionality", () => {
   });
 
   describe("groups.resolveToolPolicy", () => {
-    const resolve = maxPlugin.groups!.resolveToolPolicy;
+    const resolve = plugin.groups!.resolveToolPolicy;
 
     it("should return undefined when no tools config", () => {
       const cfg = makeConfig();
@@ -321,7 +324,7 @@ describe("MAX Group Functionality", () => {
   });
 
   describe("security.collectWarnings (groups)", () => {
-    const collectWarnings = maxPlugin.security!.collectWarnings;
+    const collectWarnings = plugin.security!.collectWarnings;
 
     it("should not warn for default allowlist policy", () => {
       const cfg = makeConfig({});
@@ -403,7 +406,7 @@ describe("MAX Group Functionality", () => {
   });
 
   describe("messaging.normalizeTarget (group IDs)", () => {
-    const normalize = maxPlugin.messaging!.normalizeTarget;
+    const normalize = plugin.messaging!.normalizeTarget;
 
     it("should accept positive numeric chat ID", () => {
       expect(normalize("12345")).toBe("12345");
@@ -427,7 +430,7 @@ describe("MAX Group Functionality", () => {
   });
 
   describe("messaging.targetResolver", () => {
-    const resolver = maxPlugin.messaging!.targetResolver!;
+    const resolver = plugin.messaging!.targetResolver!;
 
     it("should recognize numeric IDs", () => {
       expect(resolver.looksLikeId("12345")).toBe(true);
@@ -460,12 +463,12 @@ describe("MAX Group Functionality", () => {
 
   describe("directory.listGroups", () => {
     it("should be a function", () => {
-      expect(typeof maxPlugin.directory!.listGroups).toBe("function");
+      expect(typeof plugin.directory!.listGroups).toBe("function");
     });
 
     it("should return empty array when no token", async () => {
       const cfg = makeConfig({ botToken: "" });
-      const result = await maxPlugin.directory!.listGroups({ cfg, accountId: undefined });
+      const result = await plugin.directory!.listGroups({ cfg, accountId: undefined });
       expect(result).toEqual([]);
     });
 
@@ -485,7 +488,7 @@ describe("MAX Group Functionality", () => {
       });
 
       const cfg = makeConfig({ botToken: "test-token" });
-      const result = await maxPlugin.directory!.listGroups({ cfg, accountId: undefined });
+      const result = await plugin.directory!.listGroups({ cfg, accountId: undefined });
 
       // Should filter out dialogs
       expect(result).toHaveLength(2);
@@ -505,7 +508,7 @@ describe("MAX Group Functionality", () => {
       global.fetch = vi.fn().mockRejectedValueOnce(new Error("Network error"));
 
       const cfg = makeConfig({ botToken: "test-token" });
-      const result = await maxPlugin.directory!.listGroups({ cfg, accountId: undefined });
+      const result = await plugin.directory!.listGroups({ cfg, accountId: undefined });
       expect(result).toEqual([]);
     });
   });
@@ -570,7 +573,7 @@ describe("MAX Group Functionality", () => {
   });
 
   describe("Group config resolution edge cases", () => {
-    const resolve = maxPlugin.groups!.resolveRequireMention;
+    const resolve = plugin.groups!.resolveRequireMention;
 
     it("should handle missing channels.max section", () => {
       const cfg = { channels: {} } as OpenClawConfig;
@@ -672,7 +675,7 @@ describe("MAX Group Functionality", () => {
   });
 
   describe("status.auditAccount (groups)", () => {
-    const auditAccount = maxPlugin.status!.auditAccount;
+    const auditAccount = plugin.status!.auditAccount;
 
     it("should return ok when no groups configured", async () => {
       const account = {
@@ -683,7 +686,8 @@ describe("MAX Group Functionality", () => {
         tokenSource: "config" as const,
         config: {},
       };
-      const result = await auditAccount({ account, timeoutMs: 3000 });
+      const cfg = makeConfig();
+      const result = await auditAccount({ account, timeoutMs: 3000, cfg });
       expect(result.ok).toBe(true);
       expect(result.checkedGroups).toBe(0);
     });
@@ -701,7 +705,8 @@ describe("MAX Group Functionality", () => {
           },
         },
       };
-      const result = await auditAccount({ account, timeoutMs: 3000 });
+      const cfg = makeConfig();
+      const result = await auditAccount({ account, timeoutMs: 3000, cfg });
       expect(result.ok).toBe(true);
       expect(result.checkedGroups).toBe(0);
     });
@@ -730,7 +735,8 @@ describe("MAX Group Functionality", () => {
           },
         },
       };
-      const result = await auditAccount({ account, timeoutMs: 3000 });
+      const cfg = makeConfig();
+      const result = await auditAccount({ account, timeoutMs: 3000, cfg });
       expect(result.checkedGroups).toBe(1);
       expect(result.groups).toHaveLength(1);
       expect(result.groups[0].id).toBe("12345");
@@ -753,7 +759,8 @@ describe("MAX Group Functionality", () => {
           },
         },
       };
-      const result = await auditAccount({ account, timeoutMs: 3000 });
+      const cfg = makeConfig();
+      const result = await auditAccount({ account, timeoutMs: 3000, cfg });
       expect(result.ok).toBe(false);
       expect(result.unresolvedGroups).toBe(1);
       expect(result.groups[0].ok).toBe(false);
@@ -768,13 +775,14 @@ describe("MAX Group Functionality", () => {
         tokenSource: "none" as const,
         config: {},
       };
-      const result = await auditAccount({ account, timeoutMs: 3000 });
+      const cfg = makeConfig();
+      const result = await auditAccount({ account, timeoutMs: 3000, cfg });
       expect(result.ok).toBe(false);
     });
   });
 
   describe("status.collectStatusIssues", () => {
-    const collectStatusIssues = maxPlugin.status!.collectStatusIssues;
+    const collectStatusIssues = plugin.status!.collectStatusIssues;
 
     it("should report issue when token not configured", () => {
       const issues = collectStatusIssues([
@@ -803,7 +811,7 @@ describe("MAX Group Functionality", () => {
 
   describe("threading.resolveReplyToMode", () => {
     it("should return 'first' for groups", () => {
-      expect(maxPlugin.threading!.resolveReplyToMode()).toBe("first");
+      expect(plugin.threading!.resolveReplyToMode()).toBe("first");
     });
   });
 });

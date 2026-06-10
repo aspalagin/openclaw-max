@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-ts/
 *.bak
 .env
 .env.*

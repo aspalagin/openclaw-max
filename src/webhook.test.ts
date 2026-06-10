@@ -39,16 +39,17 @@ function createMockRequest(
   }) as IncomingMessage;
 }
 
-function createMockResponse(): ServerResponse & {
+interface MockResponse extends ServerResponse {
   _status?: number;
   _headers: Record<string, string>;
   _body: string;
-} {
-  const res: ServerResponse & {
-    _status?: number;
-    _headers: Record<string, string>;
-    _body: string;
-  } = {
+}
+
+function createMockResponse(): MockResponse {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const base = {} as any;
+  return {
+    ...base,
     statusCode: 200,
     _status: undefined,
     _headers: {},
@@ -61,9 +62,7 @@ function createMockResponse(): ServerResponse & {
       this._body = data ?? "";
       this._status = this.statusCode;
     },
-  } as never;
-
-  return res;
+  } as MockResponse;
 }
 
 describe("MAX Webhook Handler", () => {

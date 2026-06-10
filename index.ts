@@ -1,4 +1,5 @@
-import { maxPlugin, setMaxRuntime } from "./src/channel.js";
+import { setMaxRuntime } from "./src/runtime.js";
+import { maxPlugin } from "./src/channel.js";
 
 // Для OpenClaw 2026.5.3 плагин может экспортировать channel напрямую
 const plugin = {

@@ -4,16 +4,15 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { setMaxRuntime, getMaxRuntime } from "./runtime.js";
-import type { PluginRuntime } from "openclaw/plugin-sdk";
 
 describe("MAX Runtime Bridge", () => {
-  const mockRuntime: PluginRuntime = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mockRuntime = {
     channel: {} as never,
     config: {} as never,
     agent: {} as never,
-    infra: {} as never,
     logging: {} as never,
-  };
+  } as any;
 
   beforeEach(() => {
     // Reset runtime
@@ -32,8 +31,8 @@ describe("MAX Runtime Bridge", () => {
     });
 
     it("should allow overwriting runtime", () => {
-      const runtime1: PluginRuntime = { ...mockRuntime };
-      const runtime2: PluginRuntime = { ...mockRuntime };
+      const runtime1 = { ...mockRuntime };
+      const runtime2 = { ...mockRuntime };
 
       setMaxRuntime(runtime1);
       expect(getMaxRuntime()).toBe(runtime1);

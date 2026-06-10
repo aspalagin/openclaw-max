@@ -6,16 +6,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { maxMessageActions } from "./actions.js";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const actions = maxMessageActions as any;
+
 describe("MAX Message Actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  describe("listActions", () => {
-    it("should return empty array when no accounts configured", () => {
+  describe("describeMessageTool", () => {
+    it("should return null when no accounts configured", () => {
       const cfg: OpenClawConfig = { channels: {} };
-      const actions = maxMessageActions.listActions({ cfg });
-      expect(actions).toEqual([]);
+      const result = actions.describeMessageTool({ cfg });
+      expect(result).toBeNull();
     });
 
     it("should return actions when account is configured", () => {
@@ -27,13 +30,14 @@ describe("MAX Message Actions", () => {
           },
         },
       };
-      const actions = maxMessageActions.listActions({ cfg });
-      expect(actions).toContain("send");
-      expect(actions).toContain("edit");
-      expect(actions).toContain("delete");
+      const result = actions.describeMessageTool({ cfg });
+      expect(result).not.toBeNull();
+      expect(result?.actions).toContain("send");
+      expect(result?.actions).toContain("edit");
+      expect(result?.actions).toContain("delete");
     });
 
-    it("should not return actions for disabled accounts", () => {
+    it("should return null for disabled accounts", () => {
       const cfg: OpenClawConfig = {
         channels: {
           max: {
@@ -42,11 +46,11 @@ describe("MAX Message Actions", () => {
           },
         },
       };
-      const actions = maxMessageActions.listActions({ cfg });
-      expect(actions).toEqual([]);
+      const result = actions.describeMessageTool({ cfg });
+      expect(result).toBeNull();
     });
 
-    it("should not return actions when token is missing", () => {
+    it("should return null when token is missing", () => {
       const cfg: OpenClawConfig = {
         channels: {
           max: {
@@ -54,8 +58,8 @@ describe("MAX Message Actions", () => {
           },
         },
       };
-      const actions = maxMessageActions.listActions({ cfg });
-      expect(actions).toEqual([]);
+      const result = actions.describeMessageTool({ cfg });
+      expect(result).toBeNull();
     });
   });
 
@@ -66,7 +70,7 @@ describe("MAX Message Actions", () => {
         target: "123456",
         message: "Hello",
       };
-      const result = maxMessageActions.extractToolSend({ args });
+      const result = actions.extractToolSend({ args });
       expect(result).toEqual({ to: "123456", accountId: undefined });
     });
 
@@ -76,25 +80,25 @@ describe("MAX Message Actions", () => {
         target: "123456",
         accountId: "prod",
       };
-      const result = maxMessageActions.extractToolSend({ args });
+      const result = actions.extractToolSend({ args });
       expect(result).toEqual({ to: "123456", accountId: "prod" });
     });
 
     it("should route edit/delete actions via messageId placeholder", () => {
       const args = { action: "edit", messageId: "msg-1" };
-      const result = maxMessageActions.extractToolSend({ args });
+      const result = actions.extractToolSend({ args });
       expect(result).toEqual({ to: "__message_action__", accountId: undefined });
     });
 
     it("should return null for actions without target or messageId", () => {
       const args = { action: "edit" };
-      const result = maxMessageActions.extractToolSend({ args });
+      const result = actions.extractToolSend({ args });
       expect(result).toBeNull();
     });
 
     it("should return null when target is missing", () => {
       const args = { action: "send", message: "Hello" };
-      const result = maxMessageActions.extractToolSend({ args });
+      const result = actions.extractToolSend({ args });
       expect(result).toBeNull();
     });
   });
@@ -121,22 +125,22 @@ describe("MAX Message Actions", () => {
       });
 
       await expect(
-        maxMessageActions.handleAction({
+        actions.handleAction({
           action: "send",
           params: { target: "123", message: "Hello" },
           cfg,
-        }),
+        } as any),
       ).resolves.toBeDefined();
     });
 
     it("should throw error when token not configured", async () => {
       const cfg: OpenClawConfig = { channels: { max: {} } };
       await expect(
-        maxMessageActions.handleAction({
+        actions.handleAction({
           action: "send",
           params: { target: "123", message: "Hello" },
           cfg,
-        }),
+        } as any),
       ).rejects.toThrow("token not configured");
     });
 
@@ -145,11 +149,11 @@ describe("MAX Message Actions", () => {
         channels: { max: { botToken: "token" } },
       };
       await expect(
-        maxMessageActions.handleAction({
+        actions.handleAction({
           action: "send",
           params: { message: "Hello" },
           cfg,
-        }),
+        } as any),
       ).rejects.toThrow();
     });
 
@@ -158,11 +162,11 @@ describe("MAX Message Actions", () => {
         channels: { max: { botToken: "token" } },
       };
       await expect(
-        maxMessageActions.handleAction({
+        actions.handleAction({
           action: "send",
           params: { target: "123" },
           cfg,
-        }),
+        } as any),
       ).rejects.toThrow();
     });
 
@@ -183,11 +187,11 @@ describe("MAX Message Actions", () => {
       });
 
       await expect(
-        maxMessageActions.handleAction({
+        actions.handleAction({
           action: "send",
           params: { target: "123", message: "" },
           cfg,
-        }),
+        } as any),
       ).resolves.toBeDefined();
     });
 
@@ -207,11 +211,11 @@ describe("MAX Message Actions", () => {
         }),
       });
 
-      await maxMessageActions.handleAction({
+      await actions.handleAction({
         action: "send",
         params: { target: "123", message: "Reply", replyTo: "original-msg" },
         cfg,
-      });
+      } as any);
 
       const callBody = JSON.parse(
         (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body,
@@ -232,11 +236,11 @@ describe("MAX Message Actions", () => {
       });
 
       await expect(
-        maxMessageActions.handleAction({
+        actions.handleAction({
           action: "edit",
           params: { messageId: "msg-123", message: "Updated" },
           cfg,
-        }),
+        } as any),
       ).resolves.toBeDefined();
     });
 
@@ -246,11 +250,11 @@ describe("MAX Message Actions", () => {
       };
 
       await expect(
-        maxMessageActions.handleAction({
+        actions.handleAction({
           action: "edit",
           params: { message: "Updated" },
           cfg,
-        }),
+        } as any),
       ).rejects.toThrow();
     });
 
@@ -260,11 +264,11 @@ describe("MAX Message Actions", () => {
       };
 
       await expect(
-        maxMessageActions.handleAction({
+        actions.handleAction({
           action: "edit",
           params: { messageId: "msg-123" },
           cfg,
-        }),
+        } as any),
       ).rejects.toThrow();
     });
   });
@@ -281,11 +285,11 @@ describe("MAX Message Actions", () => {
       });
 
       await expect(
-        maxMessageActions.handleAction({
+        actions.handleAction({
           action: "delete",
           params: { messageId: "msg-456" },
           cfg,
-        }),
+        } as any),
       ).resolves.toBeDefined();
     });
 
@@ -295,11 +299,11 @@ describe("MAX Message Actions", () => {
       };
 
       await expect(
-        maxMessageActions.handleAction({
+        actions.handleAction({
           action: "delete",
           params: {},
           cfg,
-        }),
+        } as any),
       ).rejects.toThrow();
     });
   });
@@ -311,11 +315,11 @@ describe("MAX Message Actions", () => {
       };
 
       await expect(
-        maxMessageActions.handleAction({
+        actions.handleAction({
           action: "unsupported" as never,
           params: {},
           cfg,
-        }),
+        } as any),
       ).rejects.toThrow("not supported");
     });
   });
@@ -344,12 +348,12 @@ describe("MAX Message Actions", () => {
         }),
       });
 
-      await maxMessageActions.handleAction({
+      await actions.handleAction({
         action: "send",
         params: { target: "123", message: "Test" },
         cfg,
         accountId: "prod",
-      });
+      } as any);
 
       // Verify token used in Authorization header
       const authHeader = (global.fetch as ReturnType<typeof vi.fn>).mock
