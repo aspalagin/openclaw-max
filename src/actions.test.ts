@@ -4,6 +4,9 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import { mkdtemp, rm, writeFile } from "fs/promises";
+import { join } from "path";
+import { tmpdir } from "os";
 import { maxMessageActions } from "./actions.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -82,6 +85,16 @@ describe("MAX Message Actions", () => {
       };
       const result = actions.extractToolSend({ args });
       expect(result).toEqual({ to: "123456", accountId: "prod" });
+    });
+
+    it("should extract chatId when target is absent", () => {
+      const args = {
+        action: "send",
+        chatId: "max:123456",
+        message: "Hello",
+      };
+      const result = actions.extractToolSend({ args });
+      expect(result).toEqual({ to: "123456", accountId: undefined });
     });
 
     it("should route edit/delete actions via messageId placeholder", () => {
@@ -305,6 +318,61 @@ describe("MAX Message Actions", () => {
           cfg,
         } as any),
       ).rejects.toThrow();
+    });
+  });
+
+  describe("handleAction - sendAttachment", () => {
+    it("should send media attachments through the upload flow", async () => {
+      const cfg: OpenClawConfig = {
+        channels: { max: { botToken: "token" } },
+      };
+      const tempDir = await mkdtemp(join(tmpdir(), "max-action-test-"));
+      const mediaPath = join(tempDir, "clip.mp4");
+      await writeFile(mediaPath, Buffer.from("fake-video"));
+
+      try {
+        global.fetch = vi
+          .fn()
+          .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({ url: "https://upload.max.ru/token", token: "upload-token" }),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({}),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+              message: {
+                body: { mid: "msg-media" },
+                timestamp: Date.now(),
+                recipient: { chat_id: 123 },
+              },
+            }),
+          });
+
+        await expect(
+          actions.handleAction({
+            action: "sendAttachment",
+            params: { chatId: "max:123", media: mediaPath, filename: "clip.mp4", caption: "Video" },
+            cfg,
+          } as any),
+        ).resolves.toBeDefined();
+
+        expect(global.fetch).toHaveBeenCalledTimes(3);
+        const sendCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[2];
+        const sendUrl = sendCall[0] as string;
+        const sendBody = JSON.parse(sendCall[1].body as string);
+        expect(sendUrl).toContain("/messages");
+        expect(sendUrl).toContain("chat_id=123");
+        expect(sendBody.text).toBe("Video");
+        expect(sendBody.attachments).toEqual([
+          { type: "video", payload: { token: "upload-token" } },
+        ]);
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
     });
   });
 
