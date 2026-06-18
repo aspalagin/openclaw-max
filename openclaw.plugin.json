@@ -149,15 +149,84 @@
                       }
                     ]
                   }
+                },
+                "streamMode": {
+                  "type": "string",
+                  "enum": [
+                    "off",
+                    "partial",
+                    "block"
+                  ]
+                },
+                "groupAllowFrom": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  }
+                },
+                "groups": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object"
+                  }
+                },
+                "tokenFile": {
+                  "type": "string"
                 }
-              }
+              },
+              "additionalProperties": true
             }
           },
           "defaultAccount": {
             "type": "string"
+          },
+          "streamMode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "partial",
+              "block"
+            ]
+          },
+          "groupPolicy": {
+            "type": "string",
+            "enum": [
+              "allowlist",
+              "open",
+              "disabled"
+            ]
+          },
+          "groupAllowFrom": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            }
+          },
+          "groups": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object"
+            }
+          },
+          "tokenFile": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": true
       },
       "label": "MAX",
       "description": "MAX messenger channel (max.ru Bot API)."
