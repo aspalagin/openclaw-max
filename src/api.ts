@@ -152,7 +152,29 @@ export class MaxApi {
     body: MaxNewMessageBody,
     params: { chat_id?: number; user_id?: number; disable_link_preview?: boolean },
   ): Promise<MaxSendResult> {
-    return this.request<MaxSendResult>("POST", "/messages", params as Record<string, string | number>, body);
+    // MAX processes uploaded files asynchronously: an attachment token may not be
+    // ready immediately after upload, so /messages returns 400 "attachment.not.ready"
+    // (errors.process.attachment.file.not.processed). Per the MAX docs, larger files
+    // "process longer" and the prescribed mitigation is to retry with increasing
+    // intervals (there is no status-check endpoint). Back off so multi-MB files
+    // still succeed once MAX finishes processing the upload.
+    const attachments = (body as { attachments?: unknown[] }).attachments;
+    const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+    const maxAttempts = hasAttachments ? 8 : 1;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.request<MaxSendResult>("POST", "/messages", params as Record<string, string | number>, body);
+      } catch (err) {
+        const notReady =
+          err instanceof MaxApiError &&
+          err.status === 400 &&
+          (err.body as { code?: string } | undefined)?.code === "attachment.not.ready";
+        if (!notReady || attempt >= maxAttempts) throw err;
+        // Increasing backoff: 1s, 1.5s, 2.25s, … capped at 5s (≈18s total over 8 tries).
+        const delayMs = Math.min(1000 * Math.pow(1.5, attempt - 1), 5000);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
   }
 
   async editMessage(
