@@ -5,13 +5,15 @@
  * finalizeInboundContext → dispatchReplyWithBufferedBlockDispatcher
  */
 
+import { randomBytes } from "node:crypto";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import type { ChannelLogSink } from "openclaw/plugin-sdk/channel-runtime";
 import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-runtime";
-import { MaxApi, type MaxUpdate, type MaxMessage, type MaxUser, type MaxCallback } from "./api.js";
+import { MaxApi, type MaxUpdate, type MaxMessage, type MaxUser, type MaxCallback, type MaxUpdateType } from "./api.js";
 import { resolveMaxAccount, type ResolvedMaxAccount } from "./accounts.js";
-import { answerMaxCallback, sendMaxMessage, sendMaxMediaMessage, editMaxMessage, readMaxChannelButtons } from "./send.js";
+import { answerMaxCallback, sendMaxMessage, sendMaxMediaMessage, editMaxMessage, readMaxChannelButtons, readMaxChannelSendOptions } from "./send.js";
 import { getMaxRuntime } from "./runtime.js";
+import { MaxStateStore } from "./state.js";
 import { rememberStickerCode } from "./sticker-cache.js";
 import {
   registerMaxWebhookTarget,
@@ -30,11 +32,44 @@ export interface MaxMonitorOptions {
   botUsername?: string;
   log?: ChannelLogSink;
   statusSink?: (patch: { lastInboundAt?: number; lastOutboundAt?: number }) => void;
+  /** Persistent marker + chat registry (created by startMaxPolling when absent) */
+  state?: MaxStateStore;
 }
 
+/**
+ * Update types this channel consumes. Shared by long polling (types filter)
+ * and webhook subscriptions (update_types).
+ */
+export const MAX_SUBSCRIBED_UPDATE_TYPES: MaxUpdateType[] = [
+  "message_created",
+  "message_callback",
+  "message_edited",
+  "message_removed",
+  "message_chat_created",
+  "bot_started",
+  "bot_stopped",
+  "bot_added",
+  "bot_removed",
+  "dialog_cleared",
+  "dialog_removed",
+  "chat_title_changed",
+];
+
 export async function startMaxPolling(opts: MaxMonitorOptions): Promise<void> {
-  const { api, account, config, abortSignal, log, statusSink } = opts;
-  
+  const { account, log } = opts;
+
+  // Persistent state: polling marker + chat registry
+  if (!opts.state) {
+    opts.state = new MaxStateStore(account.accountId, (err) => {
+      log?.error(`[${account.accountId}] MAX state persist failed: ${String(err)}`);
+    });
+  }
+  try {
+    await opts.state.load();
+  } catch (err) {
+    log?.error(`[${account.accountId}] MAX state load failed: ${String(err)}`);
+  }
+
   // Check if webhook mode is configured
   const webhookUrl = account.config.webhookUrl?.trim();
   const useWebhook = Boolean(webhookUrl);
@@ -49,40 +84,42 @@ export async function startMaxPolling(opts: MaxMonitorOptions): Promise<void> {
 }
 
 async function startMaxPollingLoop(opts: MaxMonitorOptions): Promise<void> {
-  const { api, account, config, abortSignal, log, statusSink } = opts;
-  let marker: number | null = null;
+  const { api, account, abortSignal, log } = opts;
+  let marker: number | null = opts.state?.marker ?? null;
 
-  log?.info(`[${account.accountId}] MAX long-polling started`);
+  log?.info(`[${account.accountId}] MAX long-polling started${marker != null ? ` (resuming from marker ${marker})` : ""}`);
 
   while (!abortSignal.aborted) {
     try {
       const resp = await api.getUpdates({
         timeout: 30,
         marker: marker ?? undefined,
-        types: [
-          "message_created",
-          "message_callback",
-          "message_edited",
-          "message_removed",
-          "message_reaction_created",
-          "message_reaction_updated",
-          "bot_started",
-          "bot_added",
-          "bot_removed",
-        ],
+        types: MAX_SUBSCRIBED_UPDATE_TYPES,
       });
 
+      // Advance the in-memory marker so the next poll in this process moves on…
       if (resp.marker != null) {
         marker = resp.marker;
       }
 
+      let batchCompleted = true;
       for (const update of resp.updates) {
-        if (abortSignal.aborted) break;
+        if (abortSignal.aborted) {
+          batchCompleted = false;
+          break;
+        }
         try {
           await dispatchUpdate(update, opts);
         } catch (err) {
           log?.error(`[${account.accountId}] Error dispatching update ${update.update_type}: ${String(err)}`);
         }
+      }
+
+      // …but only PERSIST the marker after the whole batch is handled. A restart
+      // mid-batch then resumes from before the unprocessed updates (at-least-once);
+      // OpenClaw dedups replays by mid, so re-delivery is safe but loss is not.
+      if (batchCompleted && !abortSignal.aborted && resp.marker != null) {
+        opts.state?.setMarker(resp.marker);
       }
     } catch (err) {
       if (abortSignal.aborted) break;
@@ -95,16 +132,60 @@ async function startMaxPollingLoop(opts: MaxMonitorOptions): Promise<void> {
   log?.info(`[${account.accountId}] MAX long-polling stopped`);
 }
 
+/**
+ * Build a webhook onUpdate handler that acks immediately (returns a resolved
+ * promise) and processes updates through per-chat serialized queues: ordering
+ * is preserved within a chat, but a slow agent run in chat A never blocks
+ * chat B (no cross-chat head-of-line blocking). Queued work checks abort so a
+ * stopped monitor stops draining stale updates with its old config.
+ * @internal exported for testing.
+ */
+export function createSerializedWebhookHandler(params: {
+  dispatch: (update: MaxUpdate) => Promise<void>;
+  abortSignal: AbortSignal;
+  onError: (err: unknown) => void;
+}): (update: MaxUpdate) => Promise<void> {
+  const { dispatch, abortSignal, onError } = params;
+  const chatQueues = new Map<string, Promise<void>>();
+
+  return (update: MaxUpdate) => {
+    const key = String(update.message?.recipient?.chat_id ?? update.chat_id ?? "global");
+    const next = (chatQueues.get(key) ?? Promise.resolve()).then(async () => {
+      if (abortSignal.aborted) return;
+      try {
+        await dispatch(update);
+      } catch (err) {
+        onError(err);
+      }
+    });
+    chatQueues.set(key, next);
+    void next.finally(() => {
+      if (chatQueues.get(key) === next) chatQueues.delete(key);
+    });
+    return Promise.resolve();
+  };
+}
+
 async function startMaxWebhook(opts: MaxMonitorOptions & { webhookUrl: string }): Promise<void> {
-  const { api, account, config, abortSignal, log, statusSink, webhookUrl } = opts;
-  
+  const { api, account, config, abortSignal, log, webhookUrl } = opts;
+
   const webhookPath = resolveMaxWebhookPath(
     account.config.webhookPath,
     account.config.webhookUrl,
   );
-  const webhookSecret = account.config.webhookSecret?.trim();
+  // MAX supports a shared secret (X-Max-Bot-Api-Secret). Without one, anybody
+  // who finds the endpoint can inject updates — generate one when not configured.
+  const webhookSecret = account.config.webhookSecret?.trim() || generateWebhookSecret();
 
   log?.info(`[${account.accountId}] MAX webhook mode: ${webhookUrl} (path: ${webhookPath})`);
+
+  // MAX requires HTTP 200 within 30s while agent runs regularly take minutes.
+  // Ack immediately and process updates through per-chat serialized queues.
+  const onUpdate = createSerializedWebhookHandler({
+    dispatch: (update) => dispatchUpdate(update, opts),
+    abortSignal,
+    onError: (err) => log?.error(`[${account.accountId}] Webhook update dispatch failed: ${String(err)}`),
+  });
 
   // Register webhook handler
   const target: MaxWebhookTarget = {
@@ -112,13 +193,7 @@ async function startMaxWebhook(opts: MaxMonitorOptions & { webhookUrl: string })
     config,
     path: webhookPath,
     secret: webhookSecret,
-    onUpdate: async (update) => {
-      try {
-        await dispatchUpdate(update, opts);
-      } catch (err) {
-        log?.error(`[${account.accountId}] Webhook update dispatch failed: ${String(err)}`);
-      }
-    },
+    onUpdate,
     log: (msg) => log?.info?.(msg),
     error: (msg) => log?.error?.(msg),
   };
@@ -131,6 +206,7 @@ async function startMaxWebhook(opts: MaxMonitorOptions & { webhookUrl: string })
       api,
       webhookUrl,
       secret: webhookSecret,
+      updateTypes: MAX_SUBSCRIBED_UPDATE_TYPES,
     });
     log?.info(`[${account.accountId}] MAX webhook subscribed: ${webhookUrl}`);
   } catch (err) {
@@ -165,6 +241,24 @@ async function startMaxWebhook(opts: MaxMonitorOptions & { webhookUrl: string })
 
 // ── Dispatch ──
 
+/** mark_seen vanished from current MAX docs; keep behind config (default on). */
+function shouldMarkSeen(account: ResolvedMaxAccount): boolean {
+  return account.config.markSeen !== false;
+}
+
+function sendReadReceipt(chatId: number | undefined, opts: MaxMonitorOptions): void {
+  const { log, account } = opts;
+  if (!chatId) return;
+  if (shouldMarkSeen(account)) {
+    opts.api.sendAction(chatId, "mark_seen").catch((err) => {
+      log?.debug?.(`[${account.accountId}] mark_seen failed: ${String(err)}`);
+    });
+  }
+  opts.api.sendAction(chatId, "typing_on").catch((err) => {
+    log?.debug?.(`[${account.accountId}] typing_on failed: ${String(err)}`);
+  });
+}
+
 async function dispatchUpdate(
   update: MaxUpdate,
   opts: MaxMonitorOptions,
@@ -178,14 +272,19 @@ async function dispatchUpdate(
       if (opts.botUserId && update.message.sender?.user_id === opts.botUserId) break;
       statusSink?.({ lastInboundAt: Date.now() });
       // Mark message as read + show typing indicator
-      const chatIdForRead = update.message.recipient?.chat_id;
-      if (chatIdForRead) {
-        opts.api.sendAction(chatIdForRead, "mark_seen").catch((err) => {
-          log?.debug?.(`[${account.accountId}] mark_seen failed: ${String(err)}`);
-        });
-        opts.api.sendAction(chatIdForRead, "typing_on").catch((err) => {
-          log?.debug?.(`[${account.accountId}] typing_on failed: ${String(err)}`);
-        });
+      sendReadReceipt(update.message.recipient?.chat_id, opts);
+      // Passive chat discovery: GET /chats is deprecated, register group chats
+      // the bot actually sees so directory.listGroups keeps working.
+      const recipient = update.message.recipient;
+      if (
+        opts.state &&
+        recipient?.chat_id != null &&
+        (recipient.chat_type === "chat" || recipient.chat_type === "channel") &&
+        !opts.state.hasActiveChat(recipient.chat_id)
+      ) {
+        // A message from this chat proves the bot is a member — (re)register it,
+        // clearing any stale removedAt from an earlier bot_removed/dialog_removed.
+        opts.state.upsertChat(recipient.chat_id, { type: recipient.chat_type, addedAt: Date.now() });
       }
       await processIncomingMessage(update.message, update.user_locale, opts);
       break;
@@ -205,15 +304,7 @@ async function dispatchUpdate(
       log?.debug?.(`[${account.accountId}] Message edited: ${update.message?.body?.mid} text="${update.message?.body?.text ?? "<null>"}" hasBody=${!!update.message?.body}`);
       statusSink?.({ lastInboundAt: Date.now() });
       // Mark as read + show typing indicator
-      const chatIdForEditRead = update.message.recipient?.chat_id;
-      if (chatIdForEditRead) {
-        opts.api.sendAction(chatIdForEditRead, "mark_seen").catch((err) => {
-          log?.debug?.(`[${account.accountId}] mark_seen failed: ${String(err)}`);
-        });
-        opts.api.sendAction(chatIdForEditRead, "typing_on").catch((err) => {
-          log?.debug?.(`[${account.accountId}] typing_on failed: ${String(err)}`);
-        });
-      }
+      sendReadReceipt(update.message.recipient?.chat_id, opts);
       // Process edited message through the same pipeline as new messages.
       // Use a unique mid suffix to avoid OpenClaw dedup (same mid = skipped).
       const editedMessage = { ...update.message };
@@ -249,19 +340,81 @@ async function dispatchUpdate(
 
     case "bot_started": {
       if (!update.user) break;
-      log?.info(`[${account.accountId}] Bot started by user ${update.user.user_id}`);
+      log?.info(`[${account.accountId}] Bot started by user ${update.user.user_id}${update.payload ? " (with deeplink payload)" : ""}`);
       statusSink?.({ lastInboundAt: Date.now() });
-      await processBotStarted(update.user, update.chat_id, opts);
+      if (opts.state && update.chat_id != null) {
+        opts.state.upsertChat(update.chat_id, { type: "dialog", addedAt: Date.now(), stopped: false });
+      }
+      await processBotStarted(update.user, update.chat_id, update.payload ?? undefined, opts);
+      break;
+    }
+
+    case "bot_stopped": {
+      // User halted the bot in a dialog — stop proactive sends until they return
+      log?.info(`[${account.accountId}] Bot stopped by user ${update.user?.user_id ?? "?"} (chat ${update.chat_id ?? "?"})`);
+      if (opts.state && update.chat_id != null) {
+        opts.state.upsertChat(update.chat_id, { type: "dialog", stopped: true });
+      }
       break;
     }
 
     case "bot_added": {
       log?.info(`[${account.accountId}] Bot added to chat ${update.chat_id}`);
+      if (opts.state && update.chat_id != null) {
+        opts.state.upsertChat(update.chat_id, {
+          type: update.is_channel ? "channel" : "chat",
+          addedAt: Date.now(),
+        });
+      }
       break;
     }
 
     case "bot_removed": {
       log?.info(`[${account.accountId}] Bot removed from chat ${update.chat_id}`);
+      if (opts.state && update.chat_id != null) {
+        opts.state.upsertChat(update.chat_id, { removedAt: Date.now() });
+      }
+      break;
+    }
+
+    case "dialog_removed": {
+      log?.info(`[${account.accountId}] Dialog removed by user ${update.user_id ?? update.user?.user_id ?? "?"} (chat ${update.chat_id ?? "?"})`);
+      if (opts.state && update.chat_id != null) {
+        opts.state.upsertChat(update.chat_id, { removedAt: Date.now() });
+      }
+      break;
+    }
+
+    case "dialog_cleared": {
+      // User wiped the dialog history on their side; keep our session but log it
+      log?.info(`[${account.accountId}] Dialog cleared by user ${update.user_id ?? update.user?.user_id ?? "?"} (chat ${update.chat_id ?? "?"})`);
+      break;
+    }
+
+    case "chat_title_changed": {
+      if (opts.state && update.chat_id != null && typeof update.title === "string") {
+        opts.state.upsertChat(update.chat_id, { title: update.title });
+      }
+      break;
+    }
+
+    case "message_chat_created": {
+      // Chat created via a "chat" inline button
+      const chat = (update as { chat?: { chat_id?: number; type?: string; title?: string | null } }).chat;
+      log?.info(`[${account.accountId}] Chat created via button: ${chat?.chat_id ?? "?"}`);
+      if (opts.state && chat?.chat_id != null) {
+        opts.state.upsertChat(chat.chat_id, {
+          type: chat.type ?? "chat",
+          title: chat.title ?? undefined,
+          addedAt: Date.now(),
+        });
+      }
+      break;
+    }
+
+    case "message_removed": {
+      // Deliberate no-op: OpenClaw sessions have no per-message retraction.
+      log?.debug?.(`[${account.accountId}] Message removed in chat ${update.chat_id ?? "?"}: ${(update as { message_id?: string }).message_id ?? "?"}`);
       break;
     }
 
@@ -322,7 +475,23 @@ export async function processIncomingMessage(
         }
       }
 
-      const url = (payload?.url ?? (att as Record<string, unknown>).url ?? "") as string;
+      let url = (payload?.url ?? (att as Record<string, unknown>).url ?? "") as string;
+
+      // Inbound video attachments often carry only a token — resolve playback
+      // URLs via GET /videos/{videoToken} instead of degrading to "[video]".
+      if (!url && attType === "video" && typeof payload?.token === "string" && payload.token) {
+        try {
+          const info = await opts.api.getVideoInfo(payload.token);
+          const urls = info?.urls ?? undefined;
+          url = urls?.mp4_720 ?? urls?.mp4_480 ?? urls?.mp4_1080 ?? urls?.mp4_360 ?? urls?.mp4_240 ?? urls?.mp4_144 ?? "";
+          if (!url) {
+            log?.debug?.(`[${account.accountId}] Video ${payload.token.slice(0, 12)}… has no playback URLs yet`);
+          }
+        } catch (err) {
+          log?.debug?.(`[${account.accountId}] getVideoInfo failed: ${String(err)}`);
+        }
+      }
+
       if (url && typeof url === "string" && url.startsWith("http")) {
         try {
           const maxBytes = (account.config.mediaMaxMb ?? 20) * 1024 * 1024;
@@ -759,16 +928,19 @@ async function processCallback(
 async function processBotStarted(
   user: MaxUser,
   chatId: number | undefined,
+  payload: string | undefined,
   opts: MaxMonitorOptions,
 ): Promise<void> {
-  // Synthesize a /start message
+  // Synthesize a /start message; deeplink payload (max.ru/<bot>?start=...) is
+  // forwarded as the command argument like other messengers do.
+  const startText = payload?.trim() ? `/start ${payload.trim()}` : "/start";
   const syntheticMessage: MaxMessage = {
     sender: user,
     recipient: { chat_id: chatId ?? user.user_id, chat_type: "dialog" },
     timestamp: Date.now(),
     body: {
       mid: `bot_started_${user.user_id}_${Date.now()}`,
-      text: "/start",
+      text: startText,
     },
   };
 
@@ -790,6 +962,7 @@ async function deliverMaxReply(params: {
   const { payload, account, chatId, config, log, statusSink } = params;
   const core = getMaxRuntime();
   const buttons = readMaxChannelButtons(payload.channelData);
+  const sendOptions = readMaxChannelSendOptions(payload.channelData);
 
   if (params.callbackId && (payload.text || buttons?.length)) {
     try {
@@ -819,6 +992,7 @@ async function deliverMaxReply(params: {
           replyToMessageId: params.replyToId,
           format: "markdown",
           buttons: index === chunks.length - 1 ? buttons : undefined,
+          ...sendOptions,
         });
         statusSink?.({ lastOutboundAt: Date.now() });
       } catch (err: unknown) {
@@ -833,6 +1007,7 @@ async function deliverMaxReply(params: {
         replyToMessageId: params.replyToId,
         format: "markdown",
         buttons,
+        ...sendOptions,
       });
       statusSink?.({ lastOutboundAt: Date.now() });
     } catch (err: unknown) {
@@ -864,6 +1039,7 @@ async function deliverMaxReply(params: {
           await sendMaxMediaMessage(chatId, "", tmpPath, {
             token: account.token,
             replyToMessageId: params.replyToId,
+            ...sendOptions,
           });
           statusSink?.({ lastOutboundAt: Date.now() });
         } finally {
@@ -875,6 +1051,7 @@ async function deliverMaxReply(params: {
         await sendMaxMediaMessage(chatId, "", mediaUrl, {
           token: account.token,
           replyToMessageId: params.replyToId,
+          ...sendOptions,
         });
         statusSink?.({ lastOutboundAt: Date.now() });
       }
@@ -885,6 +1062,11 @@ async function deliverMaxReply(params: {
 }
 
 // ── Helpers ──
+
+/** MAX webhook secret: 5–256 chars of [A-Za-z0-9-]. */
+function generateWebhookSecret(): string {
+  return randomBytes(24).toString("base64url").replace(/_/g, "-");
+}
 
 function formatSenderName(user?: MaxUser | null): string {
   if (!user) return "Unknown";

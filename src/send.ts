@@ -2,22 +2,32 @@
  * Outbound message sending for MAX.
  */
 
+import { retryAsync } from "openclaw/plugin-sdk/retry-runtime";
+
 import {
   MaxApi,
+  MaxApiError,
   type MaxNewMessageBody,
   type MaxSendResult,
   type MaxInlineKeyboardAttachment,
+  type MaxInlineKeyboardButton,
   type MaxStickerAttachment,
   type MaxAttachment,
 } from "./api.js";
 import { resolveMaxAccount } from "./accounts.js";
+import { toMaxMarkdown } from "./format.js";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 
 export type MaxSendButton = {
   text: string;
+  /** Button type; default: "link" when url is set, otherwise "callback" */
+  type?: "callback" | "link" | "message" | "clipboard" | "open_app" | "request_contact" | "request_geo_location";
   payload?: string;
   callback_data?: string;
   url?: string;
+  intent?: "default" | "positive" | "negative";
+  /** open_app: public name of the mini-app/bot to open */
+  webApp?: string;
 };
 
 export interface MaxSendOptions {
@@ -31,6 +41,9 @@ export interface MaxSendOptions {
   buttons?: MaxSendButton[][];
 }
 
+/** Send target: numeric chat id, or an explicit user id (user:<id> targets). */
+export type MaxSendTarget = { chat_id: number } | { user_id: number };
+
 /**
  * Resolve a token from options or config.
  */
@@ -43,13 +56,45 @@ function resolveToken(opts: MaxSendOptions): string {
   throw new Error("MAX bot token not available");
 }
 
-function normalizeTargetId(to: string): number {
-  const normalized = to.startsWith("max:") ? to.slice(4) : to;
-  const chatId = Number(normalized);
-  if (Number.isNaN(chatId)) {
-    throw new Error(`Invalid MAX target: ${to}`);
+/**
+ * Resolve a target string into API send params.
+ * Supported forms: "12345", "max:12345" (chat id), "user:12345" / "max:user:12345"
+ * (user id), "@username" / public link (resolved via GET /chats/{chatLink}).
+ *
+ * Note: GET /chats/{chatLink} resolves only PUBLIC channels/chats that have a
+ * link. For ordinary group chats address by numeric chat_id (from bot_added),
+ * for users by "user:<id>".
+ */
+export async function resolveMaxTarget(api: MaxApi, to: string): Promise<MaxSendTarget> {
+  let normalized = to.trim();
+  if (normalized.startsWith("max:")) normalized = normalized.slice(4);
+
+  if (normalized.startsWith("user:")) {
+    const userId = Number(normalized.slice(5));
+    if (Number.isNaN(userId)) throw new Error(`Invalid MAX target: ${to}`);
+    return { user_id: userId };
   }
-  return chatId;
+
+  const chatId = Number(normalized);
+  if (!Number.isNaN(chatId) && normalized !== "") {
+    return { chat_id: chatId };
+  }
+
+  // @username or public chat link — resolve through the API
+  if (normalized.startsWith("@") || normalized.includes("max.ru/")) {
+    const link = normalized.replace(/^(https?:\/\/)?(www\.)?max\.ru\//i, "").replace(/^@/, "");
+    try {
+      const chat = await api.getChat(link);
+      if (chat?.chat_id != null) return { chat_id: chat.chat_id };
+    } catch (err) {
+      throw new Error(
+        `Could not resolve MAX target "${to}" via chat link (only public channels/chats are resolvable; ` +
+        `use a numeric chat_id for groups or user:<id> for users): ${String(err)}`,
+      );
+    }
+  }
+
+  throw new Error(`Invalid MAX target: ${to}`);
 }
 
 export function readMaxChannelButtons(channelData: unknown): MaxSendButton[][] | undefined {
@@ -59,6 +104,11 @@ export function readMaxChannelButtons(channelData: unknown): MaxSendButton[][] |
   const rawButtons = (maxData as Record<string, unknown>).buttons;
   if (!Array.isArray(rawButtons)) return undefined;
 
+  const validTypes = new Set([
+    "callback", "link", "message", "clipboard", "open_app", "request_contact", "request_geo_location",
+  ]);
+  const validIntents = new Set(["default", "positive", "negative"]);
+
   const rows = rawButtons
     .map((row) => {
       const items = Array.isArray(row) ? row : [row];
@@ -66,9 +116,12 @@ export function readMaxChannelButtons(channelData: unknown): MaxSendButton[][] |
         .filter((button): button is Record<string, unknown> => Boolean(button) && typeof button === "object" && !Array.isArray(button))
         .map((button) => ({
           text: String(button.text ?? button.label ?? ""),
+          type: validTypes.has(String(button.type)) ? (String(button.type) as MaxSendButton["type"]) : undefined,
           payload: button.payload != null ? String(button.payload) : undefined,
           callback_data: button.callback_data != null ? String(button.callback_data) : undefined,
           url: button.url != null ? String(button.url) : undefined,
+          intent: validIntents.has(String(button.intent)) ? (String(button.intent) as MaxSendButton["intent"]) : undefined,
+          webApp: button.webApp != null ? String(button.webApp) : button.web_app != null ? String(button.web_app) : undefined,
         }))
         .filter((button) => button.text.trim().length > 0);
     })
@@ -77,32 +130,69 @@ export function readMaxChannelButtons(channelData: unknown): MaxSendButton[][] |
   return rows.length > 0 ? rows : undefined;
 }
 
-/**
- * Send a text message to a MAX chat or user.
- */
+/** Extra per-message options passed via channelData.max (notify, link preview). */
+export function readMaxChannelSendOptions(channelData: unknown): { notify?: boolean; disableLinkPreview?: boolean } {
+  if (!channelData || typeof channelData !== "object" || Array.isArray(channelData)) return {};
+  const maxData = (channelData as Record<string, unknown>).max;
+  if (!maxData || typeof maxData !== "object" || Array.isArray(maxData)) return {};
+  const data = maxData as Record<string, unknown>;
+  const result: { notify?: boolean; disableLinkPreview?: boolean } = {};
+  if (typeof data.notify === "boolean") result.notify = data.notify;
+  if (data.silent === true) result.notify = false;
+  if (typeof data.disableLinkPreview === "boolean") result.disableLinkPreview = data.disableLinkPreview;
+  return result;
+}
+
+function buildMaxButton(btn: MaxSendButton): MaxInlineKeyboardButton {
+  const type = btn.type ?? (btn.url ? "link" : "callback");
+  switch (type) {
+    case "link":
+      return { type: "link", text: btn.text, url: btn.url ?? "" };
+    case "message":
+      return { type: "message", text: btn.text, ...(btn.payload ? { payload: btn.payload } : {}) };
+    case "clipboard":
+      return { type: "clipboard", text: btn.text, payload: btn.payload ?? btn.text };
+    case "open_app":
+      return {
+        type: "open_app",
+        text: btn.text,
+        ...(btn.webApp ? { web_app: btn.webApp } : {}),
+        ...(btn.url ? { url: btn.url } : {}),
+      };
+    case "request_contact":
+      return { type: "request_contact", text: btn.text };
+    case "request_geo_location":
+      return { type: "request_geo_location", text: btn.text };
+    case "callback":
+    default:
+      return {
+        type: "callback",
+        text: btn.text,
+        payload: btn.payload ?? btn.callback_data ?? btn.text,
+        ...(btn.intent ? { intent: btn.intent } : {}),
+      };
+  }
+}
+
 function buildInlineKeyboard(buttons: MaxSendButton[][]): MaxInlineKeyboardAttachment {
   return {
     type: "inline_keyboard",
     payload: {
-      buttons: buttons.map((row) =>
-        row.map((btn) => {
-          if (btn.url) {
-            return { type: "link" as const, text: btn.text, url: btn.url };
-          }
-          return {
-            type: "callback" as const,
-            text: btn.text,
-            payload: btn.payload ?? btn.callback_data ?? btn.text,
-          };
-        }),
-      ),
+      buttons: buttons.map((row) => row.map((btn) => buildMaxButton(btn))),
     },
   };
 }
 
+/** Apply MAX markdown dialect conversion when sending formatted text. */
+function formatOutboundText(text: string, format?: "markdown" | "html"): string {
+  if (format === "markdown" && text) return toMaxMarkdown(text);
+  return text;
+}
+
 function buildMaxTextBody(text: string, opts: MaxSendOptions = {}): MaxNewMessageBody {
+  const formatted = formatOutboundText(text, opts.format);
   const body: MaxNewMessageBody = {
-    text: text || undefined,
+    text: formatted || undefined,
     format: opts.format ?? undefined,
     notify: opts.notify,
   };
@@ -120,6 +210,20 @@ function buildMaxTextBody(text: string, opts: MaxSendOptions = {}): MaxNewMessag
   return body;
 }
 
+function buildSendParams(
+  target: MaxSendTarget,
+  opts: MaxSendOptions,
+): { chat_id?: number; user_id?: number; disable_link_preview?: boolean } {
+  const params: { chat_id?: number; user_id?: number; disable_link_preview?: boolean } = { ...target };
+  if (opts.disableLinkPreview) {
+    params.disable_link_preview = true;
+  }
+  return params;
+}
+
+/**
+ * Send a text message to a MAX chat or user.
+ */
 export async function sendMaxMessage(
   to: string,
   text: string,
@@ -128,24 +232,9 @@ export async function sendMaxMessage(
   const token = resolveToken(opts);
   const api = new MaxApi({ token });
 
-  const chatId = normalizeTargetId(to);
-
-  // Build message body
+  const target = await resolveMaxTarget(api, to);
   const body = buildMaxTextBody(text, opts);
-
-  // Determine params
-  const params: { chat_id?: number; user_id?: number; disable_link_preview?: boolean } = {};
-
-  // Could be either chat_id or user_id. For DMs, prefer chat_id if negative or large.
-  // MAX uses positive IDs for both users and chats.
-  // Convention: if we have a chat_id from an inbound message, use chat_id.
-  params.chat_id = chatId;
-
-  if (opts.disableLinkPreview) {
-    params.disable_link_preview = true;
-  }
-
-  const result = await api.sendMessage(body, params);
+  const result = await api.sendMessage(body, buildSendParams(target, opts));
 
   return {
     messageId: result.message?.body?.mid ?? "",
@@ -160,12 +249,15 @@ export async function sendMaxMessage(
 export async function answerMaxCallback(
   callbackId: string,
   text: string,
-  opts: MaxSendOptions = {},
+  opts: MaxSendOptions & { notification?: string } = {},
 ): Promise<void> {
   const token = resolveToken(opts);
   const api = new MaxApi({ token });
   const body = buildMaxTextBody(text, opts);
-  await api.answerCallback(callbackId, { message: body });
+  await api.answerCallback(callbackId, {
+    ...(text || opts.buttons?.length ? { message: body } : {}),
+    ...(opts.notification ? { notification: opts.notification } : {}),
+  });
 }
 
 /**
@@ -180,7 +272,7 @@ export async function editMaxMessage(
   const api = new MaxApi({ token });
 
   await api.editMessage(messageId, {
-    text,
+    text: formatOutboundText(text, opts.format),
     format: opts.format ?? undefined,
   });
 }
@@ -199,7 +291,57 @@ export async function deleteMaxMessage(
 }
 
 /**
+ * Pin/unpin a message in a MAX chat.
+ */
+export async function pinMaxMessage(
+  to: string,
+  messageId: string,
+  opts: MaxSendOptions & { pinNotify?: boolean } = {},
+): Promise<void> {
+  const token = resolveToken(opts);
+  const api = new MaxApi({ token });
+  const target = await resolveMaxTarget(api, to);
+  if (!("chat_id" in target)) throw new Error("MAX pin requires a chat id target");
+  await api.pinMessage(target.chat_id, messageId, opts.pinNotify);
+}
+
+export async function unpinMaxMessage(
+  to: string,
+  opts: MaxSendOptions = {},
+): Promise<void> {
+  const token = resolveToken(opts);
+  const api = new MaxApi({ token });
+  const target = await resolveMaxTarget(api, to);
+  if (!("chat_id" in target)) throw new Error("MAX unpin requires a chat id target");
+  await api.unpinMessage(target.chat_id);
+}
+
+// Extension → upload type routing. Everything else goes as a generic file.
+const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp"];
+const VIDEO_EXTENSIONS = ["mp4", "mov", "avi", "mkv", "webm"];
+const AUDIO_EXTENSIONS = ["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus"];
+
+export function detectMaxMediaType(mediaPath: string): "image" | "video" | "audio" | "file" {
+  const ext = mediaPath.split(".").pop()?.toLowerCase() ?? "";
+  if (IMAGE_EXTENSIONS.includes(ext)) return "image";
+  if (VIDEO_EXTENSIONS.includes(ext)) return "video";
+  if (AUDIO_EXTENSIONS.includes(ext)) return "audio";
+  return "file";
+}
+
+function isAttachmentNotReady(err: unknown): boolean {
+  if (!(err instanceof MaxApiError)) return false;
+  if (err.code === "attachment.not.ready") return true;
+  const message = typeof (err.body as { message?: unknown })?.message === "string"
+    ? String((err.body as { message?: unknown }).message)
+    : "";
+  return /not\s*\.?\s*ready|not processed/i.test(message);
+}
+
+/**
  * Send a media message to MAX (with upload).
+ * MAX processes video/file uploads asynchronously — sendMessage may answer
+ * attachment.not.ready for a few seconds; retry the send (not the upload).
  * @param to Chat ID or user ID
  * @param caption Text caption
  * @param mediaPath Local file path or URL
@@ -214,16 +356,7 @@ export async function sendMaxMediaMessage(
   const token = resolveToken(opts);
   const api = new MaxApi({ token });
 
-  // Detect media type from path
-  const ext = mediaPath.split(".").pop()?.toLowerCase();
-  let mediaType: "image" | "video" | "audio" | "file" = "file";
-  if (["jpg", "jpeg", "png", "gif", "webp"].includes(ext ?? "")) {
-    mediaType = "image";
-  } else if (["mp4", "mov", "avi"].includes(ext ?? "")) {
-    mediaType = "video";
-  } else if (["mp3", "wav", "ogg"].includes(ext ?? "")) {
-    mediaType = "audio";
-  }
+  const mediaType = detectMaxMediaType(mediaPath);
 
   // Upload media
   const uploadResult = await api.uploadMedia(mediaType, mediaPath);
@@ -231,34 +364,18 @@ export async function sendMaxMediaMessage(
   // Build attachment — MAX requires token from upload response
   const attachments: MaxAttachment[] = [
     {
-      type: mediaType === "image" ? "image" : mediaType === "video" ? "video" : mediaType === "audio" ? "audio" : "file",
+      type: mediaType,
       payload: { token: uploadResult.token },
     },
   ];
 
   // Add inline keyboard if present
   if (opts.buttons?.length) {
-    attachments.push({
-      type: "inline_keyboard",
-      payload: {
-        buttons: opts.buttons.map((row) =>
-          row.map((btn) => {
-            if (btn.url) {
-              return { type: "link" as const, text: btn.text, url: btn.url };
-            }
-            return {
-              type: "callback" as const,
-              text: btn.text,
-              payload: btn.payload ?? btn.callback_data ?? btn.text,
-            };
-          }),
-        ),
-      },
-    });
+    attachments.push(buildInlineKeyboard(opts.buttons) as unknown as MaxAttachment);
   }
 
   const body: MaxNewMessageBody = {
-    text: caption || undefined,
+    text: formatOutboundText(caption, opts.format) || undefined,
     format: opts.format ?? undefined,
     notify: opts.notify,
     attachments,
@@ -268,16 +385,16 @@ export async function sendMaxMediaMessage(
     body.link = { type: "reply", mid: opts.replyToMessageId };
   }
 
-  const chatId = normalizeTargetId(to);
-  const params: { chat_id?: number; user_id?: number; disable_link_preview?: boolean } = {
-    chat_id: chatId,
-  };
+  const target = await resolveMaxTarget(api, to);
+  const params = buildSendParams(target, opts);
 
-  if (opts.disableLinkPreview) {
-    params.disable_link_preview = true;
-  }
-
-  const result = await api.sendMessage(body, params);
+  const result = await retryAsync(() => api.sendMessage(body, params), {
+    attempts: 6,
+    minDelayMs: 1_500,
+    maxDelayMs: 4_000,
+    label: "MAX send media (attachment.not.ready)",
+    shouldRetry: (err) => isAttachmentNotReady(err),
+  });
 
   return {
     messageId: result.message?.body?.mid ?? "",
@@ -319,7 +436,6 @@ export async function sendMaxContact(
   };
 
   const body: MaxNewMessageBody = {
-    text: opts.disableLinkPreview ? undefined : undefined, // no separate text for contact
     attachments: [attachment],
     notify: opts.notify,
   };
@@ -328,8 +444,8 @@ export async function sendMaxContact(
     body.link = { type: "reply", mid: opts.replyToMessageId };
   }
 
-  const chatId = normalizeTargetId(to);
-  const result = await api.sendMessage(body, { chat_id: chatId });
+  const target = await resolveMaxTarget(api, to);
+  const result = await api.sendMessage(body, buildSendParams(target, opts));
 
   return {
     messageId: result.message?.body?.mid ?? "",
@@ -356,7 +472,7 @@ export async function sendMaxLocation(
   };
 
   const body: MaxNewMessageBody = {
-    text: text || undefined,
+    text: formatOutboundText(text ?? "", opts.format) || undefined,
     attachments: [attachment],
     format: opts.format ?? undefined,
     notify: opts.notify,
@@ -366,8 +482,8 @@ export async function sendMaxLocation(
     body.link = { type: "reply", mid: opts.replyToMessageId };
   }
 
-  const chatId = normalizeTargetId(to);
-  const result = await api.sendMessage(body, { chat_id: chatId });
+  const target = await resolveMaxTarget(api, to);
+  const result = await api.sendMessage(body, buildSendParams(target, opts));
 
   return {
     messageId: result.message?.body?.mid ?? "",
@@ -401,12 +517,8 @@ export async function sendMaxSticker(
     body.link = { type: "reply", mid: opts.replyToMessageId };
   }
 
-  const chatId = normalizeTargetId(to);
-  const params: { chat_id?: number; disable_link_preview?: boolean } = {
-    chat_id: chatId,
-  };
-
-  const result = await api.sendMessage(body, params);
+  const target = await resolveMaxTarget(api, to);
+  const result = await api.sendMessage(body, buildSendParams(target, opts));
 
   return {
     messageId: result.message?.body?.mid ?? "",

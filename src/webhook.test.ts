@@ -118,6 +118,7 @@ describe("MAX Webhook Handler", () => {
         account: mockAccount,
         config: mockConfig,
         path: "/test-webhook",
+        secret: "reg-secret",
         onUpdate,
       };
 
@@ -128,7 +129,7 @@ describe("MAX Webhook Handler", () => {
       const req = createMockRequest(
         "POST",
         "/test-webhook",
-        {},
+        { "x-max-bot-api-secret": "reg-secret" },
         JSON.stringify({
           update_type: "message_created",
           timestamp: Date.now(),
@@ -152,7 +153,7 @@ describe("MAX Webhook Handler", () => {
       const req2 = createMockRequest(
         "POST",
         "/test-webhook",
-        {},
+        { "x-max-bot-api-secret": "reg-secret" },
         JSON.stringify({ update_type: "bot_started", timestamp: Date.now() }),
       );
       const res2 = createMockResponse();
@@ -172,6 +173,7 @@ describe("MAX Webhook Handler", () => {
         account: mockAccount,
         config: { channels: {} },
         path: "no-leading-slash",
+        secret: "norm-secret",
         onUpdate: vi.fn(),
       };
 
@@ -180,7 +182,7 @@ describe("MAX Webhook Handler", () => {
       const req = createMockRequest(
         "POST",
         "/no-leading-slash",
-        {},
+        { "x-max-bot-api-secret": "norm-secret" },
         JSON.stringify({ update_type: "bot_started", timestamp: Date.now() }),
       );
       const res = createMockResponse();
@@ -282,6 +284,38 @@ describe("MAX Webhook Handler", () => {
       unregister();
     });
 
+    it("should never match a target that has no secret configured", async () => {
+      const mockAccount: ResolvedMaxAccount = {
+        accountId: "default",
+        enabled: true,
+        token: "token",
+        tokenSource: "config",
+        config: {},
+      };
+      const onUpdate = vi.fn();
+      const target: MaxWebhookTarget = {
+        account: mockAccount,
+        config: { channels: {} },
+        path: "/no-secret",
+        onUpdate,
+      };
+      const unregister = registerMaxWebhookTarget(target);
+
+      const req = createMockRequest(
+        "POST",
+        "/no-secret",
+        {},
+        JSON.stringify({ update_type: "bot_started", timestamp: Date.now() }),
+      );
+      const res = createMockResponse();
+      await handleMaxWebhookRequest(req, res);
+
+      expect(res._status).toBe(401);
+      expect(onUpdate).not.toHaveBeenCalled();
+
+      unregister();
+    });
+
     it("should process valid update", async () => {
       const mockAccount: ResolvedMaxAccount = {
         accountId: "default",
@@ -295,6 +329,7 @@ describe("MAX Webhook Handler", () => {
         account: mockAccount,
         config: { channels: {} },
         path: "/hook",
+        secret: "hook-secret",
         onUpdate,
       };
       const unregister = registerMaxWebhookTarget(target);
@@ -312,7 +347,7 @@ describe("MAX Webhook Handler", () => {
       const req = createMockRequest(
         "POST",
         "/hook",
-        { "content-type": "application/json" },
+        { "content-type": "application/json", "x-max-bot-api-secret": "hook-secret" },
         JSON.stringify(update),
       );
       const res = createMockResponse();
@@ -340,6 +375,7 @@ describe("MAX Webhook Handler", () => {
         account: mockAccount,
         config: { channels: {} },
         path: "/error-test",
+        secret: "err-secret",
         onUpdate,
         error: errorLog,
       };
@@ -348,7 +384,7 @@ describe("MAX Webhook Handler", () => {
       const req = createMockRequest(
         "POST",
         "/error-test",
-        {},
+        { "x-max-bot-api-secret": "err-secret" },
         JSON.stringify({ update_type: "bot_started", timestamp: Date.now() }),
       );
       const res = createMockResponse();

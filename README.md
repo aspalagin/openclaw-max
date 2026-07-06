@@ -6,35 +6,53 @@
 
 Плагин позволяет общаться с OpenClaw-ботом через мессенджер MAX — так же, как через Telegram. Поддерживает:
 
-- Приём и отправку текстовых сообщений
-- Вложения (фото, видео, аудио, файлы)
-- Inline-кнопки (callback / link)
-- Форматирование (markdown / HTML)
-- Long polling и Webhook
+- Приём и отправку текстовых сообщений (MAX-диалект markdown: `++подчёркивание++`, упоминания `max://user/id`)
+- Вложения (фото, видео, аудио, файлы, стикеры, контакты, геолокация)
+- Inline-кнопки: callback / link / message / clipboard / open_app / request_contact / request_geo_location
+- Закрепление сообщений (pin/unpin)
+- Long polling (с персистентным marker) и Webhook (с обязательным secret и мгновенным ACK)
+- Реестр чатов из событий bot_added/bot_started (замена deprecated GET /chats)
+- Ретраи на 429/сетевые сбои и `attachment.not.ready`
 - Мультиаккаунт
 - DM-security и pairing
+
+## TLS: сертификат Минцифры (важно!)
+
+С июля 2026 MAX Bot API живёт на `platform-api2.max.ru` с сертификатом, выпущенным
+Russian Trusted Sub CA (Минцифры), которого нет в стандартном доверенном наборе Node.js.
+Плагин решает это сам: все запросы к API идут через выделенный undici-dispatcher,
+в CA-набор которого добавлены Russian Trusted Root/Sub CA (встроены в пакет,
+`src/russian-trusted-ca.ts`). Доверие ограничено только соединениями плагина —
+процесс-wide trust store не трогается, `NODE_EXTRA_CA_CERTS` не требуется.
 
 ## Структура проекта
 
 ```
 openclaw-max/
-├── index.ts                # Точка входа плагина
-├── openclaw.plugin.json    # Манифест плагина
+├── index.ts                    # Точка входа плагина
+├── openclaw.plugin.json        # Манифест плагина
 ├── package.json
 ├── tsconfig.json
 ├── README.md
 ├── src/
-│   ├── types.ts            # TypeScript-типы MAX Bot API
-│   ├── polling.ts          # Long polling (приём обновлений)
-│   ├── api.ts              # HTTP-клиент MAX API (send/edit/delete/upload)
-│   ├── sender.ts           # Высокоуровневые send-хелперы
-│   ├── channel.ts          # OpenClaw channel adapter
-│   ├── config.ts           # Резолвинг аккаунтов из конфига
-│   ├── media.ts            # Скачивание входящих вложений
-│   └── buttons.ts          # Inline-кнопки и callback-ответы
+│   ├── types.ts                # TypeScript-типы MAX Bot API
+│   ├── api.ts                  # HTTP-клиент MAX API (retry, TLS, upload)
+│   ├── russian-trusted-ca.ts   # Встроенные сертификаты Минцифры
+│   ├── send.ts                 # Send-хелперы (текст, медиа, кнопки, pin)
+│   ├── format.ts               # Конвертация markdown в MAX-диалект
+│   ├── monitor.ts              # Long polling / диспетчеризация update'ов
+│   ├── webhook.ts              # Webhook-приёмник (secret, быстрый ACK)
+│   ├── state.ts                # Персист: marker поллинга + реестр чатов
+│   ├── channel.ts              # OpenClaw channel adapter
+│   ├── accounts.ts             # Резолвинг аккаунтов из конфига
+│   ├── actions.ts              # message-tool actions (send/edit/delete/pin/…)
+│   ├── config-schema.ts        # Zod-схема конфига
+│   ├── model-buttons.ts        # Кнопки выбора модели
+│   ├── onboarding.ts           # Setup wizard
+│   └── sticker-cache.ts        # Кэш кодов стикеров
 └── scripts/
-    ├── test-api.mjs        # Проверка токена и API
-    └── test-send.mjs       # Тест send + edit + delete
+    ├── test-api.mjs            # Проверка токена и API
+    └── test-send.mjs           # Тест send + edit + delete
 ```
 
 ## Установка
@@ -92,11 +110,19 @@ openclaw gateway restart
 
 | Поле | Тип | Обязательно | Описание |
 |------|-----|-------------|----------|
-| `botToken` | string | да | API-токен бота |
+| `botToken` | string | да | API-токен бота (или env `MAX_BOT_TOKEN`) |
 | `allowFrom` | string[] | да* | Список разрешённых user_id |
-| `dmSecurity` | string | нет | Политика: allowlist / open / pairing |
+| `dmPolicy` | string | нет | Политика DM: pairing (по умолчанию) / allowlist / open / disabled |
+| `groupPolicy` | string | нет | Политика групп: allowlist (по умолчанию) / open / disabled |
+| `groups` | object | нет | Пер-групповые настройки (requireMention, tools, …) |
+| `webhookUrl` | string | нет | Включает webhook-режим вместо long polling |
+| `webhookSecret` | string | нет | Секрет вебхука (автогенерируется, если не задан) |
+| `streamMode` | string | нет | off (по умолчанию) / partial / block |
+| `mediaMaxMb` | number | нет | Лимит скачивания медиа, МБ (по умолчанию 20) |
+| `markSeen` | boolean | нет | Слать mark_seen на входящие (по умолчанию true) |
+| `commands` | array | нет | Команды бота `[{name, description}]` — регистрируются через PATCH /me (до 32) |
 
-\* Обязательно при `dmSecurity: "allowlist"` (по умолчанию).
+\* Обязательно при `dmPolicy: "allowlist"`.
 
 ## Использование
 
@@ -213,18 +239,30 @@ setTimeout(stop, 60_000);
 
 ## MAX Bot API — краткая справка
 
+Базовый URL: `https://platform-api2.max.ru` (старый `platform-api.max.ru` отключается 19.07.2026).
+
 | Метод | Endpoint | Описание |
 |-------|----------|----------|
-| GET /me | Информация о боте | user_id, name, username |
+| GET /me | Информация о боте | user_id, name, username, commands |
+| PATCH /me | Обновить бота | name, description, commands (регистрация команд) |
 | GET /updates | Long polling | marker, timeout, types |
 | POST /messages | Отправить | ?chat_id или ?user_id |
 | PUT /messages | Редактировать | ?message_id (до 24ч) |
 | DELETE /messages | Удалить | ?message_id (до 24ч) |
 | POST /answers | Ответ на callback | ?callback_id |
+| GET /chats/{id}/members/me | Членство бота | is_admin (нужно для получения событий групп) |
+| PUT/DELETE /chats/{id}/pin | Закрепить/открепить | message_id |
+| GET /videos/{token} | Playback-ссылки видео | urls может быть null, пока видео обрабатывается |
+| POST /uploads | URL для загрузки медиа | type=image/video/audio/file |
 
 Авторизация: заголовок `Authorization: <token>`
 Лимит: 30 запросов/сек
 Документация: [dev.max.ru/docs-api](https://dev.max.ru/docs-api)
+
+Примечания:
+- `GET /chats` объявлен deprecated (июнь 2026) — плагин собирает чаты в собственный реестр из событий.
+- В группах long polling доставляет события только боту-администратору (проверяется в `openclaw channels status --audit`).
+- Webhook: только HTTPS:443 с доверенным сертификатом; MAX ждёт HTTP 200 не дольше 30с (плагин отвечает мгновенно, обработка асинхронная).
 
 ## Авторы
 

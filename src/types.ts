@@ -204,9 +204,15 @@ export type UpdateType =
   | "message_callback"
   | "message_edited"
   | "message_removed"
+  | "message_chat_created"
   | "bot_added"
   | "bot_removed"
   | "bot_started"
+  | "bot_stopped"
+  | "dialog_cleared"
+  | "dialog_removed"
+  | "dialog_muted"
+  | "dialog_unmuted"
   | "user_added"
   | "user_removed"
   | "chat_title_changed";
@@ -437,11 +443,15 @@ export type MaxUpdateType =
   | "message_callback"
   | "message_edited"
   | "message_removed"
-  | "message_reaction_created"
-  | "message_reaction_updated"
+  | "message_chat_created"
   | "bot_added"
   | "bot_removed"
   | "bot_started"
+  | "bot_stopped"
+  | "dialog_cleared"
+  | "dialog_removed"
+  | "dialog_muted"
+  | "dialog_unmuted"
   | "user_added"
   | "user_removed"
   | "chat_title_changed";
@@ -453,17 +463,27 @@ export interface MaxUpdate {
   callback?: MaxCallback;
   chat_id?: number;
   user?: MaxUser;
+  user_id?: number;
   inviter_id?: number;
+  /** bot_started deeplink payload / message_removed message_id etc. */
+  payload?: string | null;
+  title?: string;
+  is_channel?: boolean;
   user_locale?: string | null;
   [key: string]: unknown;
 }
 
 export interface MaxInlineKeyboardButton {
-  type: "callback" | "link" | "request_contact" | "request_geo_location" | "open_app" | "message";
+  type: "callback" | "link" | "request_contact" | "request_geo_location" | "open_app" | "message" | "clipboard" | "chat";
   text: string;
   payload?: string;
   url?: string;
   intent?: "default" | "positive" | "negative";
+  /** open_app: public name of the bot/mini-app to open */
+  web_app?: string;
+  /** chat button: title for the chat to create */
+  chat_title?: string;
+  chat_description?: string;
 }
 
 export interface MaxInlineKeyboardAttachment {
@@ -491,6 +511,57 @@ export interface MaxNewMessageBody {
 export interface MaxBotCommand {
   name: string;
   description?: string;
+}
+
+/** PATCH /me payload — bot info update (commands are registered this way). */
+export interface MaxBotPatch {
+  name?: string;
+  description?: string;
+  commands?: MaxBotCommand[];
+  photo?: Record<string, unknown>;
+}
+
+/**
+ * Chat actions (POST /chats/{chatId}/actions).
+ * mark_seen disappeared from the current docs but is still accepted; treat as legacy.
+ */
+export type MaxSenderAction =
+  | "typing_on"
+  | "sending_photo"
+  | "sending_video"
+  | "sending_audio"
+  | "sending_file"
+  | "mark_seen";
+
+/** GET /chats/{chatId}/members/me */
+export interface MaxChatMember {
+  user_id: number;
+  first_name?: string;
+  last_name?: string | null;
+  username?: string | null;
+  is_bot?: boolean;
+  is_owner?: boolean;
+  is_admin?: boolean;
+  join_time?: number;
+  permissions?: string[] | null;
+}
+
+/** GET /videos/{videoToken} — playback info; urls may be null while processing. */
+export interface MaxVideoInfo {
+  token?: string;
+  urls?: {
+    mp4_1080?: string;
+    mp4_720?: string;
+    mp4_480?: string;
+    mp4_360?: string;
+    mp4_240?: string;
+    mp4_144?: string;
+    hls?: string;
+  } | null;
+  thumbnail?: string;
+  width?: number;
+  height?: number;
+  duration?: number;
 }
 
 export interface MaxMessage {

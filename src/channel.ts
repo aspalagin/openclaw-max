@@ -37,6 +37,7 @@ import { getMaxRuntime } from "./runtime.js";
 import { maxSetupWizard } from "./onboarding.js";
 import { MaxConfigSchema } from "./config-schema.js";
 import { maxMessageActions } from "./actions.js";
+import { loadMaxAccountState } from "./state.js";
 import {
   buildMaxModelBrowseChannelData,
   buildMaxModelsAddProviderChannelData,
@@ -131,7 +132,7 @@ const maxMeta: ChannelMeta = {
   label: "MAX",
   selectionLabel: "MAX Messenger",
   docsPath: "/channels/max",
-  blurb: "MAX messenger bot via platform-api.max.ru. Supports DMs, groups, inline keyboards.",
+  blurb: "MAX messenger bot via platform-api2.max.ru. Supports DMs, groups, inline keyboards.",
   order: 50,
   aliases: ["max-messenger"],
 };
@@ -195,6 +196,8 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
         `- Sticker emoji map: ${emojiMap}${extendedHint}`,
         '- MAX location: use `message(action="sendAttachment", target="CHAT_ID", type="location", latitude="55.75", longitude="37.62")` to send a native map pin.',
         '- MAX contact: use `message(action="sendAttachment", target="CHAT_ID", type="contact", contactName="Name", vcfPhone="+70001234567")` to send a native contact card.',
+        '- MAX pin: use `message(action="pin", target="CHAT_ID", messageId="MID")` to pin a message; `message(action="unpin", target="CHAT_ID")` to unpin.',
+        '- MAX buttons support types: callback (default), link, message (sends the button text as a user message — great for suggested replies), clipboard (copies payload), open_app, request_contact, request_geo_location. Pass via buttons=[[{"text":"...","type":"message"}]].',
       ];
     },
   },
@@ -344,22 +347,47 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
     listGroups: async ({ cfg, accountId }) => {
       const account = resolveMaxAccount({ cfg, accountId });
       if (!account.token) return [];
+
+      const groups = new Map<string, { kind: "channel" | "group"; id: string; name?: string }>();
+
+      // Primary source: the persisted chat registry built from bot_added /
+      // chat_title_changed / group messages (GET /chats is deprecated since June 2026).
+      try {
+        const state = await loadMaxAccountState(account.accountId);
+        for (const entry of Object.values(state.chats ?? {})) {
+          if (entry.removedAt) continue;
+          if (entry.type !== "chat" && entry.type !== "channel") continue;
+          groups.set(String(entry.chatId), {
+            kind: entry.type === "channel" ? "channel" : "group",
+            id: String(entry.chatId),
+            name: entry.title || undefined,
+          });
+        }
+      } catch {
+        // registry unavailable — fall through to the API
+      }
+
+      // Best-effort fallback while GET /chats still answers
       try {
         const api = new MaxApi({ token: account.token, timeoutMs: 5000 });
         const result = await api.getChats({ count: 100 });
-        return (result.chats ?? [])
-          .filter((chat) => chat.type === "chat" || chat.type === "channel")
-          .map((chat) => {
-            const kind: "channel" | "group" = chat.type === "channel" ? "channel" : "group";
-            return {
-              kind,
-              id: String(chat.chat_id),
-              name: chat.title || undefined,
-            };
+        for (const chat of result.chats ?? []) {
+          if (chat.type !== "chat" && chat.type !== "channel") continue;
+          const id = String(chat.chat_id);
+          const existing = groups.get(id);
+          groups.set(id, {
+            kind: chat.type === "channel" ? "channel" : "group",
+            id,
+            // Registry title wins: it is event-driven (chat_title_changed) and
+            // is the source of truth once GET /chats is fully deprecated.
+            name: existing?.name || chat.title || undefined,
           });
+        }
       } catch {
-        return [];
+        // deprecated endpoint gone — registry is the source of truth
       }
+
+      return [...groups.values()];
     },
   },
 
@@ -619,10 +647,21 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
               error: "Bot is not a member of this chat",
             });
           } else {
+            // Long polling delivers group updates only to admin bots — surface
+            // a missing-admin state, the classic "bot is silent in the group" cause.
+            let adminSuffix = "";
+            try {
+              const membership = await api.getMembership(Number(groupId));
+              if (membership && membership.is_admin !== true) {
+                adminSuffix = " (⚠ bot is not admin — group updates are not delivered via polling)";
+              }
+            } catch {
+              // membership endpoint unavailable — skip the admin hint
+            }
             results.push({
               id: groupId,
               ok: true,
-              title: chat.title ?? undefined,
+              title: `${chat.title ?? ""}${adminSuffix}` || undefined,
             });
           }
         } catch (err) {

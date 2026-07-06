@@ -8,7 +8,7 @@ import { jsonResult } from "openclaw/plugin-sdk/agent-runtime";
 import { readStringParam } from "openclaw/plugin-sdk/param-readers";
 import { listMaxAccountIds, resolveMaxAccount } from "./accounts.js";
 import { getLastStickerCode } from "./sticker-cache.js";
-import { sendMaxMessage, editMaxMessage, deleteMaxMessage, sendMaxMediaMessage, sendMaxSticker, sendMaxContact, sendMaxLocation } from "./send.js";
+import { sendMaxMessage, editMaxMessage, deleteMaxMessage, sendMaxMediaMessage, sendMaxSticker, sendMaxContact, sendMaxLocation, pinMaxMessage, unpinMaxMessage, type MaxSendButton } from "./send.js";
 import { getMaxRuntime } from "./runtime.js";
 
 const providerId = "max";
@@ -54,7 +54,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       return null;
     }
     return {
-      actions: ["send", "edit", "delete", "sticker", "sendAttachment"],
+      actions: ["send", "edit", "delete", "sticker", "sendAttachment", "pin", "unpin"],
       capabilities: ["buttons"] as unknown as readonly ("presentation" | "delivery-pin")[],
     };
   },
@@ -106,14 +106,23 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       const replyTo = readStringParam(params, "replyTo");
       const stickerId = readStringParam(params, "stickerId");
 
-      // Parse inline keyboard buttons: [[{text, callback_data?, url?}]]
-      let buttons: Array<Array<{ text: string; payload?: string; url?: string }>> | undefined;
+      // Parse inline keyboard buttons: [[{text, type?, callback_data?, url?, intent?}]]
+      // type: callback (default) | link | message | clipboard | open_app | request_contact | request_geo_location
+      const validButtonTypes = new Set([
+        "callback", "link", "message", "clipboard", "open_app", "request_contact", "request_geo_location",
+      ]);
+      let buttons: MaxSendButton[][] | undefined;
       if (params.buttons && Array.isArray(params.buttons)) {
         buttons = (params.buttons as Array<Array<Record<string, unknown>>>).map((row) =>
           (Array.isArray(row) ? row : [row]).map((btn) => ({
             text: String(btn.text ?? btn.label ?? ""),
+            type: validButtonTypes.has(String(btn.type)) ? (String(btn.type) as MaxSendButton["type"]) : undefined,
             payload: btn.callback_data ? String(btn.callback_data) : btn.payload ? String(btn.payload) : undefined,
             url: btn.url ? String(btn.url) : undefined,
+            intent: ["default", "positive", "negative"].includes(String(btn.intent))
+              ? (String(btn.intent) as MaxSendButton["intent"])
+              : undefined,
+            webApp: btn.webApp ? String(btn.webApp) : btn.web_app ? String(btn.web_app) : undefined,
           }))
         );
       }
@@ -245,6 +254,23 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
         token: account.token,
       });
       return jsonResult({ ok: true, messageId });
+    }
+
+    if (action === "pin") {
+      const to = stripPrefix(readTargetParam(params))!;
+      const messageId = readStringParam(params, "messageId", { required: true });
+      const notifyParam = params.notify;
+      await pinMaxMessage(to, messageId, {
+        token: account.token,
+        pinNotify: typeof notifyParam === "boolean" ? notifyParam : undefined,
+      });
+      return jsonResult({ ok: true, to, messageId, pinned: true });
+    }
+
+    if (action === "unpin") {
+      const to = stripPrefix(readTargetParam(params))!;
+      await unpinMaxMessage(to, { token: account.token });
+      return jsonResult({ ok: true, to, pinned: false });
     }
 
     if (action === "sticker") {

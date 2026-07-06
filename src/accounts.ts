@@ -20,6 +20,8 @@ export interface MaxAccountConfig {
   webhookPath?: string;
   mediaMaxMb?: number;
   streamMode?: "off" | "partial" | "block";
+  /** Send mark_seen read receipts on inbound messages (default true) */
+  markSeen?: boolean;
 }
 
 export interface ResolvedMaxAccount {
@@ -109,6 +111,7 @@ export function resolveMaxAccount(params: {
       webhookPath: section.webhookPath as string | undefined,
       mediaMaxMb: section.mediaMaxMb as number | undefined,
       streamMode: section.streamMode as MaxAccountConfig["streamMode"],
+      markSeen: section.markSeen as boolean | undefined,
     };
 
     if (accountConfig.botToken?.trim()) {
@@ -135,6 +138,7 @@ export function resolveMaxAccount(params: {
       webhookPath: raw.webhookPath as string | undefined,
       mediaMaxMb: raw.mediaMaxMb as number | undefined,
       streamMode: raw.streamMode as MaxAccountConfig["streamMode"],
+      markSeen: raw.markSeen as boolean | undefined,
     };
 
     if (accountConfig.botToken?.trim()) {

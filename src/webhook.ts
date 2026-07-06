@@ -2,6 +2,7 @@
  * MAX webhook handler — HTTP endpoint for receiving webhook updates
  */
 
+import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import { readJsonBodyWithLimit } from "openclaw/plugin-sdk/infra-runtime";
@@ -9,6 +10,13 @@ import { requestBodyErrorToText } from "openclaw/plugin-sdk/webhook-ingress";
 import type { MaxUpdate } from "./api.js";
 import type { ResolvedMaxAccount } from "./accounts.js";
 import { MaxApi } from "./api.js";
+
+function secretsMatch(expected: string, provided: string): boolean {
+  const a = Buffer.from(expected);
+  const b = Buffer.from(provided);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 export type MaxWebhookTarget = {
   account: ResolvedMaxAccount;
@@ -113,14 +121,14 @@ export async function handleMaxWebhookRequest(
 
   const update = raw as MaxUpdate;
 
-  // Find matching target by secret
+  // Find matching target by secret. Targets without a secret never match:
+  // an unauthenticated webhook would let anyone inject updates (the monitor
+  // auto-generates a secret when none is configured).
   let matchedTarget: MaxWebhookTarget | undefined;
   for (const target of targets) {
-    if (target.secret && target.secret === webhookSecret) {
+    if (target.secret && webhookSecret && secretsMatch(target.secret, webhookSecret)) {
       matchedTarget = target;
       break;
-    } else if (!target.secret) {
-      matchedTarget = target;
     }
   }
 
@@ -163,9 +171,14 @@ export async function subscribeMaxWebhook(params: {
       "message_callback",
       "message_edited",
       "message_removed",
+      "message_chat_created",
       "bot_started",
+      "bot_stopped",
       "bot_added",
       "bot_removed",
+      "dialog_cleared",
+      "dialog_removed",
+      "chat_title_changed",
     ],
     secret,
   });
