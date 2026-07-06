@@ -234,10 +234,10 @@ describe("MaxApi", () => {
   });
 
   describe("setMyCommands", () => {
-    it("should set bot commands", async () => {
+    it("should register commands via PATCH /me (there is no /me/commands endpoint)", async () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ success: true }),
+        json: async () => ({ user_id: 1, first_name: "Bot", is_bot: true }),
       });
 
       const commands = [
@@ -247,13 +247,138 @@ describe("MaxApi", () => {
 
       await api.setMyCommands(commands);
 
-      expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("/me/commands"),
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({ commands }),
-        }),
-      );
+      const [url, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { method: string; body: string }];
+      expect(url).toBe(`${MOCK_BASE_URL}/me`);
+      expect(init.method).toBe("PATCH");
+      expect(JSON.parse(init.body)).toEqual({ commands });
+    });
+
+    it("should normalize commands: strip slash, clamp lengths, cap at 32", async () => {
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ user_id: 1, first_name: "Bot", is_bot: true }),
+      });
+
+      const many = Array.from({ length: 40 }, (_, i) => ({
+        name: `/cmd${i}`,
+        description: "x".repeat(200),
+      }));
+      await api.setMyCommands(many);
+
+      const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { body: string }];
+      const sent = JSON.parse(init.body).commands as Array<{ name: string; description?: string }>;
+      expect(sent).toHaveLength(32);
+      expect(sent[0].name).toBe("cmd0");
+      expect(sent[0].description).toHaveLength(128);
+    });
+  });
+
+  describe("retries", () => {
+    it("should retry once on 429 and succeed", async () => {
+      const retryApi = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, retryAttempts: 2 });
+      const mockUser = { user_id: 1, first_name: "Bot", is_bot: true };
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 429,
+          headers: { get: () => null },
+          json: async () => ({ code: "too.many.requests" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => mockUser,
+        });
+
+      const result = await retryApi.getMe();
+      expect(result).toEqual(mockUser);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("should not retry 4xx client errors", async () => {
+      const retryApi = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, retryAttempts: 3 });
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ code: "invalid.request" }),
+      });
+
+      await expect(retryApi.getMe()).rejects.toThrow(MaxApiError);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("should NOT retry a 502 on a non-idempotent POST (duplicate-send risk)", async () => {
+      const retryApi = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, retryAttempts: 3 });
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 502,
+        headers: { get: () => null },
+        json: async () => ({ code: "bad.gateway" }),
+      });
+
+      await expect(retryApi.sendMessage({ text: "hi" }, { chat_id: 1 })).rejects.toThrow(MaxApiError);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("should retry a 502 on an idempotent GET", async () => {
+      const retryApi = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, retryAttempts: 2 });
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false, status: 502, headers: { get: () => null }, json: async () => ({}) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ user_id: 1, first_name: "Bot", is_bot: true }) });
+
+      await retryApi.getMe();
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("should retry 429 even on a non-idempotent POST (request was rejected)", async () => {
+      const retryApi = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, retryAttempts: 2 });
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false, status: 429, headers: { get: () => null }, json: async () => ({}) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ message: { body: { mid: "m" }, timestamp: 1, recipient: { chat_id: 1 } } }) });
+
+      await retryApi.sendMessage({ text: "hi" }, { chat_id: 1 });
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("getUpdates never retries (polling loop owns retries)", async () => {
+      const retryApi = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, retryAttempts: 3 });
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 502,
+        headers: { get: () => null },
+        json: async () => ({}),
+      });
+
+      await expect(retryApi.getUpdates({ timeout: 30 })).rejects.toThrow(MaxApiError);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("should expose the MAX error code on MaxApiError", async () => {
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: async () => ({ code: "attachment.not.ready", message: "processing" }),
+      });
+
+      const err = await api.getMe().catch((e) => e as MaxApiError);
+      expect(err).toBeInstanceOf(MaxApiError);
+      expect((err as MaxApiError).code).toBe("attachment.not.ready");
+    });
+  });
+
+  describe("base URL", () => {
+    it("should default to platform-api2.max.ru (platform-api dies 2026-07-19)", async () => {
+      const defaultApi = new MaxApi({ token: MOCK_TOKEN });
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ user_id: 1, first_name: "Bot", is_bot: true }),
+      });
+
+      await defaultApi.getMe();
+      const [url] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
+      expect(url.startsWith("https://platform-api2.max.ru/")).toBe(true);
     });
   });
 

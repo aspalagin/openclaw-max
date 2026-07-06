@@ -511,6 +511,60 @@ describe("MAX Group Functionality", () => {
       const result = await plugin.directory!.listGroups({ cfg, accountId: undefined });
       expect(result).toEqual([]);
     });
+
+    it("should return chats from the persisted registry when GET /chats is gone", async () => {
+      const { saveMaxAccountState } = await import("./state.js");
+      await saveMaxAccountState("reg-acct", {
+        chats: {
+          "100": { chatId: 100, type: "chat", title: "Реестр-группа", addedAt: 1 },
+          "200": { chatId: 200, type: "channel", title: "Реестр-канал", addedAt: 2 },
+          "300": { chatId: 300, type: "dialog", addedAt: 3 },
+          "400": { chatId: 400, type: "chat", title: "Ушли", addedAt: 4, removedAt: 5 },
+        },
+      });
+      // GET /chats is gone (deprecated) — registry is the only source
+      global.fetch = vi.fn().mockRejectedValue(new Error("410 Gone"));
+
+      const cfg = makeConfig({
+        botToken: "test-token",
+        accounts: { "reg-acct": { botToken: "test-token", enabled: true } },
+      });
+      const result = await plugin.directory!.listGroups({ cfg, accountId: "reg-acct" });
+
+      // Only live chat/channel entries; dialog and removed chat excluded
+      expect(result).toHaveLength(2);
+      expect(result).toContainEqual({ kind: "group", id: "100", name: "Реестр-группа" });
+      expect(result).toContainEqual({ kind: "channel", id: "200", name: "Реестр-канал" });
+    });
+
+    it("should merge registry with GET /chats (registry title wins) without dupes", async () => {
+      const { saveMaxAccountState } = await import("./state.js");
+      await saveMaxAccountState("merge-acct", {
+        chats: { "100": { chatId: 100, type: "chat", title: "Из реестра", addedAt: 1 } },
+      });
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          chats: [
+            { chat_id: 100, type: "chat", title: "Из API", status: "active" },
+            { chat_id: 500, type: "chat", title: "Только API", status: "active" },
+          ],
+          marker: null,
+        }),
+      });
+
+      const cfg = makeConfig({
+        botToken: "test-token",
+        accounts: { "merge-acct": { botToken: "test-token", enabled: true } },
+      });
+      const result = await plugin.directory!.listGroups({ cfg, accountId: "merge-acct" });
+
+      expect(result).toHaveLength(2);
+      // 100 appears once, registry title preserved
+      expect(result.filter((g: { id: string }) => g.id === "100")).toHaveLength(1);
+      expect(result).toContainEqual({ kind: "group", id: "100", name: "Из реестра" });
+      expect(result).toContainEqual({ kind: "group", id: "500", name: "Только API" });
+    });
   });
 
   describe("Bot mention detection patterns", () => {
@@ -712,15 +766,22 @@ describe("MAX Group Functionality", () => {
     });
 
     it("should audit specific groups via API", async () => {
-      global.fetch = vi.fn().mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          chat_id: 12345,
-          type: "chat",
-          title: "Test Group",
-          status: "active",
-        }),
-      });
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            chat_id: 12345,
+            type: "chat",
+            title: "Test Group",
+            status: "active",
+          }),
+        })
+        // GET /chats/{id}/members/me — admin check
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ user_id: 999, is_bot: true, is_admin: true }),
+        });
 
       const account = {
         accountId: "default",

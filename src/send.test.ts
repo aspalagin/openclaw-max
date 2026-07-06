@@ -10,7 +10,10 @@ import {
   deleteMaxMessage,
   sendMaxMediaMessage,
   sendMaxSticker,
+  detectMaxMediaType,
+  resolveMaxTarget,
 } from "./send.js";
+import { MaxApi } from "./api.js";
 
 const MOCK_TOKEN = "test-token";
 
@@ -355,4 +358,205 @@ describe("MAX Sticker Sending", () => {
       expect(sendMaxSticker.length).toBe(2); // to, stickerCode (opts is optional)
     });
   });
+});
+
+describe("MAX markdown dialect", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("should convert <u>…</u> to ++…++ but leave __bold__/**bold** intact", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ message: { body: { mid: "m1" }, timestamp: 1, recipient: { chat_id: 1 } } }),
+    });
+
+    await sendMaxMessage("123", "<u>подчёркнуто</u>, __жирно__ и **тоже жирно**", {
+      token: MOCK_TOKEN,
+      format: "markdown",
+    });
+
+    const body = JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    // MAX renders __text__/**text** as bold itself — do not touch them
+    expect(body.text).toBe("++подчёркнуто++, __жирно__ и **тоже жирно**");
+  });
+
+  it("should NOT mangle __dunders__ inside code spans, fenced blocks or URLs", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ message: { body: { mid: "m1" }, timestamp: 1, recipient: { chat_id: 1 } } }),
+    });
+
+    const text = "call `<u>x</u>` here, see https://host/<u>y</u>/page and:\n```py\ndef f(): pass  # <u>z</u>\n```";
+    await sendMaxMessage("123", text, { token: MOCK_TOKEN, format: "markdown" });
+
+    const body = JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    // <u> inside code spans / fenced blocks / URLs must survive verbatim
+    expect(body.text).toContain("`<u>x</u>`");
+    expect(body.text).toContain("https://host/<u>y</u>/page");
+    expect(body.text).toContain("# <u>z</u>");
+    expect(body.text).not.toContain("++");
+  });
+
+  it("should leave text untouched without format", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ message: { body: { mid: "m1" }, timestamp: 1, recipient: { chat_id: 1 } } }),
+    });
+
+    await sendMaxMessage("123", "<u>raw</u>", { token: MOCK_TOKEN });
+
+    const body = JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    expect(body.text).toBe("<u>raw</u>");
+  });
+});
+
+describe("MAX button types", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("should build message/clipboard/open_app/request buttons", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ message: { body: { mid: "m1" }, timestamp: 1, recipient: { chat_id: 1 } } }),
+    });
+
+    await sendMaxMessage("123", "pick", {
+      token: MOCK_TOKEN,
+      buttons: [[
+        { text: "Подробнее", type: "message" },
+        { text: "Скопировать", type: "clipboard", payload: "CODE-42" },
+        { text: "Мини-апп", type: "open_app", webApp: "someapp" },
+        { text: "Контакт", type: "request_contact" },
+        { text: "Гео", type: "request_geo_location" },
+      ]],
+    });
+
+    const body = JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    const row = body.attachments[0].payload.buttons[0];
+    expect(row).toEqual([
+      { type: "message", text: "Подробнее" },
+      { type: "clipboard", text: "Скопировать", payload: "CODE-42" },
+      { type: "open_app", text: "Мини-апп", web_app: "someapp" },
+      { type: "request_contact", text: "Контакт" },
+      { type: "request_geo_location", text: "Гео" },
+    ]);
+  });
+
+  it("should pass intent on callback buttons", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ message: { body: { mid: "m1" }, timestamp: 1, recipient: { chat_id: 1 } } }),
+    });
+
+    await sendMaxMessage("123", "sure?", {
+      token: MOCK_TOKEN,
+      buttons: [[{ text: "Удалить", payload: "del", intent: "negative" }]],
+    });
+
+    const body = JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    expect(body.attachments[0].payload.buttons[0][0]).toEqual({
+      type: "callback",
+      text: "Удалить",
+      payload: "del",
+      intent: "negative",
+    });
+  });
+});
+
+describe("detectMaxMediaType", () => {
+  it("should route modern formats to the right upload type", () => {
+    expect(detectMaxMediaType("photo.heic")).toBe("image");
+    expect(detectMaxMediaType("scan.tiff")).toBe("image");
+    expect(detectMaxMediaType("clip.webm")).toBe("video");
+    expect(detectMaxMediaType("movie.mkv")).toBe("video");
+    expect(detectMaxMediaType("voice.m4a")).toBe("audio");
+    expect(detectMaxMediaType("song.flac")).toBe("audio");
+    expect(detectMaxMediaType("doc.pdf")).toBe("file");
+    expect(detectMaxMediaType("noext")).toBe("file");
+  });
+});
+
+describe("resolveMaxTarget", () => {
+  it("should resolve numeric and user: targets without API calls", async () => {
+    const api = new MaxApi({ token: MOCK_TOKEN });
+    expect(await resolveMaxTarget(api, "12345")).toEqual({ chat_id: 12345 });
+    expect(await resolveMaxTarget(api, "max:12345")).toEqual({ chat_id: 12345 });
+    expect(await resolveMaxTarget(api, "user:777")).toEqual({ user_id: 777 });
+    expect(await resolveMaxTarget(api, "max:user:777")).toEqual({ user_id: 777 });
+  });
+
+  it("should resolve @username via GET /chats/{chatLink}", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ chat_id: 4242, type: "chat", status: "active" }),
+    });
+
+    const api = new MaxApi({ token: MOCK_TOKEN });
+    expect(await resolveMaxTarget(api, "@mygroup")).toEqual({ chat_id: 4242 });
+    const [url] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
+    expect(url).toContain("/chats/mygroup");
+  });
+
+  it("should reject garbage targets", async () => {
+    const api = new MaxApi({ token: MOCK_TOKEN });
+    await expect(resolveMaxTarget(api, "not-a-target")).rejects.toThrow("Invalid MAX target");
+  });
+
+  it("should send to user_id when target is user:<id>", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ message: { body: { mid: "m1" }, timestamp: 1, recipient: { user_id: 777 } } }),
+    });
+
+    await sendMaxMessage("user:777", "hi", { token: MOCK_TOKEN });
+
+    const [url] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
+    expect(url).toContain("user_id=777");
+    expect(url).not.toContain("chat_id");
+  });
+});
+
+describe("attachment.not.ready retry", () => {
+  it("should retry the send (not the upload) until MAX finishes processing", async () => {
+    const os = await import("node:os");
+    // node:fs (sync) — "fs/promises" is module-mocked by an earlier test in this file
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const tmpFile = path.join(os.tmpdir(), `max-test-video-${Date.now()}.mp4`);
+    fs.writeFileSync(tmpFile, Buffer.from("fake-video"));
+
+    try {
+      global.fetch = vi
+        .fn()
+        // POST /uploads
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ url: "https://upload.max.example/u", token: "tok-1" }),
+        })
+        // upload host POST
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ token: "tok-1" }),
+        })
+        // first send → attachment.not.ready
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 400,
+          json: async () => ({ code: "attachment.not.ready", message: "attachment is not processed yet" }),
+        })
+        // retry send → ok
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ message: { body: { mid: "m-ok" }, timestamp: 1, recipient: { chat_id: 1 } } }),
+        });
+
+      const result = await sendMaxMediaMessage("123", "видео", tmpFile, { token: MOCK_TOKEN });
+      expect(result.messageId).toBe("m-ok");
+      expect(global.fetch).toHaveBeenCalledTimes(4);
+    } finally {
+      try { fs.unlinkSync(tmpFile); } catch { /* already gone */ }
+    }
+  }, 20_000);
 });

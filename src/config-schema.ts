@@ -84,6 +84,7 @@ export const MaxAccountSchemaBase = z
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
     responsePrefix: z.string().optional(),
     mediaMaxMb: z.number().positive().optional(),
+    markSeen: z.boolean().optional(),
     actions: z
       .record(
         z.string(),
@@ -106,11 +107,20 @@ export const MaxAccountSchema = MaxAccountSchemaBase.superRefine((value, ctx) =>
   });
 });
 
+/** Bot command registered via PATCH /me (name ≤64 chars without slash, description ≤128) */
+const MaxBotCommandSchema = z
+  .object({
+    name: z.string().min(1).max(64),
+    description: z.string().max(128).optional(),
+  })
+  .strict();
+
 /**
  * Top-level MAX config schema (supports accounts.* sub-configs)
  */
 export const MaxConfigSchema = MaxAccountSchemaBase.extend({
   accounts: z.record(z.string(), MaxAccountSchema.optional()).optional(),
+  commands: z.array(MaxBotCommandSchema).max(32).optional(),
 }).superRefine((value, ctx) => {
   requireOpenAllowFrom({
     policy: value.dmPolicy,

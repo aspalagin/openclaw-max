@@ -1,6 +1,6 @@
 {
   "name": "openclaw-max",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "MAX messenger channel plugin for OpenClaw",
   "type": "module",
   "main": "./dist/index.js",
@@ -67,6 +67,7 @@
     }
   },
   "dependencies": {
+    "undici": "^8.7.0",
     "zod": "^4.4.3"
   }
 }

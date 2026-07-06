@@ -1,8 +1,8 @@
 {
   "id": "openclaw-max",
   "name": "MAX",
-  "description": "MAX messenger channel plugin (max.ru Bot API, long polling)",
-  "version": "0.1.1",
+  "description": "MAX messenger channel plugin (max.ru Bot API via platform-api2.max.ru, long polling or webhook)",
+  "version": "0.6.0",
   "channels": [
     "max"
   ],
@@ -16,148 +16,120 @@
       "schema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          },
-          "botToken": {
-            "type": "string"
-          },
-          "dmPolicy": {
-            "type": "string",
-            "enum": [
-              "pairing",
-              "allowlist",
-              "open",
-              "disabled"
-            ],
-            "default": "pairing"
-          },
-          "allowFrom": {
+        "definitions": {
+          "allowList": {
             "type": "array",
             "items": {
               "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "number"
-                }
+                { "type": "string" },
+                { "type": "number" }
               ]
             }
           },
-          "streaming": {
-            "type": "string",
-            "enum": [
-              "off",
-              "partial",
-              "block"
-            ]
-          },
-          "transport": {
-            "type": "string",
-            "enum": [
-              "polling",
-              "webhook"
-            ]
-          },
-          "webhookUrl": {
-            "type": "string"
-          },
-          "webhookPort": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "accounts": {
+          "groupConfig": {
             "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "properties": {
-                "enabled": {
-                  "type": "boolean"
+            "properties": {
+              "requireMention": { "type": "boolean" },
+              "tools": { "type": "object" },
+              "skills": { "type": "array", "items": { "type": "string" } },
+              "enabled": { "type": "boolean" },
+              "allowFrom": { "$ref": "#/definitions/allowList" },
+              "systemPrompt": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          "accountConfig": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "enabled": { "type": "boolean" },
+              "markdown": { "type": "object" },
+              "botToken": { "type": "string" },
+              "tokenFile": { "type": "string" },
+              "dmPolicy": {
+                "type": "string",
+                "enum": ["pairing", "allowlist", "open", "disabled"],
+                "default": "pairing"
+              },
+              "allowFrom": { "$ref": "#/definitions/allowList" },
+              "groupAllowFrom": { "$ref": "#/definitions/allowList" },
+              "groupPolicy": {
+                "type": "string",
+                "enum": ["allowlist", "open", "disabled"],
+                "default": "allowlist"
+              },
+              "groups": {
+                "type": "object",
+                "additionalProperties": { "$ref": "#/definitions/groupConfig" }
+              },
+              "webhookUrl": { "type": "string" },
+              "webhookSecret": { "type": "string" },
+              "webhookPath": { "type": "string" },
+              "historyLimit": { "type": "integer", "minimum": 0 },
+              "dmHistoryLimit": { "type": "integer", "minimum": 0 },
+              "dms": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "historyLimit": { "type": "integer", "minimum": 0 }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "textChunkLimit": { "type": "integer", "minimum": 1 },
+              "blockStreaming": { "type": "boolean" },
+              "streamMode": {
+                "type": "string",
+                "enum": ["off", "partial", "block"]
+              },
+              "blockStreamingCoalesce": {
+                "type": "object",
+                "properties": {
+                  "minChars": { "type": "integer" },
+                  "maxChars": { "type": "integer" },
+                  "idleMs": { "type": "integer" }
                 },
-                "name": {
-                  "type": "string"
-                },
-                "botToken": {
-                  "type": "string"
-                },
-                "dmPolicy": {
-                  "type": "string",
-                  "enum": [
-                    "pairing",
-                    "allowlist",
-                    "open",
-                    "disabled"
+                "additionalProperties": false
+              },
+              "responsePrefix": { "type": "string" },
+              "mediaMaxMb": { "type": "number", "exclusiveMinimum": 0 },
+              "markSeen": { "type": "boolean" },
+              "actions": {
+                "type": "object",
+                "additionalProperties": {
+                  "anyOf": [
+                    { "type": "boolean" },
+                    { "type": "string", "enum": ["pairing", "allowlist", "open"] }
                   ]
-                },
-                "allowFrom": {
-                  "type": "array",
-                  "items": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "number"
-                      }
-                    ]
-                  }
-                },
-                "streaming": {
-                  "type": "string",
-                  "enum": [
-                    "off",
-                    "partial",
-                    "block"
-                  ]
-                },
-                "transport": {
-                  "type": "string",
-                  "enum": [
-                    "polling",
-                    "webhook"
-                  ]
-                },
-                "webhookUrl": {
-                  "type": "string"
-                },
-                "webhookPort": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "requireMention": {
-                  "type": "boolean"
-                },
-                "groupPolicy": {
-                  "type": "string",
-                  "enum": [
-                    "allowlist",
-                    "open",
-                    "disabled"
-                  ]
-                },
-                "allowGroups": {
-                  "type": "array",
-                  "items": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "number"
-                      }
-                    ]
-                  }
                 }
               }
             }
-          },
-          "defaultAccount": {
-            "type": "string"
           }
         },
-        "additionalProperties": false
+        "allOf": [
+          { "$ref": "#/definitions/accountConfig" }
+        ],
+        "properties": {
+          "accounts": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/definitions/accountConfig" }
+          },
+          "commands": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string", "maxLength": 64 },
+                "description": { "type": "string", "maxLength": 128 }
+              },
+              "required": ["name"],
+              "additionalProperties": false
+            },
+            "maxItems": 32
+          },
+          "defaultAccount": { "type": "string" }
+        }
       },
       "label": "MAX",
       "description": "MAX messenger channel (max.ru Bot API)."
