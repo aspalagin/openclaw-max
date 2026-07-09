@@ -11,6 +11,7 @@
  * Trusted Root/Sub CA. Trust is scoped to this client only, never process-wide.
  */
 
+import { randomBytes } from "node:crypto";
 import * as tls from "node:tls";
 import { retryAsync } from "openclaw/plugin-sdk/retry-runtime";
 import { Agent, fetch as undiciFetch } from "undici";
@@ -124,6 +125,32 @@ function maxFetch(url: string, init: Record<string, unknown>): ReturnType<FetchL
     ...init,
     dispatcher: getMaxDispatcher(),
   } as Parameters<typeof undiciFetch>[1]) as unknown as ReturnType<FetchLike>;
+}
+
+function escapeMultipartHeaderValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/[\r\n]/g, "_");
+}
+
+function buildMultipartFileBody(
+  fieldName: string,
+  fileName: string,
+  mimeType: string,
+  fileBuffer: Buffer,
+): { body: Buffer; contentType: string } {
+  const boundary = `----openclaw-max-${randomBytes(12).toString("hex")}`;
+  const escapedField = escapeMultipartHeaderValue(fieldName);
+  const escapedFile = escapeMultipartHeaderValue(fileName);
+  const preamble = Buffer.from(
+    `--${boundary}\r\n`
+    + `Content-Disposition: form-data; name="${escapedField}"; filename="${escapedFile}"\r\n`
+    + `Content-Type: ${mimeType}\r\n\r\n`,
+  );
+  const closing = Buffer.from(`\r\n--${boundary}--\r\n`);
+
+  return {
+    body: Buffer.concat([preamble, fileBuffer, closing]),
+    contentType: `multipart/form-data; boundary=${boundary}`,
+  };
 }
 
 // ────────────────────── API Client ──────────────────────
@@ -509,14 +536,18 @@ export class MaxApi {
       mimeType = mimeType ?? "application/octet-stream";
     }
 
-    // Step 3: POST file as multipart/form-data to upload URL
-    const blob = new Blob([new Uint8Array(fileBuffer)], { type: mimeType });
-    const formData = new FormData();
-    formData.append("data", blob, fileName);
+    // Step 3: POST file as multipart/form-data to upload URL. MAX upload hosts
+    // reject Node's native FormData in some cases with 412, while curl-style
+    // multipart with a known Content-Length is accepted.
+    const multipart = buildMultipartFileBody("data", fileName, mimeType, fileBuffer);
 
     const uploadRes = await maxFetch(uploadUrl, {
       method: "POST",
-      body: formData,
+      headers: {
+        "Content-Type": multipart.contentType,
+        "Content-Length": String(multipart.body.byteLength),
+      },
+      body: multipart.body,
     });
 
     if (!uploadRes.ok) {
