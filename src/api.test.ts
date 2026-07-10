@@ -2,6 +2,7 @@
  * Tests for MAX Bot API client
  */
 
+import { Buffer } from "node:buffer";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MaxApi, MaxApiError } from "./api.js";
 
@@ -379,6 +380,37 @@ describe("MaxApi", () => {
       await defaultApi.getMe();
       const [url] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
       expect(url.startsWith("https://platform-api2.max.ru/")).toBe(true);
+    });
+  });
+
+  describe("uploadMedia", () => {
+    it("should upload curl-style multipart with explicit content length", async () => {
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ url: "https://upload.max.ru/u", token: "upload-token" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({}),
+        });
+
+      const result = await api.uploadMedia("video", Buffer.from("fake-video"), "video/mp4");
+
+      expect(result.token).toBe("upload-token");
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+
+      const [, uploadInit] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[1] as [
+        string,
+        { headers: Record<string, string>; body: Buffer; method: string },
+      ];
+      expect(uploadInit.method).toBe("POST");
+      expect(uploadInit.headers["Content-Type"]).toMatch(/^multipart\/form-data; boundary=----openclaw-max-/);
+      expect(uploadInit.headers["Content-Length"]).toBe(String(uploadInit.body.byteLength));
+      expect(Buffer.isBuffer(uploadInit.body)).toBe(true);
+      expect(uploadInit.body.toString("utf8")).toContain('Content-Disposition: form-data; name="data"; filename="file"');
+      expect(uploadInit.body.toString("utf8")).toContain("Content-Type: video/mp4");
     });
   });
 
