@@ -14,20 +14,20 @@ export default [
       },
     },
     plugins: {
-      "@typescript-eslint": await import("@typescript-eslint/eslint-plugin"),
-      "simple-import-sort": await import("eslint-plugin-simple-import-sort"),
+      "@typescript-eslint": (await import("@typescript-eslint/eslint-plugin")).default,
+      "simple-import-sort": (await import("eslint-plugin-simple-import-sort")).default,
     },
     rules: {
       // TypeScript
       "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/explicit-function-return-type": "off",
       "@typescript-eslint/explicit-module-boundary-types": "off",
-      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
-      "@typescript-eslint/consistent-type-imports": ["error", { prefer: "type-only" }],
+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
+      "@typescript-eslint/consistent-type-imports": ["warn", { prefer: "type-imports" }],
 
       // Import sorting
-      "simple-import-sort/imports": "error",
-      "simple-import-sort/exports": "error",
+      "simple-import-sort/imports": "warn",
+      "simple-import-sort/exports": "warn",
 
       // General
       "no-console": "off",

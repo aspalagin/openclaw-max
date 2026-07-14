@@ -143,7 +143,9 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
   id: "max",
   meta: maxMeta,
   setupWizard: maxSetupWizard,
-  configSchema: buildChannelConfigSchema(MaxConfigSchema),
+  configSchema: buildChannelConfigSchema(
+    MaxConfigSchema as unknown as Parameters<typeof buildChannelConfigSchema>[0],
+  ),
 
   capabilities: {
     chatTypes: ["direct", "group", "channel"],

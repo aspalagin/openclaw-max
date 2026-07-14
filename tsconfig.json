@@ -11,7 +11,7 @@
     "noImplicitAny": false,
     "resolveJsonModule": true,
     "paths": {
-      "openclaw/*": ["/usr/lib/node_modules/openclaw/dist/*", "/usr/lib/node_modules/openclaw/dist/plugin-sdk/src/*"]
+      "openclaw/*": ["./node_modules/openclaw/dist/*", "./node_modules/openclaw/dist/plugin-sdk/*"]
     }
   },
   "include": ["**/*.ts"],

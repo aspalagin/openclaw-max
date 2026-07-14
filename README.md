@@ -237,6 +237,12 @@ const stop = startPolling("мой_токен", async (update) => {
 setTimeout(stop, 60_000);
 ```
 
+## Поддержка
+
+- Вопросы по использованию и предложения: [GitHub Issues](https://github.com/aspalagin/openclaw-max/issues)
+- Сообщения об уязвимостях: [Security policy](SECURITY.md)
+- Правила участия: [CONTRIBUTING.md](CONTRIBUTING.md)
+
 ## MAX Bot API — краткая справка
 
 Базовый URL: `https://platform-api2.max.ru` (старый `platform-api.max.ru` отключается 19.07.2026).

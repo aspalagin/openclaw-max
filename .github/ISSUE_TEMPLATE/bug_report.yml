@@ -1,0 +1,35 @@
+name: Bug report
+description: Report unexpected behavior in the MAX channel plugin
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: "Do not include bot tokens, private chat data, or other credentials."
+  - type: input
+    id: version
+    attributes:
+      label: Versions
+      description: OpenClaw version, plugin version, and Node.js version
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: A minimal sequence that reproduces the issue
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and safe logs
+    validations:
+      required: true
