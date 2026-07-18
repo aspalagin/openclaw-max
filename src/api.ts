@@ -347,14 +347,6 @@ export class MaxApi {
 
   // ── Chats ──
 
-  /**
-   * @deprecated MAX deprecated GET /chats in June 2026 — collect chat ids from
-   * bot_added/bot_started updates instead. Kept as a best-effort fallback.
-   */
-  async getChats(params?: { count?: number; marker?: number }): Promise<{ chats: MaxChat[]; marker: number | null }> {
-    return this.request("GET", "/chats", params as Record<string, string | number>);
-  }
-
   /** Get chat by numeric id or by public link/username (GET /chats/{chatLink}). */
   async getChat(chatIdOrLink: number | string): Promise<MaxChat> {
     const ref = typeof chatIdOrLink === "string"

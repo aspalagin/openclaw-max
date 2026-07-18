@@ -2,7 +2,7 @@
   "id": "openclaw-max",
   "name": "MAX",
   "description": "MAX messenger channel plugin (max.ru Bot API via platform-api2.max.ru, long polling or webhook)",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "channels": [
     "max"
   ],

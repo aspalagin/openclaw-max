@@ -472,47 +472,7 @@ describe("MAX Group Functionality", () => {
       expect(result).toEqual([]);
     });
 
-    it("should return groups from API", async () => {
-      const mockChats = {
-        chats: [
-          { chat_id: 100, type: "chat", title: "Test Group", status: "active" },
-          { chat_id: 200, type: "channel", title: "Test Channel", status: "active" },
-          { chat_id: 300, type: "dialog", title: null, status: "active" },
-        ],
-        marker: null,
-      };
-
-      global.fetch = vi.fn().mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChats,
-      });
-
-      const cfg = makeConfig({ botToken: "test-token" });
-      const result = await plugin.directory!.listGroups({ cfg, accountId: undefined });
-
-      // Should filter out dialogs
-      expect(result).toHaveLength(2);
-      expect(result[0]).toEqual({
-        kind: "group",
-        id: "100",
-        name: "Test Group",
-      });
-      expect(result[1]).toEqual({
-        kind: "channel",
-        id: "200",
-        name: "Test Channel",
-      });
-    });
-
-    it("should return empty array on API error", async () => {
-      global.fetch = vi.fn().mockRejectedValueOnce(new Error("Network error"));
-
-      const cfg = makeConfig({ botToken: "test-token" });
-      const result = await plugin.directory!.listGroups({ cfg, accountId: undefined });
-      expect(result).toEqual([]);
-    });
-
-    it("should return chats from the persisted registry when GET /chats is gone", async () => {
+    it("должен возвращать чаты из постоянного реестра", async () => {
       const { saveMaxAccountState } = await import("./state.js");
       await saveMaxAccountState("reg-acct", {
         chats: {
@@ -522,49 +482,18 @@ describe("MAX Group Functionality", () => {
           "400": { chatId: 400, type: "chat", title: "Ушли", addedAt: 4, removedAt: 5 },
         },
       });
-      // GET /chats is gone (deprecated) — registry is the only source
-      global.fetch = vi.fn().mockRejectedValue(new Error("410 Gone"));
-
       const cfg = makeConfig({
         botToken: "test-token",
         accounts: { "reg-acct": { botToken: "test-token", enabled: true } },
       });
       const result = await plugin.directory!.listGroups({ cfg, accountId: "reg-acct" });
 
-      // Only live chat/channel entries; dialog and removed chat excluded
+      // Только активные группы и каналы: диалог и удаленная группа исключаются.
       expect(result).toHaveLength(2);
       expect(result).toContainEqual({ kind: "group", id: "100", name: "Реестр-группа" });
       expect(result).toContainEqual({ kind: "channel", id: "200", name: "Реестр-канал" });
     });
 
-    it("should merge registry with GET /chats (registry title wins) without dupes", async () => {
-      const { saveMaxAccountState } = await import("./state.js");
-      await saveMaxAccountState("merge-acct", {
-        chats: { "100": { chatId: 100, type: "chat", title: "Из реестра", addedAt: 1 } },
-      });
-      global.fetch = vi.fn().mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          chats: [
-            { chat_id: 100, type: "chat", title: "Из API", status: "active" },
-            { chat_id: 500, type: "chat", title: "Только API", status: "active" },
-          ],
-          marker: null,
-        }),
-      });
-
-      const cfg = makeConfig({
-        botToken: "test-token",
-        accounts: { "merge-acct": { botToken: "test-token", enabled: true } },
-      });
-      const result = await plugin.directory!.listGroups({ cfg, accountId: "merge-acct" });
-
-      expect(result).toHaveLength(2);
-      // 100 appears once, registry title preserved
-      expect(result.filter((g: { id: string }) => g.id === "100")).toHaveLength(1);
-      expect(result).toContainEqual({ kind: "group", id: "100", name: "Из реестра" });
-      expect(result).toContainEqual({ kind: "group", id: "500", name: "Только API" });
-    });
   });
 
   describe("Bot mention detection patterns", () => {

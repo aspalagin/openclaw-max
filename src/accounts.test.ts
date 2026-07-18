@@ -4,6 +4,9 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   listMaxAccountIds,
   resolveDefaultMaxAccountId,
@@ -122,6 +125,23 @@ describe("MAX Account Resolution", () => {
         process.env.MAX_BOT_TOKEN = original;
       } else {
         delete process.env.MAX_BOT_TOKEN;
+      }
+    });
+
+    it("должен читать токен учетной записи из обычного файла", () => {
+      const dir = mkdtempSync(join(tmpdir(), "openclaw-max-token-"));
+      const tokenFile = join(dir, "token");
+      writeFileSync(tokenFile, "file-token-123\n", { mode: 0o600 });
+
+      try {
+        const cfg = {
+          channels: { max: { enabled: true, tokenFile } },
+        } as OpenClawConfig;
+        const account = resolveMaxAccount({ cfg });
+        expect(account.token).toBe("file-token-123");
+        expect(account.tokenSource).toBe("file");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
       }
     });
 

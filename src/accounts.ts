@@ -4,6 +4,7 @@
 
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "openclaw/plugin-sdk/core";
+import { lstatSync, readFileSync } from "node:fs";
 
 export interface MaxAccountConfig {
   enabled?: boolean;
@@ -38,6 +39,18 @@ export interface ResolvedMaxAccount {
  */
 function getMaxSection(cfg: OpenClawConfig): Record<string, unknown> | undefined {
   return (cfg.channels as Record<string, unknown>)?.max as Record<string, unknown> | undefined;
+}
+
+function readTokenFile(tokenFile?: string): string {
+  const filePath = tokenFile?.trim();
+  if (!filePath) return "";
+  try {
+    const stat = lstatSync(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) return "";
+    return readFileSync(filePath, "utf8").trim();
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -117,7 +130,11 @@ export function resolveMaxAccount(params: {
     if (accountConfig.botToken?.trim()) {
       token = accountConfig.botToken.trim();
       tokenSource = "config";
-    } else if (process.env.MAX_BOT_TOKEN?.trim()) {
+    } else if (accountConfig.tokenFile?.trim()) {
+      token = readTokenFile(accountConfig.tokenFile);
+      tokenSource = token ? "file" : "none";
+    }
+    if (!token && process.env.MAX_BOT_TOKEN?.trim()) {
       token = process.env.MAX_BOT_TOKEN.trim();
       tokenSource = "env";
     }
@@ -127,6 +144,7 @@ export function resolveMaxAccount(params: {
     accountConfig = {
       enabled: raw.enabled !== false,
       botToken: raw.botToken as string | undefined,
+      tokenFile: raw.tokenFile as string | undefined,
       name: raw.name as string | undefined,
       dmPolicy: raw.dmPolicy as string | undefined,
       allowFrom: raw.allowFrom as Array<string | number> | undefined,
@@ -144,6 +162,9 @@ export function resolveMaxAccount(params: {
     if (accountConfig.botToken?.trim()) {
       token = accountConfig.botToken.trim();
       tokenSource = "config";
+    } else if (accountConfig.tokenFile?.trim()) {
+      token = readTokenFile(accountConfig.tokenFile);
+      tokenSource = token ? "file" : "none";
     }
   }
 

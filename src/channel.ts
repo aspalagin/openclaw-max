@@ -352,8 +352,7 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
 
       const groups = new Map<string, { kind: "channel" | "group"; id: string; name?: string }>();
 
-      // Primary source: the persisted chat registry built from bot_added /
-      // chat_title_changed / group messages (GET /chats is deprecated since June 2026).
+      // Реестр чатов пополняется событиями bot_added, chat_title_changed и сообщениями групп.
       try {
         const state = await loadMaxAccountState(account.accountId);
         for (const entry of Object.values(state.chats ?? {})) {
@@ -366,27 +365,7 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
           });
         }
       } catch {
-        // registry unavailable — fall through to the API
-      }
-
-      // Best-effort fallback while GET /chats still answers
-      try {
-        const api = new MaxApi({ token: account.token, timeoutMs: 5000 });
-        const result = await api.getChats({ count: 100 });
-        for (const chat of result.chats ?? []) {
-          if (chat.type !== "chat" && chat.type !== "channel") continue;
-          const id = String(chat.chat_id);
-          const existing = groups.get(id);
-          groups.set(id, {
-            kind: chat.type === "channel" ? "channel" : "group",
-            id,
-            // Registry title wins: it is event-driven (chat_title_changed) and
-            // is the source of truth once GET /chats is fully deprecated.
-            name: existing?.name || chat.title || undefined,
-          });
-        }
-      } catch {
-        // deprecated endpoint gone — registry is the source of truth
+        // При недоступности реестра вернуть пустой список.
       }
 
       return [...groups.values()];

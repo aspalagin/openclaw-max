@@ -471,6 +471,8 @@ describe("detectMaxMediaType", () => {
     expect(detectMaxMediaType("scan.tiff")).toBe("image");
     expect(detectMaxMediaType("clip.webm")).toBe("video");
     expect(detectMaxMediaType("movie.mkv")).toBe("video");
+    expect(detectMaxMediaType("legacy.avi")).toBe("file");
+    expect(detectMaxMediaType("animation.webp")).toBe("file");
     expect(detectMaxMediaType("voice.m4a")).toBe("audio");
     expect(detectMaxMediaType("song.flac")).toBe("audio");
     expect(detectMaxMediaType("doc.pdf")).toBe("file");

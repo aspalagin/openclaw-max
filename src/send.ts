@@ -317,8 +317,8 @@ export async function unpinMaxMessage(
 }
 
 // Extension → upload type routing. Everything else goes as a generic file.
-const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp"];
-const VIDEO_EXTENSIONS = ["mp4", "mov", "avi", "mkv", "webm"];
+const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "heic", "tif", "tiff", "bmp"];
+const VIDEO_EXTENSIONS = ["mp4", "mov", "mkv", "webm"];
 const AUDIO_EXTENSIONS = ["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus"];
 
 export function detectMaxMediaType(mediaPath: string): "image" | "video" | "audio" | "file" {

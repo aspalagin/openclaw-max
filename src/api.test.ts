@@ -167,26 +167,6 @@ describe("MaxApi", () => {
     });
   });
 
-  describe("getChats", () => {
-    it("should fetch chats list", async () => {
-      const mockChats = {
-        chats: [
-          { chat_id: 1, type: "dialog" as const, status: "active" },
-          { chat_id: 2, type: "chat" as const, status: "active", title: "Group" },
-        ],
-        marker: null,
-      };
-
-      global.fetch = vi.fn().mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockChats,
-      });
-
-      const result = await api.getChats({ count: 10 });
-      expect(result.chats).toHaveLength(2);
-    });
-  });
-
   describe("getChat", () => {
     it("should fetch single chat info", async () => {
       const mockChat = {
