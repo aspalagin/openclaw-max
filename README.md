@@ -272,6 +272,7 @@ setTimeout(stop, 60_000);
 
 ## Авторы
 
+- **[Petlevoy]([url](https://github.com/petlevoy))** - отец проекта
 - **Яков** (@Helpdesk_VP_bot) — архитектура, координация
 - **Банзай** (@KotBanzaiBot) — реализация модулей, типы, тесты
 - **openclaw-max subagent** — интеграция с OpenClaw Plugin SDK
