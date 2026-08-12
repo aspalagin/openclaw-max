@@ -22,6 +22,13 @@ TLS-сертификат Минцифры для platform-api2.max.ru встро
 
 ## Установка
 
+
+Рекомендуемый способ через CLI:
+```bash
+openclaw plugins install openclaw-max
+```
+
+Ручная установка:
 ```bash
 cd ~/.openclaw/extensions
 git clone https://github.com/aspalagin/openclaw-max openclaw-max
