@@ -7,8 +7,9 @@
 
 import { randomBytes } from "node:crypto";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
-import type { ChannelLogSink } from "openclaw/plugin-sdk/channel-runtime";
-import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-runtime";
+import type { ChannelAccountSnapshot, ChannelLogSink } from "openclaw/plugin-sdk/channel-contract";
+import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-outbound";
+import { channelReadyPatch, createTransportActivityStatusPatch } from "openclaw/plugin-sdk/gateway-runtime";
 import { MaxApi, type MaxUpdate, type MaxMessage, type MaxUser, type MaxCallback, type MaxUpdateType } from "./api.js";
 import { resolveMaxAccount, type ResolvedMaxAccount } from "./accounts.js";
 import { answerMaxCallback, sendMaxMessage, sendMaxMediaMessage, editMaxMessage, readMaxChannelButtons, readMaxChannelSendOptions } from "./send.js";
@@ -23,6 +24,14 @@ import {
   type MaxWebhookTarget,
 } from "./webhook.js";
 
+/**
+ * Runtime status patches published to the gateway. Activity timestamps are not
+ * enough: the gateway leaves an account in `lifecycle: "starting"` until the
+ * transport reports `connected`, and its health policy can only detect a dead
+ * socket from `lastTransportActivityAt`.
+ */
+export type MaxStatusPatch = Partial<ChannelAccountSnapshot>;
+
 export interface MaxMonitorOptions {
   api: MaxApi;
   account: ResolvedMaxAccount;
@@ -31,7 +40,7 @@ export interface MaxMonitorOptions {
   botUserId?: number;
   botUsername?: string;
   log?: ChannelLogSink;
-  statusSink?: (patch: { lastInboundAt?: number; lastOutboundAt?: number }) => void;
+  statusSink?: (patch: MaxStatusPatch) => void;
   /** Persistent marker + chat registry (created by startMaxPolling when absent) */
   state?: MaxStateStore;
 }
@@ -84,18 +93,30 @@ export async function startMaxPolling(opts: MaxMonitorOptions): Promise<void> {
 }
 
 async function startMaxPollingLoop(opts: MaxMonitorOptions): Promise<void> {
-  const { api, account, abortSignal, log } = opts;
+  const { api, account, abortSignal, log, statusSink } = opts;
   let marker: number | null = opts.state?.marker ?? null;
 
   log?.info(`[${account.accountId}] MAX long-polling started${marker != null ? ` (resuming from marker ${marker})` : ""}`);
 
   while (!abortSignal.aborted) {
     try {
+      // The channel abort signal must reach the request: a 35s long poll that
+      // only the request's own timeout can cancel outlives the gateway's 5s
+      // stop budget and logs "channel stop exceeded 5000ms after abort".
       const resp = await api.getUpdates({
         timeout: 30,
         marker: marker ?? undefined,
         types: MAX_SUBSCRIBED_UPDATE_TYPES,
+        signal: abortSignal,
       });
+
+      // A completed poll is the transport proof the gateway waits for: it moves
+      // the account out of lifecycle "starting", clears a stale lastError, and
+      // refreshes the timestamp the health policy uses to spot a dead socket.
+      statusSink?.(channelReadyPatch({
+        ...createTransportActivityStatusPatch(),
+        mode: "polling",
+      }) as MaxStatusPatch);
 
       // Advance the in-memory marker so the next poll in this process moves on…
       if (resp.marker != null) {
@@ -124,11 +145,17 @@ async function startMaxPollingLoop(opts: MaxMonitorOptions): Promise<void> {
     } catch (err) {
       if (abortSignal.aborted) break;
       log?.error(`[${account.accountId}] Polling error: ${String(err)}`);
+      // Record the error but keep `connected` untouched: this loop owns its
+      // retries, and flipping to disconnected on a transient blip would hand
+      // the health monitor a restart trigger. A genuinely dead transport is
+      // caught by lastTransportActivityAt going stale instead.
+      statusSink?.({ lastError: String(err) } as MaxStatusPatch);
       // Back off on error
       await sleep(3000);
     }
   }
 
+  statusSink?.({ connected: false } as MaxStatusPatch);
   log?.info(`[${account.accountId}] MAX long-polling stopped`);
 }
 
@@ -646,14 +673,19 @@ export async function processIncomingMessage(
   }
 
   // Resolve agent route
+  // chatIdStr stays the delivery address (MAX addresses replies by chat_id).
   const chatIdStr = String(chatId ?? senderId);
+  // DM routing keys off the sender's user_id, not the dialog's chat_id: in MAX
+  // the two differ, and bindings/allowFrom are expressed in user_id terms, so a
+  // chat_id peer never matches. Groups keep chat_id — it is the group's own id.
+  const routePeerId = isGroup ? chatIdStr : String(senderId ?? chatId);
   const route = core.channel.routing.resolveAgentRoute({
     cfg: config,
     channel: "max",
     accountId: account.accountId,
     peer: {
       kind: isGroup ? "group" : "direct",
-      id: chatIdStr,
+      id: routePeerId,
     },
   });
 

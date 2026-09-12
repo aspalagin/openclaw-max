@@ -227,6 +227,7 @@ export class MaxApi {
     params?: Record<string, string | number | boolean | undefined | null>,
     body?: unknown,
     timeoutMs?: number,
+    externalSignal?: AbortSignal,
   ): Promise<T> {
     const url = new URL(path, this.baseUrl);
     if (params) {
@@ -240,6 +241,12 @@ export class MaxApi {
       () => controller.abort(),
       timeoutMs ?? this.timeoutMs,
     );
+    // A caller-supplied signal (the channel stop) must cancel the in-flight
+    // request, not just be polled between requests: a 35s long poll otherwise
+    // keeps running long after the gateway asked the channel to stop.
+    const signal = externalSignal
+      ? AbortSignal.any([controller.signal, externalSignal])
+      : controller.signal;
 
     try {
       const res = await maxFetch(url.toString(), {
@@ -249,7 +256,7 @@ export class MaxApi {
           ...(body ? { "Content-Type": "application/json" } : {}),
         },
         body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
+        signal,
       });
 
       const json = (await res.json().catch(() => null)) as T;
@@ -284,13 +291,14 @@ export class MaxApi {
     body?: unknown,
     timeoutMs?: number,
     retryAttempts?: number,
+    externalSignal?: AbortSignal,
   ): Promise<T> {
     const attempts = retryAttempts ?? this.retryAttempts;
     if (attempts <= 1) {
-      return this.requestOnce<T>(method, path, params, body, timeoutMs);
+      return this.requestOnce<T>(method, path, params, body, timeoutMs, externalSignal);
     }
     const idempotent = IDEMPOTENT_METHODS.has(method);
-    return retryAsync(() => this.requestOnce<T>(method, path, params, body, timeoutMs), {
+    return retryAsync(() => this.requestOnce<T>(method, path, params, body, timeoutMs, externalSignal), {
       attempts,
       minDelayMs: 500,
       maxDelayMs: 5_000,
@@ -396,6 +404,8 @@ export class MaxApi {
     timeout?: number;
     marker?: number | null;
     types?: MaxUpdateType[];
+    /** Channel stop signal — aborts the in-flight long poll immediately. */
+    signal?: AbortSignal;
   }): Promise<MaxUpdatesResponse> {
     const qp: Record<string, string | number> = {};
     if (params?.limit) qp.limit = params.limit;
@@ -405,7 +415,7 @@ export class MaxApi {
 
     // Long polling needs a longer timeout; the polling loop owns retries
     const pollTimeout = ((params?.timeout ?? 30) + 5) * 1000;
-    return this.request("GET", "/updates", qp, undefined, pollTimeout, 0);
+    return this.request("GET", "/updates", qp, undefined, pollTimeout, 0, params?.signal);
   }
 
   // ── Videos ──
