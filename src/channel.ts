@@ -5,10 +5,8 @@
  */
 
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
-import type {
-  ChannelPlugin,
-  ChannelMeta,
-} from "openclaw/plugin-sdk/channel-runtime";
+import type { ChannelPlugin } from "openclaw/plugin-sdk/channel-core";
+import type { ChannelMeta } from "openclaw/plugin-sdk/channel-contract";
 import {
   DEFAULT_ACCOUNT_ID,
   normalizeAccountId,
@@ -550,6 +548,10 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
       configured: snapshot.configured ?? false,
       tokenSource: snapshot.tokenSource ?? "none",
       running: snapshot.running ?? false,
+      // lifecycle/connected must mirror the gateway runtime store: the health cache
+      // compares them with the live runtime and treats a missing value as stale.
+      ...(snapshot.lifecycle !== undefined ? { lifecycle: snapshot.lifecycle } : {}),
+      ...(typeof snapshot.connected === "boolean" ? { connected: snapshot.connected } : {}),
       lastStartAt: snapshot.lastStartAt ?? null,
       lastStopAt: snapshot.lastStopAt ?? null,
       lastError: snapshot.lastError ?? null,
@@ -574,6 +576,8 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
       configured: Boolean(account.token?.trim()),
       tokenSource: account.tokenSource,
       running: runtime?.running ?? false,
+      ...(runtime?.lifecycle !== undefined ? { lifecycle: runtime.lifecycle } : {}),
+      ...(typeof runtime?.connected === "boolean" ? { connected: runtime.connected } : {}),
       lastStartAt: runtime?.lastStartAt ?? null,
       lastStopAt: runtime?.lastStopAt ?? null,
       lastError: runtime?.lastError ?? null,

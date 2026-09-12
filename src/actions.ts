@@ -3,7 +3,7 @@
  */
 
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
-import type { ChannelMessageActionAdapter } from "openclaw/plugin-sdk/channel-runtime";
+import type { ChannelMessageActionAdapter } from "openclaw/plugin-sdk/channel-contract";
 import { jsonResult } from "openclaw/plugin-sdk/agent-runtime";
 import { readStringParam } from "openclaw/plugin-sdk/param-readers";
 import { listMaxAccountIds, resolveMaxAccount } from "./accounts.js";
