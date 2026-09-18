@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import { maxSetupWizard } from "./onboarding.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

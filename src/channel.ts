@@ -31,7 +31,7 @@ import {
 import { MaxApi, type MaxUser } from "./api.js";
 import { readMaxChannelButtons, sendMaxMessage, sendMaxMediaMessage } from "./send.js";
 import { startMaxPolling } from "./monitor.js";
-import { getMaxRuntime } from "./runtime.js";
+import { getMaxRuntime, loadMaxConfig, writeMaxConfig } from "./runtime.js";
 import { maxSetupWizard } from "./onboarding.js";
 import { MaxConfigSchema } from "./config-schema.js";
 import { maxMessageActions } from "./actions.js";
@@ -377,7 +377,7 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
     textChunkLimit: 4000,
 
     sendPayload: async ({ to, text, payload, mediaUrl, accountId, replyToId }) => {
-      const cfg = await getMaxRuntime().config.loadConfig();
+      const cfg = await loadMaxConfig();
       const account = resolveMaxAccount({ cfg, accountId });
       if (!account.token) throw new Error("MAX bot token not configured");
 
@@ -411,7 +411,7 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
     },
 
     sendText: async ({ to, text, accountId, replyToId }) => {
-      const cfg = await getMaxRuntime().config.loadConfig();
+      const cfg = await loadMaxConfig();
       const account = resolveMaxAccount({ cfg, accountId });
       if (!account.token) throw new Error("MAX bot token not configured");
 
@@ -428,7 +428,7 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
     },
 
     sendMedia: async ({ to, text, mediaUrl, accountId, replyToId }) => {
-      const cfg = await getMaxRuntime().config.loadConfig();
+      const cfg = await loadMaxConfig();
       const account = resolveMaxAccount({ cfg, accountId });
       if (!account.token) throw new Error("MAX bot token not configured");
 
@@ -765,7 +765,7 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
         nextCfg.channels = channels;
 
         if (cleared) {
-          await getMaxRuntime().config.writeConfigFile(nextCfg);
+          await writeMaxConfig(nextCfg);
         }
       }
 

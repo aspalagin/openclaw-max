@@ -15,7 +15,7 @@ import {
 } from "./webhook.js";
 import { MaxApi } from "./api.js";
 import type { ResolvedMaxAccount } from "./accounts.js";
-import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 
 function createMockRequest(
   method: string,
