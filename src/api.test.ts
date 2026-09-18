@@ -4,7 +4,7 @@
 
 import { Buffer } from "node:buffer";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { MaxApi, MaxApiError } from "./api.js";
+import { MaxApi, MaxApiError, MaxRequestTimeoutError } from "./api.js";
 
 const MOCK_TOKEN = "test-bot-token";
 const MOCK_BASE_URL = "https://test-api.max.ru";
@@ -456,6 +456,43 @@ describe("MaxApi", () => {
       );
 
       await expect(slowApi.getMe()).rejects.toThrow();
+    });
+
+    it("converts our own deadline into a typed MaxRequestTimeoutError", async () => {
+      const slowApi = new MaxApi({ token: MOCK_TOKEN, timeoutMs: 20 });
+
+      global.fetch = vi.fn((_url, init) =>
+        new Promise((_resolve, reject) => {
+          (init as { signal: AbortSignal }).signal.addEventListener("abort", () => {
+            reject(Object.assign(new Error("This operation was aborted"), { name: "AbortError" }));
+          });
+        }),
+      ) as unknown as typeof fetch;
+
+      await expect(slowApi.getMe()).rejects.toBeInstanceOf(MaxRequestTimeoutError);
+    });
+
+    it("does not auto-retry a POST /messages that hit the client deadline (duplicate-safe)", async () => {
+      const retryApi = new MaxApi({
+        token: MOCK_TOKEN,
+        baseUrl: MOCK_BASE_URL,
+        retryAttempts: 3,
+        timeoutMs: 20,
+      });
+
+      const fetchMock = vi.fn((_url, init) =>
+        new Promise((_resolve, reject) => {
+          (init as { signal: AbortSignal }).signal.addEventListener("abort", () => {
+            reject(Object.assign(new Error("This operation was aborted"), { name: "AbortError" }));
+          });
+        }),
+      );
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      await expect(retryApi.sendMessage({ text: "hi" }, { chat_id: 1 })).rejects.toBeInstanceOf(
+        MaxRequestTimeoutError,
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
 });

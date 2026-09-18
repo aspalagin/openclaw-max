@@ -14,7 +14,7 @@
 import { randomBytes } from "node:crypto";
 import * as tls from "node:tls";
 import { retryAsync } from "openclaw/plugin-sdk/retry-runtime";
-import { Agent, fetch as undiciFetch } from "undici";
+import { Agent, buildConnector, fetch as undiciFetch } from "undici";
 
 import { RUSSIAN_TRUSTED_ROOT_CA, RUSSIAN_TRUSTED_SUB_CA } from "./russian-trusted-ca.js";
 import type {
@@ -81,6 +81,20 @@ export type {
  */
 const BASE_URL = "https://platform-api2.max.ru";
 
+/**
+ * Default per-request deadline. Raised from 10s after an intermittent in-process
+ * stall aborted sends at exactly 10s ("This operation was aborted") while the
+ * same request from a fresh process completed in <300ms. The long poll sets its
+ * own (longer) timeout, so this only bounds one-shot calls like send/edit/get.
+ */
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+/** Round trips slower than this are logged, to fingerprint a stalling path. */
+const MAX_SLOW_REQUEST_MS = 5_000;
+
+/** New connections whose DNS+TCP+TLS exceeds this are logged. */
+const MAX_SLOW_CONNECT_MS = 2_000;
+
 // ────────────────────── HTTP transport ──────────────────────
 
 type FetchLike = (url: string, init?: Record<string, unknown>) => Promise<{
@@ -110,11 +124,28 @@ function getMaxDispatcher(): Agent {
     };
     // getCACertificates("default") includes NODE_EXTRA_CA_CERTS additions when available
     const systemCas = tlsWithCaList.getCACertificates?.("default") ?? tls.rootCertificates;
-    cachedDispatcher = new Agent({
-      connect: {
-        ca: [...systemCas, RUSSIAN_TRUSTED_ROOT_CA, RUSSIAN_TRUSTED_SUB_CA],
-      },
-    });
+    const ca = [...systemCas, RUSSIAN_TRUSTED_ROOT_CA, RUSSIAN_TRUSTED_SUB_CA];
+    // Wrap the TLS connector to time the DNS+TCP+TLS phase, scoped to this
+    // dispatcher only (never process-wide). Diagnosing the intermittent
+    // "This operation was aborted" needs to separate a connect stall from a
+    // response-wait stall; a slow or failed connect leaves a fingerprint here.
+    const connect = buildConnector({ ca });
+    type Connect = typeof connect;
+    const timedConnect: Connect = (options, callback) => {
+      const startedAt = Date.now();
+      connect(options, (...args: Parameters<Parameters<Connect>[1]>) => {
+        const err = args[0];
+        const elapsedMs = Date.now() - startedAt;
+        if (err || elapsedMs > MAX_SLOW_CONNECT_MS) {
+          console.error(
+            `[MAX API] connect ${options.hostname} ${err ? "failed" : "slow"} dns+tcp+tls=${elapsedMs}ms`
+            + (err ? ` (${err.name})` : ""),
+          );
+        }
+        callback(...args);
+      });
+    };
+    cachedDispatcher = new Agent({ connect: timedConnect });
   }
   return cachedDispatcher;
 }
@@ -184,12 +215,32 @@ export class MaxApiError extends Error {
 }
 
 /**
+ * A request that hit the client-side deadline (our AbortController), as opposed
+ * to a caller-supplied stop signal. Carries the stalled phase so the send path
+ * can decide whether one retry on a fresh connection is safe.
+ */
+export class MaxRequestTimeoutError extends Error {
+  constructor(
+    public method: string,
+    public path: string,
+    public elapsedMs: number,
+    public phase: "awaiting-response" | "reading-body",
+  ) {
+    super(`MAX API ${method} ${path} timed out after ${elapsedMs}ms (phase=${phase})`);
+    this.name = "MaxRequestTimeoutError";
+  }
+}
+
+/**
  * Whether an error is safe to retry. `idempotent` gates the ambiguous cases:
  * for non-idempotent calls (POST /messages, POST /answers) a 5xx or network
  * failure may mean the request WAS applied server-side, so retrying would
  * duplicate the message — only a definite 429 (never applied) is retried.
  */
 function isRetryableError(err: unknown, idempotent: boolean): boolean {
+  // A client-side timeout is safe to retry only for idempotent methods here; the
+  // send path handles its own single, duplicate-safe retry for POST /messages.
+  if (err instanceof MaxRequestTimeoutError) return idempotent;
   if (err instanceof MaxApiError) {
     if (err.status === 429) return true; // rate-limited: request was rejected, safe to retry
     // 500 excluded everywhere: the request may have been applied.
@@ -213,7 +264,7 @@ export class MaxApi {
   constructor(opts: MaxApiOptions) {
     this.token = opts.token;
     this.baseUrl = opts.baseUrl ?? BASE_URL;
-    this.timeoutMs = opts.timeoutMs ?? 10_000;
+    this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const envAttempts = Number(process.env.OPENCLAW_MAX_RETRY_ATTEMPTS);
     this.retryAttempts = opts.retryAttempts
       ?? (Number.isFinite(envAttempts) && envAttempts >= 0 ? envAttempts : 3);
@@ -237,10 +288,13 @@ export class MaxApi {
     }
 
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      timeoutMs ?? this.timeoutMs,
-    );
+    let timedOutByUs = false;
+    let gotResponse = false;
+    const startedAt = Date.now();
+    const timeout = setTimeout(() => {
+      timedOutByUs = true;
+      controller.abort();
+    }, timeoutMs ?? this.timeoutMs);
     // A caller-supplied signal (the channel stop) must cancel the in-flight
     // request, not just be polled between requests: a 35s long poll otherwise
     // keeps running long after the gateway asked the channel to stop.
@@ -258,8 +312,15 @@ export class MaxApi {
         body: body ? JSON.stringify(body) : undefined,
         signal,
       });
+      gotResponse = true;
 
       const json = (await res.json().catch(() => null)) as T;
+
+      const elapsedMs = Date.now() - startedAt;
+      if (elapsedMs > MAX_SLOW_REQUEST_MS) {
+        // Reached the server but slowly: points away from a connect hang.
+        console.error(`[MAX API] ${method} ${path} slow: ${elapsedMs}ms (status ${res.status})`);
+      }
 
       if (!res.ok) {
         // Never log the request body: it may carry the webhook secret (POST
@@ -279,6 +340,23 @@ export class MaxApi {
       }
 
       return json;
+    } catch (err) {
+      const elapsedMs = Date.now() - startedAt;
+      const isAbort = err instanceof Error && err.name === "AbortError";
+      if (timedOutByUs && isAbort) {
+        // Our own deadline fired (not the caller's stop signal). Convert the
+        // opaque "This operation was aborted" into a typed, loggable timeout
+        // that records whether a response had started.
+        const phase = gotResponse ? "reading-body" : "awaiting-response";
+        console.error(`[MAX API] ${method} ${path} timed out after ${elapsedMs}ms (phase=${phase})`);
+        throw new MaxRequestTimeoutError(method, path, elapsedMs, phase);
+      }
+      if (!isAbort && !(err instanceof MaxApiError)) {
+        // Network-level failure (DNS/TCP/TLS/reset): record timing so a connect
+        // stall is distinguishable from a response-wait stall in the log.
+        console.error(`[MAX API] ${method} ${path} failed after ${elapsedMs}ms: ${(err as Error).name}`);
+      }
+      throw err;
     } finally {
       clearTimeout(timeout);
     }

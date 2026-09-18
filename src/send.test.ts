@@ -13,7 +13,7 @@ import {
   detectMaxMediaType,
   resolveMaxTarget,
 } from "./send.js";
-import { MaxApi } from "./api.js";
+import { MaxApi, MaxRequestTimeoutError } from "./api.js";
 
 const MOCK_TOKEN = "test-token";
 
@@ -43,6 +43,29 @@ describe("MAX Message Sending", () => {
 
       expect(result.messageId).toBe("msg-123");
       expect(global.fetch).toHaveBeenCalled();
+    });
+
+    it("retries a text send once when the client deadline fires, then succeeds", async () => {
+      const spy = vi
+        .spyOn(MaxApi.prototype, "sendMessage")
+        .mockRejectedValueOnce(new MaxRequestTimeoutError("POST", "/messages", 30_000, "awaiting-response"))
+        .mockResolvedValueOnce({
+          message: { body: { mid: "msg-retry" }, timestamp: Date.now(), recipient: { chat_id: 1 } },
+        } as never);
+
+      const result = await sendMaxMessage("1", "Hello", { token: MOCK_TOKEN });
+
+      expect(result.messageId).toBe("msg-retry");
+      expect(spy).toHaveBeenCalledTimes(2);
+      spy.mockRestore();
+    });
+
+    it("does not retry a text send on a non-timeout error", async () => {
+      const spy = vi.spyOn(MaxApi.prototype, "sendMessage").mockRejectedValue(new Error("boom"));
+
+      await expect(sendMaxMessage("1", "Hello", { token: MOCK_TOKEN })).rejects.toThrow("boom");
+      expect(spy).toHaveBeenCalledTimes(1);
+      spy.mockRestore();
     });
 
     it("should send message with config and accountId", async () => {

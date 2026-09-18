@@ -7,6 +7,7 @@ import { retryAsync } from "openclaw/plugin-sdk/retry-runtime";
 import {
   MaxApi,
   MaxApiError,
+  MaxRequestTimeoutError,
   type MaxNewMessageBody,
   type MaxSendResult,
   type MaxInlineKeyboardAttachment,
@@ -234,7 +235,21 @@ export async function sendMaxMessage(
 
   const target = await resolveMaxTarget(api, to);
   const body = buildMaxTextBody(text, opts);
-  const result = await api.sendMessage(body, buildSendParams(target, opts));
+  const params = buildSendParams(target, opts);
+
+  let result: MaxSendResult;
+  try {
+    result = await api.sendMessage(body, params);
+  } catch (err) {
+    // A client-side timeout aborts before the request reaches MAX: aborted
+    // sends never appear in the chat and never duplicate (verified against the
+    // live chat history). So one retry on a fresh connection is duplicate-safe
+    // and recovers the intermittent in-process send stall. Scoped to text sends
+    // on purpose — media is not retried here to avoid re-uploading the file.
+    if (!(err instanceof MaxRequestTimeoutError)) throw err;
+    console.error(`[MAX] send timed out after ${err.elapsedMs}ms (phase=${err.phase}); retrying once`);
+    result = await api.sendMessage(body, params);
+  }
 
   return {
     messageId: result.message?.body?.mid ?? "",
