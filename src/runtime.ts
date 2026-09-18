@@ -1,4 +1,4 @@
-import type { OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk/core";
+import type { OpenClawConfig, PluginRuntime } from 'openclaw/plugin-sdk/core';
 
 let runtime: PluginRuntime | null = null;
 
@@ -8,7 +8,7 @@ export function setMaxRuntime(next: PluginRuntime) {
 
 export function getMaxRuntime(): PluginRuntime {
   if (!runtime) {
-    throw new Error("MAX runtime not initialized");
+    throw new Error('MAX runtime not initialized');
   }
   return runtime;
 }
@@ -26,29 +26,31 @@ type LegacyMaxRuntimeConfigApi = {
 /** Read the current config snapshot through the plugin runtime, on any supported OpenClaw version. */
 export async function loadMaxConfig(): Promise<OpenClawConfig> {
   const config = getMaxRuntime().config;
-  if (typeof config.current === "function") {
+  if (typeof config.current === 'function') {
     return config.current() as OpenClawConfig;
   }
   const legacy = config as unknown as LegacyMaxRuntimeConfigApi;
-  if (typeof legacy.loadConfig === "function") {
+  if (typeof legacy.loadConfig === 'function') {
     return await legacy.loadConfig();
   }
-  throw new Error("MAX runtime config API unavailable: neither config.current() nor config.loadConfig()");
+  throw new Error(
+    'MAX runtime config API unavailable: neither config.current() nor config.loadConfig()',
+  );
 }
 
 /** Persist a full config replacement through the plugin runtime, on any supported OpenClaw version. */
 export async function writeMaxConfig(nextConfig: OpenClawConfig): Promise<void> {
   const config = getMaxRuntime().config;
-  if (typeof config.replaceConfigFile === "function") {
-    await config.replaceConfigFile({ nextConfig, afterWrite: { mode: "auto" } });
+  if (typeof config.replaceConfigFile === 'function') {
+    await config.replaceConfigFile({ nextConfig, afterWrite: { mode: 'auto' } });
     return;
   }
   const legacy = config as unknown as LegacyMaxRuntimeConfigApi;
-  if (typeof legacy.writeConfigFile === "function") {
+  if (typeof legacy.writeConfigFile === 'function') {
     await legacy.writeConfigFile(nextConfig);
     return;
   }
   throw new Error(
-    "MAX runtime config API unavailable: neither config.replaceConfigFile() nor config.writeConfigFile()",
+    'MAX runtime config API unavailable: neither config.replaceConfigFile() nor config.writeConfigFile()',
   );
 }
