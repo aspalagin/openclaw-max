@@ -317,8 +317,10 @@ export class MaxApi {
       const json = (await res.json().catch(() => null)) as T;
 
       const elapsedMs = Date.now() - startedAt;
-      if (elapsedMs > MAX_SLOW_REQUEST_MS) {
-        // Reached the server but slowly: points away from a connect hang.
+      // The long poll blocks server-side for its `timeout` seconds by design, so
+      // it is excluded here; every other call reaching the server slowly is a
+      // fingerprint that points away from a connect hang.
+      if (elapsedMs > MAX_SLOW_REQUEST_MS && path !== "/updates") {
         console.error(`[MAX API] ${method} ${path} slow: ${elapsedMs}ms (status ${res.status})`);
       }
 
