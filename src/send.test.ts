@@ -10,6 +10,7 @@ import {
   deleteMaxMessage,
   sendMaxMediaMessage,
   sendMaxSticker,
+  sendMaxContact,
   detectMaxMediaType,
   resolveMaxTarget,
 } from "./send.js";
@@ -485,6 +486,42 @@ describe("MAX button types", () => {
       payload: "del",
       intent: "negative",
     });
+  });
+});
+
+describe("sendMaxContact payload", () => {
+  const sentAttachment = () => {
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { body: string }];
+    return JSON.parse(init.body).attachments[0];
+  };
+
+  beforeEach(() => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ message: { body: { mid: "mid.c" }, timestamp: 1, recipient: { chat_id: 1 } } }),
+    });
+  });
+
+  it("sends a MAX user as snake_case contact_id + vcf_phone with name", async () => {
+    await sendMaxContact("1", { name: "Ann", contactId: 42, vcfPhone: "+79990000000" }, { token: MOCK_TOKEN });
+    expect(sentAttachment()).toEqual({
+      type: "contact",
+      payload: { name: "Ann", contact_id: 42, vcf_phone: "+79990000000" },
+    });
+  });
+
+  it("passes an explicit VCard as vcf_info", async () => {
+    const vcf = "BEGIN:VCARD\nVERSION:3.0\nFN:Ann\nEND:VCARD";
+    await sendMaxContact("1", { name: "Ann", vcfInfo: vcf }, { token: MOCK_TOKEN });
+    expect(sentAttachment().payload).toEqual({ name: "Ann", vcf_info: vcf });
+  });
+
+  it("builds vcf_info from name and phone when there is no contact id", async () => {
+    await sendMaxContact("1", { name: "Ann", vcfPhone: "+7999" }, { token: MOCK_TOKEN });
+    const payload = sentAttachment().payload;
+    expect(payload).toEqual({ name: "Ann", vcf_info: "BEGIN:VCARD\nVERSION:3.0\nFN:Ann\nTEL:+7999\nEND:VCARD" });
+    expect(payload).not.toHaveProperty("contactId");
+    expect(payload).not.toHaveProperty("vcfInfo");
   });
 });
 
