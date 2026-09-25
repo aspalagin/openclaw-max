@@ -26,6 +26,7 @@ All notable changes to this project are documented in this file.
 ### Added
 
 - `capabilities.unsend` и `capabilities.reply` (`DELETE /messages` и ответы через `link.type=reply` уже поддерживались, но не объявлялись).
+- Webhook-ingress на HTTP-сервере gateway: роут регистрируется из жизненного цикла аккаунта через `registerPluginHttpRoute` (`plugin-sdk/webhook-ingress`: `auth: "plugin"`, `match: "exact"`, `pluginId`/`source`, `replaceExisting`, `throwOnFailure`) и обслуживается `handleMaxWebhookRequest`. Путь — `webhookPath`, иначе pathname `webhookUrl`, иначе `/max/webhook` (раньше `/max`). Секрет `X-Max-Bot-Api-Secret` сверяется timing-safe до чтения тела (401), тело без `update_type` — 400, валидное обновление получает 200 сразу, обработка идёт асинхронно с логированием ошибок (раньше ответ ждал `onUpdate` и при ошибке отдавал 500, провоцируя повторы MAX). Повторные доставки отсекаются LRU на 1000 ключей `(update_type, timestamp, mid|callback_id)`. Тесты: регистрация роута с mock, 200/400/401/405, дедупликация, сквозной прогон через настоящий `node:http` и `fetch`.
 
 ## 0.6.1 - 2026-07-18
 

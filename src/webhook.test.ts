@@ -7,6 +7,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import {
   handleMaxWebhookRequest,
+  maxUpdateDedupeKey,
+  registerMaxWebhookRoute,
   registerMaxWebhookTarget,
   resolveMaxWebhookPath,
   subscribeMaxWebhook,
@@ -16,6 +18,9 @@ import {
 import { MaxApi } from "./api.js";
 import type { ResolvedMaxAccount } from "./accounts.js";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
+
+// Other tests replace global.fetch with mocks; the HTTP round trip needs the real one.
+const realFetch = globalThis.fetch;
 
 function createMockRequest(
   method: string,
@@ -93,9 +98,9 @@ describe("MAX Webhook Handler", () => {
       expect(path).toBe("/api/max");
     });
 
-    it("should default to /max", () => {
+    it("should default to /max/webhook", () => {
       const path = resolveMaxWebhookPath(undefined, undefined);
-      expect(path).toBe("/max");
+      expect(path).toBe("/max/webhook");
     });
 
     it("should handle root path", () => {
@@ -392,7 +397,7 @@ describe("MAX Webhook Handler", () => {
       unregister();
     });
 
-    it("should handle onUpdate errors", async () => {
+    it("should ack 200 and log onUpdate errors asynchronously", async () => {
       const mockAccount: ResolvedMaxAccount = {
         accountId: "default",
         enabled: true,
@@ -422,10 +427,202 @@ describe("MAX Webhook Handler", () => {
 
       await handleMaxWebhookRequest(req, res);
 
-      expect(res._status).toBe(500);
-      expect(errorLog).toHaveBeenCalled();
+      // MAX only needs the 200; a processing failure must not trigger redelivery.
+      expect(res._status).toBe(200);
+      await vi.waitFor(() => expect(errorLog).toHaveBeenCalled());
+      expect(String(errorLog.mock.calls[0][0])).toContain("Processing failed");
 
       unregister();
+    });
+
+    it("should answer 200 before a slow update finishes", async () => {
+      let release!: () => void;
+      const onUpdate = vi.fn(() => new Promise<void>((resolve) => { release = resolve; }));
+      const unregister = registerMaxWebhookTarget({
+        account: { accountId: "default", enabled: true, token: "t", tokenSource: "config", config: {} },
+        config: { channels: {} },
+        path: "/slow",
+        secret: "slow-secret",
+        onUpdate,
+      });
+
+      const res = createMockResponse();
+      await handleMaxWebhookRequest(
+        createMockRequest("POST", "/slow", { "x-max-bot-api-secret": "slow-secret" },
+          JSON.stringify({ update_type: "bot_started", timestamp: 1 })),
+        res,
+      );
+      expect(res._status).toBe(200);
+      await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
+      release();
+      unregister();
+    });
+
+    it("should reject a body without update_type with 400", async () => {
+      const onUpdate = vi.fn();
+      const unregister = registerMaxWebhookTarget({
+        account: { accountId: "default", enabled: true, token: "t", tokenSource: "config", config: {} },
+        config: { channels: {} },
+        path: "/shape",
+        secret: "shape-secret",
+        onUpdate,
+      });
+      const res = createMockResponse();
+      await handleMaxWebhookRequest(
+        createMockRequest("POST", "/shape", { "x-max-bot-api-secret": "shape-secret" }, JSON.stringify({ hello: 1 })),
+        res,
+      );
+      expect(res._status).toBe(400);
+      expect(onUpdate).not.toHaveBeenCalled();
+      unregister();
+    });
+
+    it("should reject a missing secret header with 401 without reading the body", async () => {
+      const onUpdate = vi.fn();
+      const unregister = registerMaxWebhookTarget({
+        account: { accountId: "default", enabled: true, token: "t", tokenSource: "config", config: {} },
+        config: { channels: {} },
+        path: "/nosecret",
+        secret: "right-secret",
+        onUpdate,
+      });
+      const req = createMockRequest("POST", "/nosecret", {}, "{not json");
+      const res = createMockResponse();
+      await handleMaxWebhookRequest(req, res);
+      expect(res._status).toBe(401);
+      expect(onUpdate).not.toHaveBeenCalled();
+      unregister();
+    });
+
+    it("should drop redelivered duplicates (same type, timestamp and mid)", async () => {
+      const onUpdate = vi.fn().mockResolvedValue(undefined);
+      const unregister = registerMaxWebhookTarget({
+        account: { accountId: "default", enabled: true, token: "t", tokenSource: "config", config: {} },
+        config: { channels: {} },
+        path: "/dedupe",
+        secret: "dedupe-secret",
+        onUpdate,
+      });
+      const update = {
+        update_type: "message_created",
+        timestamp: 1_700_000_000_000,
+        message: { body: { mid: "mid.dup", text: "x" }, timestamp: 1, recipient: { chat_id: 1 } },
+      };
+      const send = async (body: object) => {
+        const res = createMockResponse();
+        await handleMaxWebhookRequest(
+          createMockRequest("POST", "/dedupe", { "x-max-bot-api-secret": "dedupe-secret" }, JSON.stringify(body)),
+          res,
+        );
+        return res;
+      };
+
+      expect((await send(update))._status).toBe(200);
+      expect((await send(update))._status).toBe(200);
+      await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
+      await send({ ...update, message: { ...update.message, body: { mid: "mid.other", text: "y" } } });
+      await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(2));
+      unregister();
+    });
+  });
+
+  describe("maxUpdateDedupeKey", () => {
+    it("keys callbacks by callback_id and messages by mid", () => {
+      expect(maxUpdateDedupeKey({
+        update_type: "message_callback",
+        timestamp: 5,
+        callback: { callback_id: "cb.1", timestamp: 5, user: { user_id: 1, first_name: "a" } },
+      } as never)).toBe("message_callback:5:cb.1");
+      expect(maxUpdateDedupeKey({
+        update_type: "message_created",
+        timestamp: 6,
+        message: { body: { mid: "mid.6" } },
+      } as never)).toBe("message_created:6:mid.6");
+    });
+  });
+
+  describe("registerMaxWebhookRoute", () => {
+    it("registers a plugin-auth exact route owned by the plugin, strict", () => {
+      const unregister = vi.fn();
+      const register = vi.fn(() => unregister);
+      const result = registerMaxWebhookRoute({
+        path: "max/webhook/",
+        accountId: "default",
+        register: register as never,
+      });
+
+      expect(result).toBe(unregister);
+      expect(register).toHaveBeenCalledTimes(1);
+      const params = (register.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+      expect(params).toMatchObject({
+        path: "/max/webhook",
+        auth: "plugin",
+        match: "exact",
+        pluginId: "openclaw-max",
+        source: "max-webhook",
+        accountId: "default",
+        replaceExisting: true,
+        throwOnFailure: true,
+      });
+      expect(params.handler).toBe(handleMaxWebhookRequest);
+    });
+  });
+
+  describe("gateway route over a real HTTP server", () => {
+    it("serves 200/401/405/404 through handleMaxWebhookRequest", async () => {
+      const { createServer } = await import("node:http");
+      const onUpdate = vi.fn().mockResolvedValue(undefined);
+      const unregister = registerMaxWebhookTarget({
+        account: { accountId: "default", enabled: true, token: "t", tokenSource: "config", config: {} },
+        config: { channels: {} },
+        path: "/max/webhook",
+        secret: "live-secret",
+        onUpdate,
+      });
+      // Stand-in for the gateway: a route handler returning false falls through to 404.
+      const server = createServer((req, res) => {
+        void handleMaxWebhookRequest(req, res).then((handled) => {
+          if (!handled) {
+            res.statusCode = 404;
+            res.end("Not Found");
+          }
+        });
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const { port } = server.address() as { port: number };
+      const base = `http://127.0.0.1:${port}`;
+      const update = {
+        update_type: "message_created",
+        timestamp: 1_700_000_000_001,
+        message: { body: { mid: "mid.http", text: "hi" }, timestamp: 1, recipient: { chat_id: 7 } },
+      };
+      try {
+        const ok = await realFetch(`${base}/max/webhook`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "X-Max-Bot-Api-Secret": "live-secret" },
+          body: JSON.stringify(update),
+        });
+        expect(ok.status).toBe(200);
+        expect(await ok.json()).toEqual({ ok: true });
+        await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledWith(update));
+
+        const bad = await realFetch(`${base}/max/webhook`, {
+          method: "POST",
+          headers: { "X-Max-Bot-Api-Secret": "wrong-secret" },
+          body: JSON.stringify(update),
+        });
+        expect(bad.status).toBe(401);
+
+        const get = await realFetch(`${base}/max/webhook`);
+        expect(get.status).toBe(405);
+
+        const other = await realFetch(`${base}/elsewhere`, { method: "POST", body: "{}" });
+        expect(other.status).toBe(404);
+        expect(onUpdate).toHaveBeenCalledTimes(1);
+      } finally {
+        unregister();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     });
   });
 
