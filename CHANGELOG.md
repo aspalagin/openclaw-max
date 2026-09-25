@@ -7,6 +7,7 @@ All notable changes to this project are documented in this file.
 ### Fixed
 
 - Совместимость с OpenClaw 2026.9.3: конфиг читается через `config.current()` / `replaceConfigFile` (в рантайме плагинов убраны `loadConfig`/`writeConfigFile`), с откатом на старый API. Раньше исходящая отправка через `outbound.sendText/sendPayload` падала с `config.loadConfig is not a function`.
+- Тесты на OpenClaw 2026.9.6 снова зелёные. `dmPolicy`/`groupPolicy` с дефолтами строятся на zod самого плагина: обёртка `.optional().default()` над enum-ами SDK ломалась («expected nonoptional»), когда плагин и gateway подтягивали разные копии zod (4.4 в каталоге плагина против 4.6 у gateway); значения сверяются с SDK тестом. Заглушка `IncomingMessage` в webhook-тестах получила `socket`, как у настоящего запроса.
 
 ### Changed
 
@@ -15,6 +16,7 @@ All notable changes to this project are documented in this file.
 - Диагностика: медленные (> 5 с) и оборвавшиеся запросы, а также медленные (> 2 с) или неудавшиеся установки соединения логируются с таймингом фаз, не раскрывая тело запроса.
 - Уход с SDK-подпутей, закрываемых гейтом 2026-10-01: webhook читает тело через `readJsonWebhookBodyOrReject` из `plugin-sdk/webhook-ingress` (вместо `readJsonBodyWithLimit` из `infra-runtime`; ошибки размера/таймаута/обрыва/битого JSON — 413/408/400), тип `DmPolicy` импортируется из `plugin-sdk/config-contracts` (вместо `config-runtime`).
 - Входящие медиа передаются агенту упорядоченными фактами `media` (`toInboundMediaFacts` из `plugin-sdk/channel-inbound`) вместо устаревших `MediaPath/MediaPaths/MediaUrl/MediaUrls/MediaType/MediaTypes` (снимаются гейтом 2026-10-01). Каждому вложению — локальный путь, `contentType`, имя файла и `messageId`; подписанные ссылки CDN MAX в контекст не попадают. Заодно исчез рассинхрон индексов, когда у части вложений не было `contentType`.
+- `devDependencies.openclaw` поднят до `^2026.9.6`, lockfile обновлён; в CI добавлен прогон typecheck+test на последней опубликованной версии OpenClaw, в том числе с минимальной zod 4.4.3.
 
 ## 0.6.1 - 2026-07-18
 

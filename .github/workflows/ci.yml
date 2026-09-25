@@ -21,3 +21,26 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+
+  # Same checks against the newest published OpenClaw, so SDK drift (removed
+  # subpaths, changed helpers) shows up before a gateway upgrade does. The zod
+  # floor leg catches schemas that break when plugin and SDK resolve different
+  # zod copies.
+  openclaw-current:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        zod: [locked, "4.4.3"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --ignore-scripts
+      - run: npm install --no-save --ignore-scripts openclaw@latest
+      - if: matrix.zod != 'locked'
+        run: npm install --no-save --ignore-scripts zod@${{ matrix.zod }}
+      - run: node -p "'openclaw ' + require('./node_modules/openclaw/package.json').version + ', zod ' + require('./node_modules/zod/package.json').version"
+      - run: npm run typecheck
+      - run: npm test

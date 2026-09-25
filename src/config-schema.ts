@@ -2,13 +2,15 @@
  * MAX channel config Zod schema
  */
 
-import {
-  DmPolicySchema,
-  GroupPolicySchema,
-  MarkdownConfigSchema,
-  ToolPolicySchema,
-} from "openclaw/plugin-sdk/channel-config-schema";
+import { MarkdownConfigSchema, ToolPolicySchema } from "openclaw/plugin-sdk/channel-config-schema";
 import { z } from "zod";
+
+// Defaulted policy fields are built with this package's own zod: wrapping the
+// SDK's enum instances in `.optional().default()` breaks as soon as the plugin
+// and the gateway resolve different zod copies (4.4 vs 4.6 → "expected
+// nonoptional"). Values mirror the SDK's DmPolicySchema/GroupPolicySchema.
+export const DmPolicySchema = z.enum(["pairing", "allowlist", "open", "disabled"]);
+export const GroupPolicySchema = z.enum(["open", "disabled", "allowlist"]);
 
 // These schemas were removed from the public plugin-sdk surface in OpenClaw 2026.3.x.
 // Inlined here to stay compatible with both old and new runtimes.

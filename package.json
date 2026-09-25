@@ -65,7 +65,7 @@
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-simple-import-sort": "^13.0.0",
-    "openclaw": "^2026.5.26",
+    "openclaw": "^2026.9.6",
     "prettier": "^3.8.4",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"

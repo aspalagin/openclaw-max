@@ -3,7 +3,17 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { MaxConfigSchema, MaxAccountSchema, MaxGroupSchema } from "./config-schema.js";
+import {
+  DmPolicySchema as SdkDmPolicySchema,
+  GroupPolicySchema as SdkGroupPolicySchema,
+} from "openclaw/plugin-sdk/channel-config-schema";
+import {
+  DmPolicySchema,
+  GroupPolicySchema,
+  MaxAccountSchema,
+  MaxConfigSchema,
+  MaxGroupSchema,
+} from "./config-schema.js";
 
 describe("MAX Config Schema", () => {
   describe("MaxGroupSchema", () => {
@@ -246,6 +256,19 @@ describe("MAX Config Schema", () => {
         unknownField: "value",
       };
       expect(() => MaxConfigSchema.parse(invalid)).toThrow();
+    });
+  });
+
+  describe("policy enums", () => {
+    it("mirror the SDK policy values exactly", () => {
+      expect([...DmPolicySchema.options].sort()).toEqual([...SdkDmPolicySchema.options].sort());
+      expect([...GroupPolicySchema.options].sort()).toEqual([...SdkGroupPolicySchema.options].sort());
+    });
+
+    it("default dmPolicy/groupPolicy when omitted", () => {
+      const result = MaxAccountSchema.parse({ botToken: "t" });
+      expect(result.dmPolicy).toBe("pairing");
+      expect(result.groupPolicy).toBe("allowlist");
     });
   });
 });
