@@ -13,7 +13,7 @@
 
 import { randomBytes } from "node:crypto";
 import * as tls from "node:tls";
-import { retryAsync } from "openclaw/plugin-sdk/retry-runtime";
+import { retryAsync } from "openclaw/plugin-sdk/runtime-env";
 import { Agent, buildConnector, fetch as undiciFetch } from "undici";
 
 import { RUSSIAN_TRUSTED_ROOT_CA, RUSSIAN_TRUSTED_SUB_CA } from "./russian-trusted-ca.js";

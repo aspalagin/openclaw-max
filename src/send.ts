@@ -2,7 +2,7 @@
  * Outbound message sending for MAX.
  */
 
-import { retryAsync } from "openclaw/plugin-sdk/retry-runtime";
+import { retryAsync } from "openclaw/plugin-sdk/runtime-env";
 
 import {
   MaxApi,

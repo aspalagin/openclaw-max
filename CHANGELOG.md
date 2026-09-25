@@ -25,6 +25,7 @@ All notable changes to this project are documented in this file.
 - `describeMessageTool` объявляет реальные capabilities `presentation` и `delivery-pin` без приведения типов (раньше — несуществующее `"buttons"` через `as unknown as`). Действие `send` инструмента message рендерит `presentation` той же политикой (текст режется по 4000, клавиатура на последнем куске) и закрепляет отправленное сообщение по `delivery.pin`/`pin=true` для всех вариантов отправки; необязательный pin при ошибке не роняет отправку (`pinned:false`, `pinError`), обязательный (`required`) — роняет.
 - README: в списке возможностей — `presentation`, `delivery.pin` и webhook на HTTP-сервере gateway.
 - Внутреннее: импорты новых модулей отсортированы по правилам eslint, число предупреждений lint вернулось к уровню до этапа (74, ошибок 0).
+- Уход с устаревших SDK-подпутей: `retryAsync` импортируется из `plugin-sdk/runtime-env` (вместо `retry-runtime`, приватного с июля 2026), `jsonResult` — из `plugin-sdk/tool-results` (вместо широкого barrel `agent-runtime`).
 
 ### Added
 
