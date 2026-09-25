@@ -12,7 +12,7 @@ import type { ChannelAccountSnapshot, ChannelLogSink } from "openclaw/plugin-sdk
 import { type ChannelInboundMediaInput, toInboundMediaFacts } from "openclaw/plugin-sdk/channel-inbound";
 import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-outbound";
 import { channelReadyPatch, createTransportActivityStatusPatch } from "openclaw/plugin-sdk/gateway-runtime";
-import { MaxApi, type MaxUpdate, type MaxMessage, type MaxUser, type MaxCallback, type MaxUpdateType, type MaxSubscription } from "./api.js";
+import { MaxApi, type MaxAttachment, type MaxUpdate, type MaxMessage, type MaxUser, type MaxCallback, type MaxUpdateType, type MaxSubscription } from "./api.js";
 import { readSecretFile, resolveMaxAccount, type MaxAccountConfig, type ResolvedMaxAccount } from "./accounts.js";
 import { answerMaxCallback, sendMaxMessage, sendMaxMediaMessage, editMaxMessage, pinMaxMessage, readMaxChannelButtons, readMaxChannelSendOptions } from "./send.js";
 import { resolveApprovalOverGateway } from "openclaw/plugin-sdk/approval-gateway-runtime";
@@ -646,6 +646,14 @@ export async function processIncomingMessage(
         }
       }
 
+      // MAX may transcribe voice messages itself (AudioAttachment.transcription,
+      // a sibling of payload). The text goes to the agent and the audio fact is
+      // marked transcribed, so core media understanding does not run STT again.
+      const transcription = attType === "audio" ? readAudioTranscription(att) : undefined;
+      if (transcription) {
+        attachmentDescriptions.push(`[Voice transcript: ${transcription}]`);
+      }
+
       if (url && typeof url === "string" && url.startsWith("http")) {
         try {
           const maxBytes = (account.config.mediaMaxMb ?? 20) * 1024 * 1024;
@@ -664,6 +672,7 @@ export async function processIncomingMessage(
             contentType: saved.contentType,
             fileName: fetched.fileName,
             messageId,
+            ...(transcription ? { transcribed: true } : {}),
           });
         } catch (err) {
           log?.error?.(`[${account.accountId}] Failed to download ${attType}: ${String(err)}`);
@@ -1345,6 +1354,14 @@ async function deliverMaxReply(params: {
 /** MAX webhook secret: 5–256 chars of [A-Za-z0-9-]. */
 function generateWebhookSecret(): string {
   return randomBytes(24).toString("base64url").replace(/_/g, "-");
+}
+
+/** Non-empty MAX transcription of an audio attachment, if any. */
+function readAudioTranscription(att: MaxAttachment): string | undefined {
+  const value = att.transcription;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 function formatSenderName(user?: MaxUser | null): string {

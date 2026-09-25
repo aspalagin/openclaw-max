@@ -259,6 +259,65 @@ describe("processIncomingMessage inbound media", () => {
     // The agent still sees the local file path of the first attachment.
     expect(dispatchedCtx?.MediaPath ?? (dispatchedCtx?.media as { path?: string }[])[0]?.path).toBe(saved[0].path);
   });
+
+  async function runVoiceMessage(audio: Record<string, unknown>) {
+    const { setMaxRuntime } = await import("./runtime.js");
+    const { processIncomingMessage } = await import("./monitor.js");
+    const { core, dispatched } = makeCallbackRuntime();
+    const fetchRemoteMedia = vi.fn(async () => ({ buffer: Buffer.from("ogg"), contentType: "audio/ogg" }));
+    const runtime = {
+      ...core,
+      channel: {
+        ...core.channel,
+        media: {
+          fetchRemoteMedia,
+          saveMediaBuffer: vi.fn(async () => ({ path: "/state/media/inbound/voice.ogg", contentType: "audio/ogg" })),
+        },
+      },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setMaxRuntime(runtime as any);
+    await processIncomingMessage(
+      {
+        sender: { user_id: 7, first_name: "Ann", is_bot: false },
+        recipient: { chat_id: 70, chat_type: "dialog" },
+        timestamp: 1,
+        body: { mid: "mid.voice", text: "", attachments: [audio] },
+      } as unknown as MaxMessage,
+      null,
+      makeCallbackOpts({ dmPolicy: "open" }),
+    );
+    return { ctx: dispatched[0], fetchRemoteMedia };
+  }
+
+  it("hands a MAX voice transcription to the agent and marks the audio transcribed", async () => {
+    // AudioAttachment: transcription is a sibling of payload (schema.yaml).
+    const { ctx, fetchRemoteMedia } = await runVoiceMessage({
+      type: "audio",
+      payload: { url: "https://cdn.max.test/voice", token: "tok" },
+      transcription: "  Привет, это голосовое  ",
+    });
+
+    expect(fetchRemoteMedia).toHaveBeenCalledOnce();
+    expect(ctx?.BodyForAgent).toBe("[Voice transcript: Привет, это голосовое]");
+    expect(ctx?.media).toEqual([
+      expect.objectContaining({ path: "/state/media/inbound/voice.ogg", transcribed: true }),
+    ]);
+  });
+
+  it("leaves an untranscribed voice message to core STT", async () => {
+    for (const transcription of [undefined, null, "   "]) {
+      const { ctx, fetchRemoteMedia } = await runVoiceMessage({
+        type: "audio",
+        payload: { url: "https://cdn.max.test/voice" },
+        transcription,
+      });
+
+      expect(fetchRemoteMedia).toHaveBeenCalledOnce();
+      expect(String(ctx?.BodyForAgent ?? "")).not.toContain("Voice transcript");
+      expect((ctx?.media as { transcribed?: boolean }[])[0]?.transcribed).not.toBe(true);
+    }
+  });
 });
 
 // Raw `message_callback` update captured live on 2026-09-26 (names/usernames

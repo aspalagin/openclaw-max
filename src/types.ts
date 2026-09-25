@@ -86,6 +86,8 @@ export interface AudioAttachment {
     url: string;
     id?: number;
   };
+  /** Speech-to-text by MAX (sibling of payload); null/absent when not transcribed */
+  transcription?: string | null;
 }
 
 export interface FileAttachment {
