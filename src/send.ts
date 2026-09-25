@@ -270,7 +270,10 @@ export async function answerMaxCallback(
 }
 
 /**
- * Edit an existing MAX message.
+ * Edit an existing MAX message. PUT /messages keeps the current attachments
+ * when `attachments` is absent/null and deletes them all on an empty list, so
+ * the keyboard is sent only when `buttons` are given (it then replaces the
+ * message attachments, e.g. adds buttons to a text-only stream draft).
  */
 export async function editMaxMessage(
   messageId: string,
@@ -283,6 +286,7 @@ export async function editMaxMessage(
   await api.editMessage(messageId, {
     text: formatOutboundText(text, opts.format),
     format: opts.format ?? undefined,
+    ...(opts.buttons?.length ? { attachments: [buildInlineKeyboard(opts.buttons)] } : {}),
   });
 }
 

@@ -238,6 +238,31 @@ describe("MAX Message Sending", () => {
       expect(callBody.format).toBe("markdown");
     });
 
+    it("keeps attachments untouched without buttons and sends the keyboard with them", async () => {
+      global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
+
+      await editMaxMessage("msg-1", "No keyboard", { token: MOCK_TOKEN });
+      await editMaxMessage("msg-2", "With keyboard", {
+        token: MOCK_TOKEN,
+        buttons: [[{ text: "Да", payload: "yes" }, { text: "Docs", url: "https://docs.example" }]],
+      });
+
+      const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
+      // attachments absent → MAX keeps the current ones (an empty list would delete them).
+      expect(JSON.parse(calls[0][1].body)).not.toHaveProperty("attachments");
+      expect(JSON.parse(calls[1][1].body).attachments).toEqual([
+        {
+          type: "inline_keyboard",
+          payload: {
+            buttons: [[
+              { type: "callback", text: "Да", payload: "yes" },
+              { type: "link", text: "Docs", url: "https://docs.example" },
+            ]],
+          },
+        },
+      ]);
+    });
+
     it("should throw error when no token available", async () => {
       const cfg: OpenClawConfig = { channels: { max: {} } };
       await expect(

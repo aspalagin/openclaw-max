@@ -1086,23 +1086,27 @@ export async function processIncomingMessage(
         // presentation fallback/render policy as core's outbound path.
         const payload = await materializeMaxPresentation(rawPayload);
         if (useEditStreaming && draftMid && payload.text) {
-          // Final delivery replaces the draft message with final text
+          // Final delivery replaces the draft message with final text. The
+          // keyboard (presentation buttons) goes onto the same edit, otherwise
+          // the final answer would lose its buttons.
           const finalText = payload.text;
-          if (finalText !== draftLastText) {
+          const buttons = readMaxChannelButtons(payload.channelData);
+          if (finalText !== draftLastText || buttons?.length) {
             try {
               await editMaxMessage(draftMid, finalText, {
                 token: account.token,
                 format: "markdown",
+                buttons,
               });
               draftLastText = finalText;
             } catch (_) { /* best effort */ }
           }
           draftStopped = true;
 
-          // Handle media if present
+          // Handle media if present (buttons already sit on the draft)
           if (payload.mediaUrls?.length || payload.mediaUrl) {
             await deliverMaxReply({
-              payload: { ...payload, text: undefined },
+              payload: { ...payload, text: undefined, channelData: withoutMaxButtons(payload.channelData) },
               account,
               chatId: chatIdStr,
               replyToId: replyMid,
@@ -1421,6 +1425,15 @@ async function deliverMaxReply(params: {
 /** MAX webhook secret: 5–256 chars of [A-Za-z0-9-]. */
 function generateWebhookSecret(): string {
   return randomBytes(24).toString("base64url").replace(/_/g, "-");
+}
+
+/** channelData with `max.buttons` removed (other max options kept). */
+function withoutMaxButtons(channelData: unknown): unknown {
+  if (!channelData || typeof channelData !== "object" || Array.isArray(channelData)) return channelData;
+  const maxData = (channelData as Record<string, unknown>).max;
+  if (!maxData || typeof maxData !== "object" || Array.isArray(maxData)) return channelData;
+  const { buttons: _buttons, ...rest } = maxData as Record<string, unknown>;
+  return { ...(channelData as Record<string, unknown>), max: rest };
 }
 
 /** Non-empty MAX transcription of an audio attachment, if any. */

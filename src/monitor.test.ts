@@ -466,3 +466,55 @@ describe("message_callback", () => {
     );
   });
 });
+
+describe("edit streaming (streamMode: partial)", () => {
+  it("puts the keyboard of the final answer onto the edited draft", async () => {
+    const { setMaxRuntime } = await import("./runtime.js");
+    const { processIncomingMessage } = await import("./monitor.js");
+    const { core } = makeCallbackRuntime();
+    const requests: { method: string; url: string; body: Record<string, unknown> }[] = [];
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      requests.push({ method: String(init?.method), url: String(url), body: JSON.parse(String(init?.body ?? "{}")) });
+      return new Response(JSON.stringify({ success: true, message: { body: { mid: "mid.draft" } } }), { status: 200 });
+    }) as typeof fetch;
+    const draftText = "Черновик ответа, достаточно длинный для отправки";
+    core.channel.reply.dispatchReplyWithBufferedBlockDispatcher = vi.fn(async (params: {
+      dispatcherOptions: { deliver: (payload: Record<string, unknown>) => Promise<void> };
+      replyOptions: { onPartialReply?: (payload: { text?: string }) => void };
+    }) => {
+      params.replyOptions.onPartialReply?.({ text: draftText });
+      await vi.waitFor(() => expect(requests.some((r) => r.method === "POST")).toBe(true));
+      await params.dispatcherOptions.deliver({
+        text: draftText,
+        channelData: { max: { buttons: [[{ text: "Ещё", payload: "more" }]] } },
+      });
+    }) as never;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setMaxRuntime(core as any);
+    try {
+      await processIncomingMessage(
+        {
+          sender: { user_id: 7, first_name: "Ann", is_bot: false },
+          recipient: { chat_id: 70, chat_type: "dialog" },
+          timestamp: 1,
+          body: { mid: "mid.in", text: "привет" },
+        } as unknown as MaxMessage,
+        null,
+        makeCallbackOpts({ dmPolicy: "open", streamMode: "partial" }),
+      );
+    } finally {
+      global.fetch = originalFetch;
+    }
+
+    const sends = requests.filter((r) => r.method === "POST" && r.url.includes("/messages"));
+    const edits = requests.filter((r) => r.method === "PUT");
+    // Same text, but the buttons still arrive via the edit, not a second message.
+    expect(sends).toHaveLength(1);
+    expect(edits).toHaveLength(1);
+    expect(edits[0].url).toContain("message_id=mid.draft");
+    expect(edits[0].body.attachments).toEqual([
+      { type: "inline_keyboard", payload: { buttons: [[{ type: "callback", text: "Ещё", payload: "more" }]] } },
+    ]);
+  });
+});
