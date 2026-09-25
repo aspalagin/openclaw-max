@@ -14,7 +14,8 @@ import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-outbound";
 import { channelReadyPatch, createTransportActivityStatusPatch } from "openclaw/plugin-sdk/gateway-runtime";
 import { MaxApi, type MaxUpdate, type MaxMessage, type MaxUser, type MaxCallback, type MaxUpdateType, type MaxSubscription } from "./api.js";
 import { readSecretFile, resolveMaxAccount, type MaxAccountConfig, type ResolvedMaxAccount } from "./accounts.js";
-import { answerMaxCallback, sendMaxMessage, sendMaxMediaMessage, editMaxMessage, readMaxChannelButtons, readMaxChannelSendOptions } from "./send.js";
+import { answerMaxCallback, sendMaxMessage, sendMaxMediaMessage, editMaxMessage, pinMaxMessage, readMaxChannelButtons, readMaxChannelSendOptions } from "./send.js";
+import { materializeMaxPresentation, readMaxDeliveryPin } from "./presentation.js";
 import { getMaxRuntime } from "./runtime.js";
 import { MaxStateStore } from "./state.js";
 import { rememberStickerCode } from "./sticker-cache.js";
@@ -997,7 +998,10 @@ export async function processIncomingMessage(
     cfg: config,
     dispatcherOptions: {
       ...prefixOptions,
-      deliver: async (payload) => {
+      deliver: async (rawPayload) => {
+        // This funnel consumes ReplyPayload directly, so it must apply the same
+        // presentation fallback/render policy as core's outbound path.
+        const payload = await materializeMaxPresentation(rawPayload);
         if (useEditStreaming && draftMid && payload.text) {
           // Final delivery replaces the draft message with final text
           const finalText = payload.text;
@@ -1121,7 +1125,7 @@ async function processBotStarted(
 // ── Deliver reply ──
 
 async function deliverMaxReply(params: {
-  payload: { text?: string; mediaUrls?: string[]; mediaUrl?: string; replyToId?: string; channelData?: unknown };
+  payload: { text?: string; mediaUrls?: string[]; mediaUrl?: string; replyToId?: string; channelData?: unknown; delivery?: unknown };
   account: ResolvedMaxAccount;
   chatId: string;
   replyToId?: string;
@@ -1150,6 +1154,12 @@ async function deliverMaxReply(params: {
     return;
   }
 
+  // delivery.pin: pin the first delivered message (first chunk).
+  let firstMessageId: string | undefined;
+  const noteDelivered = (messageId: string) => {
+    if (!firstMessageId && messageId) firstMessageId = messageId;
+  };
+
   if (payload.text) {
     const chunkLimit = 4000; // MAX message limit
     const chunkMode = core.channel.text.resolveChunkMode(config, "max", account.accountId);
@@ -1158,13 +1168,14 @@ async function deliverMaxReply(params: {
     for (let index = 0; index < chunks.length; index += 1) {
       const chunk = chunks[index];
       try {
-        await sendMaxMessage(chatId, chunk, {
+        const sent = await sendMaxMessage(chatId, chunk, {
           token: account.token,
           replyToMessageId: params.replyToId,
           format: "markdown",
           buttons: index === chunks.length - 1 ? buttons : undefined,
           ...sendOptions,
         });
+        noteDelivered(sent.messageId);
         statusSink?.({ lastOutboundAt: Date.now() });
       } catch (err: unknown) {
         const body = (err as { body?: unknown })?.body;
@@ -1173,13 +1184,14 @@ async function deliverMaxReply(params: {
     }
   } else if (buttons?.length) {
     try {
-      await sendMaxMessage(chatId, "", {
+      const sent = await sendMaxMessage(chatId, "", {
         token: account.token,
         replyToMessageId: params.replyToId,
         format: "markdown",
         buttons,
         ...sendOptions,
       });
+      noteDelivered(sent.messageId);
       statusSink?.({ lastOutboundAt: Date.now() });
     } catch (err: unknown) {
       const body = (err as { body?: unknown })?.body;
@@ -1207,11 +1219,12 @@ async function deliverMaxReply(params: {
         await fs.writeFile(tmpPath, loaded.buffer);
         
         try {
-          await sendMaxMediaMessage(chatId, "", tmpPath, {
+          const sent = await sendMaxMediaMessage(chatId, "", tmpPath, {
             token: account.token,
             replyToMessageId: params.replyToId,
             ...sendOptions,
           });
+          noteDelivered(sent.messageId);
           statusSink?.({ lastOutboundAt: Date.now() });
         } finally {
           // Cleanup temp file
@@ -1219,15 +1232,26 @@ async function deliverMaxReply(params: {
         }
       } else {
         // Local file path
-        await sendMaxMediaMessage(chatId, "", mediaUrl, {
+        const sent = await sendMaxMediaMessage(chatId, "", mediaUrl, {
           token: account.token,
           replyToMessageId: params.replyToId,
           ...sendOptions,
         });
+        noteDelivered(sent.messageId);
         statusSink?.({ lastOutboundAt: Date.now() });
       }
     } catch (err) {
       log?.error(`[${account.accountId}] MAX media send failed: ${String(err)}`);
+    }
+  }
+
+  const pin = readMaxDeliveryPin(payload.delivery);
+  if (pin && firstMessageId) {
+    try {
+      await pinMaxMessage(chatId, firstMessageId, { token: account.token, pinNotify: pin.notify === true });
+    } catch (err) {
+      // Optional pins degrade; the delivered message stays.
+      log?.[pin.required ? "error" : "warn"](`[${account.accountId}] MAX pin of ${firstMessageId} failed: ${String(err)}`);
     }
   }
 }

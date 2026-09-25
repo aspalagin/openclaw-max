@@ -311,13 +311,25 @@ export async function deleteMaxMessage(
 export async function pinMaxMessage(
   to: string,
   messageId: string,
-  opts: MaxSendOptions & { pinNotify?: boolean } = {},
+  opts: MaxSendOptions & {
+    pinNotify?: boolean;
+    /** Checked synchronously right before each MAX request (delivery-owner guard). */
+    beforeRequest?: () => void;
+  } = {},
 ): Promise<void> {
   const token = resolveToken(opts);
   const api = new MaxApi({ token });
   const target = await resolveMaxTarget(api, to);
-  if (!("chat_id" in target)) throw new Error("MAX pin requires a chat id target");
-  await api.pinMessage(target.chat_id, messageId, opts.pinNotify);
+  let chatId: number | undefined = "chat_id" in target ? target.chat_id : undefined;
+  if (chatId == null) {
+    // user:<id> targets: PUT /chats/{chatId}/pin needs the dialog chat id,
+    // which differs from the user id — take it from the sent message.
+    opts.beforeRequest?.();
+    chatId = (await api.getMessageById(messageId)).recipient?.chat_id ?? undefined;
+    if (chatId == null) throw new Error("MAX pin: could not resolve the chat id of the message");
+  }
+  opts.beforeRequest?.();
+  await api.pinMessage(chatId, messageId, opts.pinNotify);
 }
 
 export async function unpinMaxMessage(
