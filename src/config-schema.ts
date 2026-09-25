@@ -109,7 +109,7 @@ export const MaxAccountSchema = MaxAccountSchemaBase.superRefine((value, ctx) =>
   });
 });
 
-/** Bot command registered via PATCH /me (name ≤64 chars without slash, description ≤128) */
+/** Bot command registered via PATCH /me/commands (name ≤64 chars without slash, description ≤128) */
 const MaxBotCommandSchema = z
   .object({
     name: z.string().min(1).max(64),

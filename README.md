@@ -120,7 +120,7 @@ openclaw gateway restart
 | `streamMode` | string | нет | off (по умолчанию) / partial / block |
 | `mediaMaxMb` | number | нет | Лимит скачивания медиа, МБ (по умолчанию 20) |
 | `markSeen` | boolean | нет | Слать mark_seen на входящие (по умолчанию true) |
-| `commands` | array | нет | Команды бота `[{name, description}]` — регистрируются через PATCH /me (до 32) |
+| `commands` | array | нет | Команды бота `[{name, description}]` — регистрируются через PATCH /me/commands (до 32) |
 
 \* Обязательно при `dmPolicy: "allowlist"`.
 
@@ -250,7 +250,7 @@ setTimeout(stop, 60_000);
 | Метод | Endpoint | Описание |
 |-------|----------|----------|
 | GET /me | Информация о боте | user_id, name, username, commands |
-| PATCH /me | Обновить бота | name, description, commands (регистрация команд) |
+| PATCH /me/commands | Команды бота | commands (полная замена списка, до 32) |
 | GET /updates | Long polling | marker, timeout, types |
 | POST /messages | Отправить | ?chat_id или ?user_id |
 | PUT /messages | Редактировать | ?message_id (до 24ч) |

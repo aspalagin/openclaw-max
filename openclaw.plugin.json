@@ -117,6 +117,7 @@
           },
           "commands": {
             "type": "array",
+            "description": "Bot commands registered on start via PATCH /me/commands (replaces the whole list, max 32).",
             "items": {
               "type": "object",
               "properties": {

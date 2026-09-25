@@ -15,7 +15,7 @@ description: Канал-плагин для подключения OpenClaw к �
 - **Pin/unpin** — закрепление сообщений в чатах
 - **Long polling** — с персистентным marker (рестарты без потери/дублей событий)
 - **Webhook** — HTTPS c обязательным secret (X-Max-Bot-Api-Secret), мгновенный ACK, последовательная обработка
-- **Команды бота** — регистрация через PATCH /me из `channels.max.commands`
+- **Команды бота** — регистрация через PATCH /me/commands из `channels.max.commands`
 - **Мультиаккаунт**, DM-security (pairing/allowlist/open), пер-групповые политики
 
 TLS-сертификат Минцифры для platform-api2.max.ru встроен в плагин — дополнительная настройка не нужна.

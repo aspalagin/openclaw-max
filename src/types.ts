@@ -513,12 +513,9 @@ export interface MaxBotCommand {
   description?: string;
 }
 
-/** PATCH /me payload — bot info update (commands are registered this way). */
-export interface MaxBotPatch {
-  name?: string;
-  description?: string;
-  commands?: MaxBotCommand[];
-  photo?: Record<string, unknown>;
+/** PATCH /me/commands response (BotCommandsInfo). */
+export interface MaxBotCommandsInfo {
+  commands?: MaxBotCommand[] | null;
 }
 
 /**

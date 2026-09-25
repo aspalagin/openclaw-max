@@ -25,7 +25,7 @@ import type {
   MaxUpdate,
   MaxCallback,
   MaxNewMessageBody,
-  MaxBotPatch,
+  MaxBotCommandsInfo,
   MaxSenderAction,
   MaxSendResult,
   MaxSimpleResult,
@@ -54,7 +54,7 @@ export type {
   MaxUpdate,
   MaxCallback,
   MaxNewMessageBody,
-  MaxBotPatch,
+  MaxBotCommandsInfo,
   MaxSenderAction,
   MaxSendResult,
   MaxSimpleResult,
@@ -394,11 +394,6 @@ export class MaxApi {
     return this.request<MaxUser>("GET", "/me");
   }
 
-  /** Update bot info: name, description, avatar, commands (PATCH /me). */
-  async editMyInfo(patch: MaxBotPatch): Promise<MaxUser> {
-    return this.request<MaxUser>("PATCH", "/me", undefined, patch);
-  }
-
   // ── Messages ──
 
   async sendMessage(
@@ -526,11 +521,10 @@ export class MaxApi {
   // ── Commands ──
 
   /**
-   * Register bot commands. MAX has no dedicated commands endpoint — commands
-   * are part of bot info and updated via PATCH /me. Limits: 32 commands,
-   * name ≤ 64 chars (no leading slash), description ≤ 128 chars.
+   * Replace the bot command list (PATCH /me/commands; PATCH /me answers 404).
+   * Limits: 32 commands, name ≤ 64 chars (no leading slash), description ≤ 128 chars.
    */
-  async setMyCommands(commands: MaxBotCommand[]): Promise<MaxUser> {
+  async setMyCommands(commands: MaxBotCommand[]): Promise<MaxBotCommandsInfo> {
     const normalized = commands
       .map((cmd) => ({
         name: cmd.name.replace(/^\//, "").slice(0, 64),
@@ -538,7 +532,7 @@ export class MaxApi {
       }))
       .filter((cmd) => cmd.name.length > 0)
       .slice(0, 32);
-    return this.editMyInfo({ commands: normalized });
+    return this.request<MaxBotCommandsInfo>("PATCH", "/me/commands", undefined, { commands: normalized });
   }
 
   // ── Upload ──

@@ -8,6 +8,7 @@ All notable changes to this project are documented in this file.
 
 - Совместимость с OpenClaw 2026.9.3: конфиг читается через `config.current()` / `replaceConfigFile` (в рантайме плагинов убраны `loadConfig`/`writeConfigFile`), с откатом на старый API. Раньше исходящая отправка через `outbound.sendText/sendPayload` падала с `config.loadConfig is not a function`.
 - Тесты на OpenClaw 2026.9.6 снова зелёные. `dmPolicy`/`groupPolicy` с дефолтами строятся на zod самого плагина: обёртка `.optional().default()` над enum-ами SDK ломалась («expected nonoptional»), когда плагин и gateway подтягивали разные копии zod (4.4 в каталоге плагина против 4.6 у gateway); значения сверяются с SDK тестом. Заглушка `IncomingMessage` в webhook-тестах получила `socket`, как у настоящего запроса.
+- Команды бота регистрируются через `PATCH /me/commands` с телом `{commands:[…]}`: прежний `PATCH /me` MAX отвечает 404 `method.not.found`, так что `channels.max.commands` фактически не применялись. Удалены `MaxBotPatch` и `editMyInfo`; `setMyCommands` возвращает `BotCommandsInfo`.
 
 ### Changed
 

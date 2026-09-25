@@ -215,10 +215,10 @@ describe("MaxApi", () => {
   });
 
   describe("setMyCommands", () => {
-    it("should register commands via PATCH /me (there is no /me/commands endpoint)", async () => {
+    it("should register commands via PATCH /me/commands (PATCH /me is 404)", async () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ user_id: 1, first_name: "Bot", is_bot: true }),
+        json: async () => ({ commands: [{ name: "start", description: "Start bot" }, { name: "help", description: "Show help" }] }),
       });
 
       const commands = [
@@ -226,10 +226,11 @@ describe("MaxApi", () => {
         { name: "help", description: "Show help" },
       ];
 
-      await api.setMyCommands(commands);
+      const result = await api.setMyCommands(commands);
 
       const [url, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { method: string; body: string }];
-      expect(url).toBe(`${MOCK_BASE_URL}/me`);
+      expect(url).toBe(`${MOCK_BASE_URL}/me/commands`);
+      expect(result.commands).toEqual(commands);
       expect(init.method).toBe("PATCH");
       expect(JSON.parse(init.body)).toEqual({ commands });
     });
@@ -237,7 +238,7 @@ describe("MaxApi", () => {
     it("should normalize commands: strip slash, clamp lengths, cap at 32", async () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ user_id: 1, first_name: "Bot", is_bot: true }),
+        json: async () => ({ commands: [] }),
       });
 
       const many = Array.from({ length: 40 }, (_, i) => ({
