@@ -6,18 +6,20 @@
 import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+
 import type { ChannelLogSink } from "openclaw/plugin-sdk/channel-contract";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
-import type { MaxApi } from "./api.js";
+import { describe, expect, it, vi } from "vitest";
+
 import type { MaxAccountConfig, ResolvedMaxAccount } from "./accounts.js";
+import type { MaxApi } from "./api.js";
 import {
-  MAX_SUBSCRIBED_UPDATE_TYPES,
   clearMaxSubscriptionsForPolling,
+  MAX_SUBSCRIBED_UPDATE_TYPES,
+  type MaxStatusPatch,
   resolveMaxTransport,
   resolveMaxWebhookSecret,
   startMaxPolling,
-  type MaxStatusPatch,
 } from "./monitor.js";
 import { MaxStateStore } from "./state.js";
 import { handleMaxWebhookRequest } from "./webhook.js";

@@ -27,12 +27,13 @@ import {
   type MessagePresentationBlock,
   type MessagePresentationButton,
   type MessagePresentationOption,
-  type ReplyPayloadDelivery,
   renderMessagePresentationFallbackText,
   renderPresentationForDelivery,
+  type ReplyPayloadDelivery,
   resolveMessagePresentationButtonAction,
   resolveMessagePresentationOptionAction,
 } from "openclaw/plugin-sdk/interactive-runtime";
+
 import type { MaxSendButton } from "./send.js";
 
 type ChannelPresentationCapabilities = NonNullable<ChannelOutboundAdapter["presentationCapabilities"]>;
@@ -344,7 +345,8 @@ export function renderMaxPresentation(payload: ReplyPayload, presentation: Messa
   const existingMax = readChannelDataMax(payload.channelData);
   const existingButtons = Array.isArray(existingMax.buttons) ? (existingMax.buttons as MaxSendButton[][]) : [];
   const buttons = [...existingButtons, ...rendered.buttons];
-  const { presentation: _presentation, ...rest } = payload;
+  const rest: ReplyPayload = { ...payload };
+  delete rest.presentation;
   return {
     ...rest,
     text: rendered.text,

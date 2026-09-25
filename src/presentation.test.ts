@@ -3,13 +3,14 @@
  * callback round trip (render → press → dispatchUpdate).
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessagePresentation } from "openclaw/plugin-sdk/interactive-runtime";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
 import type { MaxUpdate } from "./api.js";
 import {
-  MAX_PRESENTATION_CAPABILITIES,
   decodeMaxPresentationCallback,
   materializeMaxPresentation,
+  MAX_PRESENTATION_CAPABILITIES,
   readMaxDeliveryPin,
   renderMaxPresentation,
   renderMaxPresentationParts,
