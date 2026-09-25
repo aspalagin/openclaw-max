@@ -23,6 +23,7 @@ All notable changes to this project are documented in this file.
 - `getMessages` принимает `before`/`after` (Unix-время, мс) вместо устаревших `from`/`to`; добавлен `getMessageById` (`GET /messages/{messageId}`).
 - Контракт с Bot API сверен с `schema.yaml`: из подписки (`GET /updates types`, `POST /subscriptions update_types`) и типов убрано несуществующее событие `message_chat_created`; удалены тип кнопки `chat` и поле `intent` (не входят в `Button`, `intent` больше не отправляется); кнопка `open_app` адресуется полем `web_app` (прежний `url` переносится туда, `url` не отправляется), поддержан `payload`; в известные `update_type` добавлены `bot_admin_permissions_changed` и `comment_*`; `MaxVideoInfo.thumbnail` — объект `{url}`; `MaxRecipient.post_id`; `MaxSubscription` без `version/secret` (secret — только в теле `POST /subscriptions`). Тест сверяет подписку со списком `Update` из схемы.
 - `describeMessageTool` объявляет реальные capabilities `presentation` и `delivery-pin` без приведения типов (раньше — несуществующее `"buttons"` через `as unknown as`). Действие `send` инструмента message рендерит `presentation` той же политикой (текст режется по 4000, клавиатура на последнем куске) и закрепляет отправленное сообщение по `delivery.pin`/`pin=true` для всех вариантов отправки; необязательный pin при ошибке не роняет отправку (`pinned:false`, `pinError`), обязательный (`required`) — роняет.
+- README: в списке возможностей — `presentation`, `delivery.pin` и webhook на HTTP-сервере gateway.
 
 ### Added
 

@@ -9,8 +9,9 @@
 - Приём и отправку текстовых сообщений (MAX-диалект markdown: `++подчёркивание++`, упоминания `max://user/id`)
 - Вложения (фото, видео, аудио, файлы, стикеры, контакты, геолокация)
 - Inline-кнопки: callback / link / message / clipboard / open_app / request_contact / request_geo_location
-- Закрепление сообщений (pin/unpin)
-- Long polling (с персистентным marker) и Webhook (с обязательным secret и мгновенным ACK)
+- Контракт OpenClaw `presentation`: заголовок, текст, context, divider, таблицы и графики (моноширинно), кнопки и select → inline-клавиатура; нажатия approval/ask_user/command/callback возвращаются в gateway
+- Закрепление сообщений (pin/unpin) и `delivery.pin` для отправляемых сообщений
+- Long polling (с персистентным marker) и Webhook на HTTP-сервере gateway (секрет, мгновенный ACK, дедупликация повторов) — см. «Webhook»
 - Реестр чатов из событий bot_added/bot_started (замена deprecated GET /chats)
 - Ретраи на 429/сетевые сбои и `attachment.not.ready`
 - Мультиаккаунт
