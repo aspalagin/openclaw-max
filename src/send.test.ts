@@ -664,3 +664,102 @@ describe("attachment.not.ready retry", () => {
     }
   }, 20_000);
 });
+
+describe("albums and images by URL", () => {
+  const sent = () => vi.spyOn(MaxApi.prototype, "sendMessage")
+    .mockImplementation(async () => ({ message: { body: { mid: `m-${Math.random()}` } } }) as never);
+  const uploads = () => vi.spyOn(MaxApi.prototype, "uploadMedia")
+    .mockImplementation(async (type, data) => ({ token: `tok:${type}:${String(data).split("/").pop()}` }));
+
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("groups consecutive images/videos up to 12 per message, audio and files alone", async () => {
+    const { groupMaxMedia, MAX_VISUAL_MEDIA_PER_MESSAGE } = await import("./send.js");
+    expect(MAX_VISUAL_MEDIA_PER_MESSAGE).toBe(12);
+    const images = Array.from({ length: 14 }, (_, i) => `/tmp/p${i}.jpg`);
+    expect(groupMaxMedia(images).map((g) => g.length)).toEqual([12, 2]);
+    expect(groupMaxMedia(["/a.png", "https://x/v.mp4", "/b.pdf", "/c.mp3", "/d.jpg"])).toEqual([
+      ["/a.png", "https://x/v.mp4"],
+      ["/b.pdf"],
+      ["/c.mp3"],
+      ["/d.jpg"],
+    ]);
+  });
+
+  it("sends an album in one message: caption and reply on the first, buttons on the last", async () => {
+    const { sendMaxMediaGroup } = await import("./send.js");
+    const send = sent();
+    uploads();
+    const images = Array.from({ length: 13 }, (_, i) => `/tmp/p${i}.jpg`);
+
+    const result = await sendMaxMediaGroup("123", "Подпись", images, {
+      token: MOCK_TOKEN,
+      replyToMessageId: "mid.q",
+      buttons: [[{ text: "Ок", payload: "ok" }]],
+    });
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(result.messageIds).toHaveLength(2);
+    const [first, second] = send.mock.calls.map((c) => c[0]);
+    expect(first.text).toBe("Подпись");
+    expect(first.link).toEqual({ type: "reply", mid: "mid.q" });
+    expect(first.attachments).toHaveLength(12);
+    expect(first.attachments?.every((a) => a.type === "image")).toBe(true);
+    expect(second.text).toBeUndefined();
+    expect(second.link).toBeUndefined();
+    expect(second.attachments?.map((a) => a.type)).toEqual(["image", "inline_keyboard"]);
+  });
+
+  it("sends https image links by URL without upload", async () => {
+    const send = sent();
+    const upload = uploads();
+    await sendMaxMediaMessage("123", "", "https://cdn.example/pic.png?x=1", { token: MOCK_TOKEN });
+    expect(upload).not.toHaveBeenCalled();
+    expect(send.mock.calls[0][0].attachments).toEqual([{ type: "image", payload: { url: "https://cdn.example/pic.png?x=1" } }]);
+  });
+
+  it("falls back to download + upload when MAX refuses the image URL", async () => {
+    const { MaxApiError } = await import("./api.js");
+    const { setMaxRuntime } = await import("./runtime.js");
+    const fetchRemoteMedia = vi.fn(async () => ({ buffer: Buffer.from("png"), contentType: "image/png", fileName: "pic.png" }));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setMaxRuntime({ channel: { media: { fetchRemoteMedia } } } as any);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const send = vi.spyOn(MaxApi.prototype, "sendMessage")
+      .mockRejectedValueOnce(Object.assign(new MaxApiError("bad url", 400), { code: "attachment.invalid" }))
+      .mockResolvedValueOnce({ message: { body: { mid: "m-up" } } } as never);
+    const upload = uploads();
+
+    const result = await sendMaxMediaMessage("123", "", "https://cdn.example/pic.png", { token: MOCK_TOKEN, mediaMaxBytes: 1000 });
+
+    expect(result.messageId).toBe("m-up");
+    expect(fetchRemoteMedia).toHaveBeenCalledWith({ url: "https://cdn.example/pic.png", maxBytes: 1000 });
+    expect(upload).toHaveBeenCalledWith("image", expect.stringMatching(/max-media-.*pic\.png$/), "image/png");
+    expect(send.mock.calls[1][0].attachments).toEqual([{ type: "image", payload: { token: "tok:image:pic.png" } }]);
+  });
+
+  it("downloads remote non-image media instead of reading the URL as a path", async () => {
+    const { setMaxRuntime } = await import("./runtime.js");
+    const fetchRemoteMedia = vi.fn(async () => ({ buffer: Buffer.from("pdf"), contentType: "application/pdf" }));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setMaxRuntime({ channel: { media: { fetchRemoteMedia } } } as any);
+    const send = sent();
+    const upload = uploads();
+    await sendMaxMediaMessage("123", "", "https://cdn.example/files/report", { token: MOCK_TOKEN });
+    expect(upload).toHaveBeenCalledWith("file", expect.stringMatching(/report\.pdf$/), "application/pdf");
+    expect(send.mock.calls[0][0].attachments).toEqual([{ type: "file", payload: { token: "tok:file:report.pdf" } }]);
+  });
+
+  it("keeps sending the rest when onError is given", async () => {
+    const { sendMaxMediaGroup } = await import("./send.js");
+    uploads();
+    const send = vi.spyOn(MaxApi.prototype, "sendMessage")
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValueOnce({ message: { body: { mid: "m-2" } } } as never);
+    const onError = vi.fn();
+    const result = await sendMaxMediaGroup("123", "", ["/a.pdf", "/b.pdf"], { token: MOCK_TOKEN, onError });
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(onError).toHaveBeenCalledWith(expect.any(Error), ["/a.pdf"]);
+    expect(result.messageIds).toEqual(["m-2"]);
+  });
+});

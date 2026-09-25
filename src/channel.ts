@@ -29,7 +29,7 @@ import {
   type ResolvedMaxAccount,
 } from './accounts.js';
 import { MaxApi, type MaxUser } from './api.js';
-import { pinMaxMessage, readMaxChannelButtons, sendMaxMessage, sendMaxMediaMessage } from './send.js';
+import { pinMaxMessage, readMaxChannelButtons, sendMaxMessage, sendMaxMediaGroup, sendMaxMediaMessage } from './send.js';
 import {
   MAX_PRESENTATION_CAPABILITIES,
   MAX_TEXT_LIMIT,
@@ -449,18 +449,27 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
       const payload = rawPayload.presentation ? await materializeMaxPresentation(rawPayload) : rawPayload;
       const effectiveText = payload === rawPayload ? text : (payload.text ?? '');
       const buttons = readMaxChannelButtons(payload.channelData);
-      const effectiveMediaUrl = mediaUrl ?? payload.mediaUrl ?? payload.mediaUrls?.[0];
+      const mediaUrls = mediaUrl
+        ? [mediaUrl]
+        : payload.mediaUrls?.length
+          ? payload.mediaUrls
+          : payload.mediaUrl
+            ? [payload.mediaUrl]
+            : [];
 
-      if (effectiveMediaUrl) {
-        const result = await sendMaxMediaMessage(to, effectiveText, effectiveMediaUrl, {
+      if (mediaUrls.length) {
+        // Albums: up to 12 images/videos per message, caption on the first,
+        // buttons on the last; report the first message (delivery.pin).
+        const result = await sendMaxMediaGroup(to, effectiveText, mediaUrls, {
           token: account.token,
           replyToMessageId: replyToId ?? undefined,
           format: 'markdown',
           buttons,
+          mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
         });
         return {
           channel: 'max',
-          messageId: result.messageId,
+          messageId: result.messageIds[0] ?? '',
         };
       }
 
@@ -526,6 +535,7 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
         token: account.token,
         replyToMessageId: replyToId ?? undefined,
         format: 'markdown',
+        mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
       });
 
       return {

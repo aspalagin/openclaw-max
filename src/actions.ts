@@ -11,7 +11,6 @@ import { getLastStickerCode } from "./sticker-cache.js";
 import { normalizeMessagePresentation } from "openclaw/plugin-sdk/interactive-runtime";
 import { sendMaxMessage, editMaxMessage, deleteMaxMessage, sendMaxMediaMessage, sendMaxSticker, sendMaxContact, sendMaxLocation, pinMaxMessage, unpinMaxMessage, readMaxChannelButtons, type MaxSendButton } from "./send.js";
 import { MAX_TEXT_LIMIT, materializeMaxPresentation, readMaxDeliveryPin } from "./presentation.js";
-import { withRemoteMediaTempFile } from "./media-temp.js";
 import { getMaxRuntime } from "./runtime.js";
 
 const providerId = "max";
@@ -230,26 +229,15 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       const mediaSource = readMediaSource(params);
 
       if (mediaSource) {
-        // Download if URL, otherwise use as local file path
-        if (mediaSource.startsWith("http://") || mediaSource.startsWith("https://")) {
-          const maxBytes = (account.config.mediaMaxMb ?? 20) * 1024 * 1024;
-          return await withRemoteMediaTempFile(mediaSource, maxBytes, async ({ path }) => {
-            const result = await sendMaxMediaMessage(to, content, path, {
-              token: account.token,
-              replyToMessageId: replyTo ?? undefined,
-              format: "markdown",
-            });
-            return withPin(result.messageId);
-          });
-        } else {
-          // Local file path (from media, buffer, or filePath params)
-          const result = await sendMaxMediaMessage(to, content, mediaSource, {
-            token: account.token,
-            replyToMessageId: replyTo ?? undefined,
-            format: "markdown",
-          });
-          return withPin(result.messageId);
-        }
+        // Local path or URL: https image links go by URL, other remote media
+        // is downloaded to a temp file and uploaded.
+        const result = await sendMaxMediaMessage(to, content, mediaSource, {
+          token: account.token,
+          replyToMessageId: replyTo ?? undefined,
+          format: "markdown",
+          mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
+        });
+        return withPin(result.messageId);
       }
 
       const result = await sendMaxMessage(to, content, {
@@ -336,6 +324,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
           token: account.token,
           replyToMessageId: replyTo ?? undefined,
           format: "markdown",
+          mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
         });
         return jsonResult({ ok: true, to, messageId: result.messageId });
       }

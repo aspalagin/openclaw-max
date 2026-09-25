@@ -14,7 +14,7 @@ import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-outbound";
 import { channelReadyPatch, createTransportActivityStatusPatch } from "openclaw/plugin-sdk/gateway-runtime";
 import { MaxApi, type MaxAttachment, type MaxUpdate, type MaxMessage, type MaxUser, type MaxCallback, type MaxUpdateType, type MaxSubscription } from "./api.js";
 import { readSecretFile, resolveMaxAccount, type MaxAccountConfig, type ResolvedMaxAccount } from "./accounts.js";
-import { answerMaxCallback, sendMaxMessage, sendMaxMediaMessage, editMaxMessage, pinMaxMessage, readMaxChannelButtons, readMaxChannelSendOptions } from "./send.js";
+import { answerMaxCallback, sendMaxMessage, sendMaxMediaGroup, editMaxMessage, pinMaxMessage, readMaxChannelButtons, readMaxChannelSendOptions } from "./send.js";
 import { resolveApprovalOverGateway } from "openclaw/plugin-sdk/approval-gateway-runtime";
 import { questionGatewayRuntime } from "openclaw/plugin-sdk/question-gateway-runtime";
 import {
@@ -23,7 +23,7 @@ import {
   readMaxDeliveryPin,
   type MaxPresentationCallback,
 } from "./presentation.js";
-import { sanitizeMaxFileName, withRemoteMediaTempFile } from "./media-temp.js";
+import { sanitizeMaxFileName } from "./media-temp.js";
 import { getMaxRuntime } from "./runtime.js";
 import { MaxStateStore } from "./state.js";
 import { rememberStickerCode } from "./sticker-cache.js";
@@ -1372,33 +1372,18 @@ async function deliverMaxReply(params: {
       ? [payload.mediaUrl]
       : [];
 
-  for (const mediaUrl of mediaList) {
-    try {
-      // Download media first if it's a URL
-      if (mediaUrl.startsWith("http://") || mediaUrl.startsWith("https://")) {
-        const maxBytes = (account.config.mediaMaxMb ?? 20) * 1024 * 1024;
-        await withRemoteMediaTempFile(mediaUrl, maxBytes, async ({ path }) => {
-          const sent = await sendMaxMediaMessage(chatId, "", path, {
-            token: account.token,
-            replyToMessageId: params.replyToId,
-            ...sendOptions,
-          });
-          noteDelivered(sent.messageId);
-          statusSink?.({ lastOutboundAt: Date.now() });
-        });
-      } else {
-        // Local file path
-        const sent = await sendMaxMediaMessage(chatId, "", mediaUrl, {
-          token: account.token,
-          replyToMessageId: params.replyToId,
-          ...sendOptions,
-        });
-        noteDelivered(sent.messageId);
-        statusSink?.({ lastOutboundAt: Date.now() });
-      }
-    } catch (err) {
-      log?.error(`[${account.accountId}] MAX media send failed: ${String(err)}`);
-    }
+  // Images/videos go as albums (up to 12 per message); https image links are
+  // sent by URL, other remote media is downloaded and uploaded.
+  if (mediaList.length) {
+    const sent = await sendMaxMediaGroup(chatId, "", mediaList, {
+      token: account.token,
+      replyToMessageId: params.replyToId,
+      mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
+      ...sendOptions,
+      onError: (err, failed) => log?.error(`[${account.accountId}] MAX media send failed (${failed.length} item(s)): ${String(err)}`),
+    });
+    for (const id of sent.messageIds) noteDelivered(id);
+    if (sent.messageIds.length) statusSink?.({ lastOutboundAt: Date.now() });
   }
 
   const pin = readMaxDeliveryPin(payload.delivery);

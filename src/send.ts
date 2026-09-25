@@ -17,6 +17,7 @@ import {
 } from "./api.js";
 import { resolveMaxAccount } from "./accounts.js";
 import { toMaxMarkdown } from "./format.js";
+import { withRemoteMediaTempFile } from "./media-temp.js";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 
 export type MaxSendButton = {
@@ -363,57 +364,93 @@ function isAttachmentNotReady(err: unknown): boolean {
   return /not\s*\.?\s*ready|not processed/i.test(message);
 }
 
+/** Images and videos per message (docs «Медиафайлы»: up to 12 in total). */
+export const MAX_VISUAL_MEDIA_PER_MESSAGE = 12;
+
+const DEFAULT_MEDIA_MAX_BYTES = 20 * 1024 * 1024;
+
+export interface MaxMediaSendOptions extends MaxSendOptions {
+  /** Download cap for remote media that has to be uploaded (default 20 MB). */
+  mediaMaxBytes?: number;
+}
+
+function isRemoteUrl(source: string): boolean {
+  return source.startsWith("https://") || source.startsWith("http://");
+}
+
+/** https link whose path looks like an image: MAX can fetch it itself (image.payload.url). */
+function isImageLink(source: string): boolean {
+  if (!source.startsWith("https://")) return false;
+  try {
+    return detectMaxMediaType(new URL(source).pathname) === "image";
+  } catch {
+    return false;
+  }
+}
+
+function mediaKind(source: string): "image" | "video" | "audio" | "file" {
+  if (!isRemoteUrl(source)) return detectMaxMediaType(source);
+  try {
+    return detectMaxMediaType(new URL(source).pathname);
+  } catch {
+    return "file";
+  }
+}
+
+/** Upload a local path, or a remote URL through a temporary file. */
+async function uploadMaxAttachment(api: MaxApi, source: string, opts: MaxMediaSendOptions): Promise<MaxAttachment> {
+  if (isRemoteUrl(source)) {
+    return withRemoteMediaTempFile(source, opts.mediaMaxBytes ?? DEFAULT_MEDIA_MAX_BYTES, async ({ path, contentType }) => {
+      const type = detectMaxMediaType(path);
+      const uploaded = await api.uploadMedia(type, path, contentType);
+      return { type, payload: { token: uploaded.token } };
+    });
+  }
+  const type = detectMaxMediaType(source);
+  const uploaded = await api.uploadMedia(type, source);
+  return { type, payload: { token: uploaded.token } };
+}
+
 /**
- * Send a media message to MAX (with upload).
- * MAX processes video/file uploads asynchronously — sendMessage may answer
- * attachment.not.ready for a few seconds; retry the send (not the upload).
- * @param to Chat ID or user ID
- * @param caption Text caption
- * @param mediaPath Local file path or URL
- * @param opts Send options
+ * One message with the given media. https image links go as image.payload.url
+ * (no download/upload round trip); if MAX refuses the message, those links are
+ * uploaded and the message is sent once more. MAX processes video/file uploads
+ * asynchronously — sendMessage may answer attachment.not.ready for a few
+ * seconds; retry the send (not the upload).
  */
-export async function sendMaxMediaMessage(
+async function sendMaxAttachmentsMessage(
+  api: MaxApi,
   to: string,
   caption: string,
-  mediaPath: string,
-  opts: MaxSendOptions = {},
+  sources: string[],
+  opts: MaxMediaSendOptions,
 ): Promise<{ messageId: string; raw: MaxSendResult }> {
-  const token = resolveToken(opts);
-  const api = new MaxApi({ token });
-
-  const mediaType = detectMaxMediaType(mediaPath);
-
-  // Upload media
-  const uploadResult = await api.uploadMedia(mediaType, mediaPath);
-
-  // Build attachment — MAX requires token from upload response
-  const attachments: MaxAttachment[] = [
-    {
-      type: mediaType,
-      payload: { token: uploadResult.token },
-    },
-  ];
-
-  // Add inline keyboard if present
-  if (opts.buttons?.length) {
-    attachments.push(buildInlineKeyboard(opts.buttons) as unknown as MaxAttachment);
-  }
-
-  const body: MaxNewMessageBody = {
-    text: formatOutboundText(caption, opts.format) || undefined,
-    format: opts.format ?? undefined,
-    notify: opts.notify,
-    attachments,
-  };
-
-  if (opts.replyToMessageId) {
-    body.link = { type: "reply", mid: opts.replyToMessageId };
-  }
-
   const target = await resolveMaxTarget(api, to);
   const params = buildSendParams(target, opts);
 
-  const result = await retryAsync(() => api.sendMessage(body, params), {
+  const build = async (allowLinks: boolean): Promise<MaxNewMessageBody> => {
+    const attachments: MaxAttachment[] = [];
+    for (const source of sources) {
+      attachments.push(allowLinks && isImageLink(source)
+        ? { type: "image", payload: { url: source } }
+        : await uploadMaxAttachment(api, source, opts));
+    }
+    if (opts.buttons?.length) {
+      attachments.push(buildInlineKeyboard(opts.buttons) as unknown as MaxAttachment);
+    }
+    const body: MaxNewMessageBody = {
+      text: formatOutboundText(caption, opts.format) || undefined,
+      format: opts.format ?? undefined,
+      notify: opts.notify,
+      attachments,
+    };
+    if (opts.replyToMessageId) {
+      body.link = { type: "reply", mid: opts.replyToMessageId };
+    }
+    return body;
+  };
+
+  const send = (body: MaxNewMessageBody) => retryAsync(() => api.sendMessage(body, params), {
     attempts: 6,
     minDelayMs: 1_500,
     maxDelayMs: 4_000,
@@ -421,10 +458,102 @@ export async function sendMaxMediaMessage(
     shouldRetry: (err) => isAttachmentNotReady(err),
   });
 
+  let result: MaxSendResult;
+  if (sources.some(isImageLink)) {
+    try {
+      result = await send(await build(true));
+    } catch (err) {
+      if (!(err instanceof MaxApiError)) throw err;
+      console.warn(`[MAX] image by URL refused (${err.code ?? err.status}); uploading instead`);
+      result = await send(await build(false));
+    }
+  } else {
+    result = await send(await build(false));
+  }
+
   return {
     messageId: result.message?.body?.mid ?? "",
     raw: result,
   };
+}
+
+/**
+ * Send a media message to MAX (with upload).
+ * @param to Chat ID or user ID
+ * @param caption Text caption
+ * @param mediaPath Local file path or URL (https image links are sent by URL)
+ * @param opts Send options
+ */
+export async function sendMaxMediaMessage(
+  to: string,
+  caption: string,
+  mediaPath: string,
+  opts: MaxMediaSendOptions = {},
+): Promise<{ messageId: string; raw: MaxSendResult }> {
+  const token = resolveToken(opts);
+  const api = new MaxApi({ token });
+  return sendMaxAttachmentsMessage(api, to, caption, [mediaPath], opts);
+}
+
+/**
+ * Split media into messages MAX accepts: consecutive images/videos go together
+ * (up to 12 per message, an album), audio and files one per message. Order is
+ * kept.
+ */
+export function groupMaxMedia(sources: string[]): string[][] {
+  const groups: string[][] = [];
+  let album: string[] = [];
+  const flush = () => {
+    if (album.length) groups.push(album);
+    album = [];
+  };
+  for (const source of sources) {
+    const kind = mediaKind(source);
+    if (kind === "image" || kind === "video") {
+      if (album.length >= MAX_VISUAL_MEDIA_PER_MESSAGE) flush();
+      album.push(source);
+    } else {
+      flush();
+      groups.push([source]);
+    }
+  }
+  flush();
+  return groups;
+}
+
+/**
+ * Send several media as few messages as MAX allows (albums of up to 12
+ * images/videos). Caption and reply link go on the first message, buttons on
+ * the last. Without `onError` the first failure throws; with it, a failed
+ * message is reported and the rest are still sent.
+ */
+export async function sendMaxMediaGroup(
+  to: string,
+  caption: string,
+  sources: string[],
+  opts: MaxMediaSendOptions & { onError?: (err: unknown, sources: string[]) => void } = {},
+): Promise<{ messageIds: string[] }> {
+  const token = resolveToken(opts);
+  const api = new MaxApi({ token });
+  const { onError, ...sendOpts } = opts;
+  const groups = groupMaxMedia(sources);
+  const messageIds: string[] = [];
+  for (let index = 0; index < groups.length; index += 1) {
+    const first = index === 0;
+    const last = index === groups.length - 1;
+    try {
+      const sent = await sendMaxAttachmentsMessage(api, to, first ? caption : "", groups[index], {
+        ...sendOpts,
+        replyToMessageId: first ? sendOpts.replyToMessageId : undefined,
+        buttons: last ? sendOpts.buttons : undefined,
+      });
+      if (sent.messageId) messageIds.push(sent.messageId);
+    } catch (err) {
+      if (!onError) throw err;
+      onError(err, groups[index]);
+    }
+  }
+  return { messageIds };
 }
 
 /**
