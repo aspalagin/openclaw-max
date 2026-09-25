@@ -2,11 +2,12 @@
  * Tests for MAX config Zod schema
  */
 
-import { describe, it, expect } from "vitest";
 import {
   DmPolicySchema as SdkDmPolicySchema,
   GroupPolicySchema as SdkGroupPolicySchema,
 } from "openclaw/plugin-sdk/channel-config-schema";
+import { describe, expect,it } from "vitest";
+
 import {
   DmPolicySchema,
   GroupPolicySchema,

@@ -7,34 +7,37 @@
  */
 
 import { randomBytes } from "node:crypto";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
+
+import { resolveApprovalOverGateway } from "openclaw/plugin-sdk/approval-gateway-runtime";
 import type { ChannelAccountSnapshot, ChannelLogSink } from "openclaw/plugin-sdk/channel-contract";
 import { type ChannelInboundMediaInput, toInboundMediaFacts } from "openclaw/plugin-sdk/channel-inbound";
 import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-outbound";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import { channelReadyPatch, createTransportActivityStatusPatch } from "openclaw/plugin-sdk/gateway-runtime";
-import { MaxApi, type MaxAttachment, type MaxUpdate, type MaxMessage, type MaxUser, type MaxCallback, type MaxUpdateType, type MaxSubscription } from "./api.js";
-import type { MaxMarkupElement } from "./types.js";
-import { readSecretFile, resolveMaxAccount, type MaxAccountConfig, type ResolvedMaxAccount } from "./accounts.js";
-import { answerMaxCallback, sendMaxMessage, sendMaxMediaGroup, editMaxMessage, pinMaxMessage, readMaxChannelButtons, readMaxChannelSendOptions } from "./send.js";
-import { resolveApprovalOverGateway } from "openclaw/plugin-sdk/approval-gateway-runtime";
 import { questionGatewayRuntime } from "openclaw/plugin-sdk/question-gateway-runtime";
+
+import { type MaxAccountConfig, readSecretFile, type ResolvedMaxAccount } from "./accounts.js";
+import type { MaxApi} from "./api.js";
+import { type MaxAttachment, type MaxCallback, type MaxMessage, type MaxSubscription,type MaxUpdate, type MaxUpdateType, type MaxUser } from "./api.js";
+import { sanitizeMaxFileName } from "./media-temp.js";
 import {
   decodeMaxPresentationCallback,
   materializeMaxPresentation,
-  readMaxDeliveryPin,
   type MaxPresentationCallback,
+  readMaxDeliveryPin,
 } from "./presentation.js";
-import { sanitizeMaxFileName } from "./media-temp.js";
 import { getMaxRuntime } from "./runtime.js";
+import { answerMaxCallback, editMaxMessage, pinMaxMessage, readMaxChannelButtons, readMaxChannelSendOptions,sendMaxMediaGroup, sendMaxMessage } from "./send.js";
 import { MaxStateStore } from "./state.js";
 import { rememberStickerCode } from "./sticker-cache.js";
+import type { MaxMarkupElement } from "./types.js";
 import {
+  type MaxWebhookTarget,
+  type RegisterMaxWebhookRoute,
   registerMaxWebhookRoute,
   registerMaxWebhookTarget,
   resolveMaxWebhookPath,
   subscribeMaxWebhook,
-  type MaxWebhookTarget,
-  type RegisterMaxWebhookRoute,
 } from "./webhook.js";
 
 /**
@@ -1070,12 +1073,6 @@ export async function processIncomingMessage(
     }
   };
 
-  const draftFlush = async () => {
-    if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; }
-    if (!draftLastText) return;
-    // no-op if nothing changed
-  };
-
   const draftClear = async () => {
     if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; }
     draftStopped = true;
@@ -1104,7 +1101,7 @@ export async function processIncomingMessage(
                 buttons,
               });
               draftLastText = finalText;
-            } catch (_) { /* best effort */ }
+            } catch { /* best effort */ }
           }
           draftStopped = true;
 
@@ -1436,7 +1433,8 @@ function withoutMaxButtons(channelData: unknown): unknown {
   if (!channelData || typeof channelData !== "object" || Array.isArray(channelData)) return channelData;
   const maxData = (channelData as Record<string, unknown>).max;
   if (!maxData || typeof maxData !== "object" || Array.isArray(maxData)) return channelData;
-  const { buttons: _buttons, ...rest } = maxData as Record<string, unknown>;
+  const rest = { ...(maxData as Record<string, unknown>) };
+  delete rest.buttons;
   return { ...(channelData as Record<string, unknown>), max: rest };
 }
 

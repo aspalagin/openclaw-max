@@ -2,11 +2,13 @@
  * Tests for MAX account resolution
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
+import { describe, expect, it } from "vitest";
+
 import {
   listMaxAccountIds,
   resolveDefaultMaxAccountId,

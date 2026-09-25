@@ -2,9 +2,10 @@
  * Tests for MAX monitor (interface verification)
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { startMaxPolling, MAX_SUBSCRIBED_UPDATE_TYPES, createSerializedWebhookHandler } from "./monitor.js";
+import { describe, expect, it, vi } from "vitest";
+
 import type { MaxMessage, MaxUpdate } from "./api.js";
+import { createSerializedWebhookHandler,MAX_SUBSCRIBED_UPDATE_TYPES, startMaxPolling } from "./monitor.js";
 
 function makeMsgUpdate(chatId: number, mid: string): MaxUpdate {
   return {

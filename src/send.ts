@@ -2,23 +2,23 @@
  * Outbound message sending for MAX.
  */
 
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import { retryAsync } from "openclaw/plugin-sdk/runtime-env";
 
+import { resolveMaxAccount } from "./accounts.js";
 import {
   MaxApi,
   MaxApiError,
-  MaxRequestTimeoutError,
-  type MaxNewMessageBody,
-  type MaxSendResult,
+  type MaxAttachment,
   type MaxInlineKeyboardAttachment,
   type MaxInlineKeyboardButton,
+  type MaxNewMessageBody,
+  MaxRequestTimeoutError,
+  type MaxSendResult,
   type MaxStickerAttachment,
-  type MaxAttachment,
 } from "./api.js";
-import { resolveMaxAccount } from "./accounts.js";
 import { toMaxMarkdown } from "./format.js";
 import { withRemoteMediaTempFile } from "./media-temp.js";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 
 export type MaxSendButton = {
   text: string;

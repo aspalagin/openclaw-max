@@ -2,11 +2,12 @@
  * Tests for MAX message actions adapter
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import { mkdtemp, rm, writeFile } from "fs/promises";
-import { join } from "path";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import { tmpdir } from "os";
+import { join } from "path";
+import { beforeEach,describe, expect, it, vi } from "vitest";
+
 import { maxMessageActions } from "./actions.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -142,7 +143,7 @@ describe("MAX Message Actions", () => {
           action: "send",
           params: { target: "123", message: "Hello" },
           cfg,
-        } as any),
+        } as never),
       ).resolves.toBeDefined();
     });
 
@@ -153,7 +154,7 @@ describe("MAX Message Actions", () => {
           action: "send",
           params: { target: "123", message: "Hello" },
           cfg,
-        } as any),
+        } as never),
       ).rejects.toThrow("token not configured");
     });
 
@@ -166,7 +167,7 @@ describe("MAX Message Actions", () => {
           action: "send",
           params: { message: "Hello" },
           cfg,
-        } as any),
+        } as never),
       ).rejects.toThrow();
     });
 
@@ -179,7 +180,7 @@ describe("MAX Message Actions", () => {
           action: "send",
           params: { target: "123" },
           cfg,
-        } as any),
+        } as never),
       ).rejects.toThrow();
     });
 
@@ -204,7 +205,7 @@ describe("MAX Message Actions", () => {
           action: "send",
           params: { target: "123", message: "" },
           cfg,
-        } as any),
+        } as never),
       ).resolves.toBeDefined();
     });
 
@@ -228,7 +229,7 @@ describe("MAX Message Actions", () => {
         action: "send",
         params: { target: "123", message: "Reply", replyTo: "original-msg" },
         cfg,
-      } as any);
+      } as never);
 
       const callBody = JSON.parse(
         (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body,
@@ -253,7 +254,7 @@ describe("MAX Message Actions", () => {
           action: "edit",
           params: { messageId: "msg-123", message: "Updated" },
           cfg,
-        } as any),
+        } as never),
       ).resolves.toBeDefined();
     });
 
@@ -267,7 +268,7 @@ describe("MAX Message Actions", () => {
           action: "edit",
           params: { message: "Updated" },
           cfg,
-        } as any),
+        } as never),
       ).rejects.toThrow();
     });
 
@@ -281,7 +282,7 @@ describe("MAX Message Actions", () => {
           action: "edit",
           params: { messageId: "msg-123" },
           cfg,
-        } as any),
+        } as never),
       ).rejects.toThrow();
     });
   });
@@ -302,7 +303,7 @@ describe("MAX Message Actions", () => {
           action: "delete",
           params: { messageId: "msg-456" },
           cfg,
-        } as any),
+        } as never),
       ).resolves.toBeDefined();
     });
 
@@ -316,7 +317,7 @@ describe("MAX Message Actions", () => {
           action: "delete",
           params: {},
           cfg,
-        } as any),
+        } as never),
       ).rejects.toThrow();
     });
   });
@@ -357,7 +358,7 @@ describe("MAX Message Actions", () => {
             action: "sendAttachment",
             params: { chatId: "max:123", media: mediaPath, filename: "clip.mp4", caption: "Video" },
             cfg,
-          } as any),
+          } as never),
         ).resolves.toBeDefined();
 
         expect(global.fetch).toHaveBeenCalledTimes(3);
@@ -387,7 +388,7 @@ describe("MAX Message Actions", () => {
           action: "unsupported" as never,
           params: {},
           cfg,
-        } as any),
+        } as never),
       ).rejects.toThrow("not supported");
     });
   });
@@ -421,7 +422,7 @@ describe("MAX Message Actions", () => {
         params: { target: "123", message: "Test" },
         cfg,
         accountId: "prod",
-      } as any);
+      } as never);
 
       // Verify token used in Authorization header
       const authHeader = (global.fetch as ReturnType<typeof vi.fn>).mock

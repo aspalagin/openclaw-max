@@ -3,7 +3,9 @@
  */
 
 import { Buffer } from "node:buffer";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+import { afterEach,beforeEach, describe, expect, it, vi } from "vitest";
+
 import { MaxApi, MaxApiError, MaxRequestTimeoutError } from "./api.js";
 
 const MOCK_TOKEN = "test-bot-token";

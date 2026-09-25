@@ -2,16 +2,17 @@
  * MAX channel message actions adapter — implements message tool actions
  */
 
-import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import type { ChannelMessageActionAdapter } from "openclaw/plugin-sdk/channel-contract";
-import { jsonResult } from "openclaw/plugin-sdk/tool-results";
-import { readStringParam } from "openclaw/plugin-sdk/param-readers";
-import { listMaxAccountIds, resolveMaxAccount } from "./accounts.js";
-import { getLastStickerCode } from "./sticker-cache.js";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import { normalizeMessagePresentation } from "openclaw/plugin-sdk/interactive-runtime";
-import { sendMaxMessage, editMaxMessage, deleteMaxMessage, sendMaxMediaMessage, sendMaxSticker, sendMaxContact, sendMaxLocation, pinMaxMessage, unpinMaxMessage, readMaxChannelButtons, type MaxSendButton } from "./send.js";
-import { MAX_TEXT_LIMIT, materializeMaxPresentation, readMaxDeliveryPin } from "./presentation.js";
+import { readStringParam } from "openclaw/plugin-sdk/param-readers";
+import { jsonResult } from "openclaw/plugin-sdk/tool-results";
+
+import { listMaxAccountIds, resolveMaxAccount } from "./accounts.js";
+import { materializeMaxPresentation, MAX_TEXT_LIMIT, readMaxDeliveryPin } from "./presentation.js";
 import { getMaxRuntime } from "./runtime.js";
+import { deleteMaxMessage, editMaxMessage, type MaxSendButton,pinMaxMessage, readMaxChannelButtons, sendMaxContact, sendMaxLocation, sendMaxMediaMessage, sendMaxMessage, sendMaxSticker, unpinMaxMessage } from "./send.js";
+import { getLastStickerCode } from "./sticker-cache.js";
 
 const providerId = "max";
 const mediaSourceKeys = ["media", "filePath", "path", "fileUrl", "url", "buffer", "image"] as const;

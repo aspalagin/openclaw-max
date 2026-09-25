@@ -12,8 +12,9 @@
  * - Security warnings for group policy
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
+import { describe, expect, it, vi } from "vitest";
+
 import { maxPlugin } from "./channel.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -769,7 +770,7 @@ describe("MAX Group Functionality", () => {
           accountId: "default",
           configured: false,
           running: false,
-        } as any,
+        } as never,
       ]);
       expect(issues.length).toBe(1);
       expect(issues[0].kind).toBe("config");
@@ -782,7 +783,7 @@ describe("MAX Group Functionality", () => {
           accountId: "default",
           configured: true,
           running: true,
-        } as any,
+        } as never,
       ]);
       expect(issues.length).toBe(0);
     });

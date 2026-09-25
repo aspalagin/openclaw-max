@@ -2,8 +2,9 @@
  * Tests for MAX onboarding adapter
  */
 
-import { describe, it, expect } from "vitest";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
+import { describe, expect,it } from "vitest";
+
 import { maxSetupWizard } from "./onboarding.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

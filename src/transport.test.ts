@@ -16,9 +16,9 @@ import type { MaxApi } from "./api.js";
 import {
   clearMaxSubscriptionsForPolling,
   MAX_SUBSCRIBED_UPDATE_TYPES,
+  MAX_SUBSCRIPTION_CHECK_INTERVAL_MS,
   type MaxStatusPatch,
   resolveMaxTransport,
-  MAX_SUBSCRIPTION_CHECK_INTERVAL_MS,
   resolveMaxWebhookSecret,
   startMaxPolling,
   startMaxSubscriptionWatch,

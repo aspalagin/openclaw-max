@@ -11,6 +11,7 @@
 
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import {
   normalizeWebhookPath,
@@ -18,9 +19,10 @@ import {
   registerPluginHttpRoute,
   resolveWebhookPath,
 } from "openclaw/plugin-sdk/webhook-ingress";
-import type { MaxUpdate } from "./api.js";
+
 import type { ResolvedMaxAccount } from "./accounts.js";
-import { MaxApi } from "./api.js";
+import type { MaxUpdate } from "./api.js";
+import type { MaxApi } from "./api.js";
 
 /** Plugin id from openclaw.plugin.json — the owner of the gateway route. */
 export const MAX_PLUGIN_ID = "openclaw-max";

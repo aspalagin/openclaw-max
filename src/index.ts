@@ -6,6 +6,7 @@
 
 import type { ChannelPlugin, OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { emptyPluginConfigSchema } from "openclaw/plugin-sdk/core";
+
 import { maxPlugin } from "./channel.js";
 import { setMaxRuntime } from "./runtime.js";
 

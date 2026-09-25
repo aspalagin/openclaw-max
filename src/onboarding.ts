@@ -2,22 +2,21 @@
  * MAX channel onboarding — setup wizard for `openclaw channel add max`
  */
 
+import type { DmPolicy } from "openclaw/plugin-sdk/config-contracts";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import {
   DEFAULT_ACCOUNT_ID,
-  normalizeAccountId,
 } from "openclaw/plugin-sdk/core";
+import type {
+  ChannelSetupDmPolicy,
+  ChannelSetupWizard,
+} from "openclaw/plugin-sdk/setup";
 import {
   formatDocsLink,
 } from "openclaw/plugin-sdk/setup";
-import type { DmPolicy } from "openclaw/plugin-sdk/config-contracts";
-import type {
-  ChannelSetupWizard,
-  ChannelSetupDmPolicy,
-} from "openclaw/plugin-sdk/setup";
+
 import {
   listMaxAccountIds,
-  resolveDefaultMaxAccountId,
   resolveMaxAccount,
 } from "./accounts.js";
 import { MaxApi } from "./api.js";
@@ -100,7 +99,7 @@ export const maxSetupWizard: ChannelSetupWizard = {
         (accountId) => resolveMaxAccount({ cfg, accountId }).tokenSource !== "none",
       );
     },
-    resolveStatusLines: ({ cfg, configured }) => {
+    resolveStatusLines: ({ configured }) => {
       return [`MAX: ${configured ? "configured" : "needs bot token"}`];
     },
   },
@@ -155,7 +154,7 @@ export const maxSetupWizard: ChannelSetupWizard = {
         return applyAccountConfig({ cfg, accountId, patch: {} });
       },
 
-      applySet: async ({ cfg, accountId, value, resolvedValue }) => {
+      applySet: async ({ cfg, accountId, resolvedValue }) => {
         const tokenValue = String(resolvedValue).trim();
 
         // Verify token by calling GET /me
@@ -185,7 +184,7 @@ export const maxSetupWizard: ChannelSetupWizard = {
       placeholder: "/path/to/max-token.txt",
       required: false,
 
-      shouldPrompt: ({ cfg, accountId, credentialValues }) => {
+      shouldPrompt: ({ credentialValues }) => {
         // Only prompt if no token was set via credential
         return !credentialValues.botToken;
       },
@@ -203,7 +202,7 @@ export const maxSetupWizard: ChannelSetupWizard = {
     },
   ],
 
-  finalize: ({ cfg, accountId }) => {
+  finalize: ({ cfg }) => {
     // Ensure the channel is enabled
     return {
       cfg: {

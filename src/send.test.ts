@@ -2,19 +2,20 @@
  * Tests for MAX message sending
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
-import {
-  sendMaxMessage,
-  editMaxMessage,
-  deleteMaxMessage,
-  sendMaxMediaMessage,
-  sendMaxSticker,
-  sendMaxContact,
-  detectMaxMediaType,
-  resolveMaxTarget,
-} from "./send.js";
+import { beforeEach,describe, expect, it, vi } from "vitest";
+
 import { MaxApi, MaxRequestTimeoutError } from "./api.js";
+import {
+  deleteMaxMessage,
+  detectMaxMediaType,
+  editMaxMessage,
+  resolveMaxTarget,
+  sendMaxContact,
+  sendMaxMediaMessage,
+  sendMaxMessage,
+  sendMaxSticker,
+} from "./send.js";
 
 const MOCK_TOKEN = "test-token";
 

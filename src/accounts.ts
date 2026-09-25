@@ -2,9 +2,10 @@
  * MAX account resolution — reads config and produces a resolved account object.
  */
 
+import { lstatSync, readFileSync } from "node:fs";
+
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "openclaw/plugin-sdk/core";
-import { lstatSync, readFileSync } from "node:fs";
 
 export interface MaxAccountConfig {
   enabled?: boolean;
@@ -96,7 +97,7 @@ export function listMaxAccountIds(cfg: OpenClawConfig): string[] {
 /**
  * Resolve the default account ID.
  */
-export function resolveDefaultMaxAccountId(cfg: OpenClawConfig): string {
+export function resolveDefaultMaxAccountId(_cfg: OpenClawConfig): string {
   return DEFAULT_ACCOUNT_ID;
 }
 

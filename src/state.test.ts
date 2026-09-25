@@ -2,8 +2,9 @@
  * Tests for persistent MAX state (polling marker + chat registry)
  */
 
-import { describe, it, expect } from "vitest";
-import { MaxStateStore, loadMaxAccountState, resolveMaxStatePath } from "./state.js";
+import { describe, expect,it } from "vitest";
+
+import { loadMaxAccountState, MaxStateStore, resolveMaxStatePath } from "./state.js";
 
 describe("MaxStateStore", () => {
   it("should persist the polling marker across store instances", async () => {

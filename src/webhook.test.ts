@@ -2,22 +2,24 @@
  * Tests for MAX webhook handler
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
+
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
+import { describe, expect, it, vi } from "vitest";
+
+import type { ResolvedMaxAccount } from "./accounts.js";
+import { MaxApi } from "./api.js";
 import {
   handleMaxWebhookRequest,
   maxUpdateDedupeKey,
+  type MaxWebhookTarget,
   registerMaxWebhookRoute,
   registerMaxWebhookTarget,
   resolveMaxWebhookPath,
   subscribeMaxWebhook,
   unsubscribeMaxWebhook,
-  type MaxWebhookTarget,
 } from "./webhook.js";
-import { MaxApi } from "./api.js";
-import type { ResolvedMaxAccount } from "./accounts.js";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 
 // Other tests replace global.fetch with mocks; the HTTP round trip needs the real one.
 const realFetch = globalThis.fetch;

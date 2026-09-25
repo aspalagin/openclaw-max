@@ -4,44 +4,31 @@
  * Implements the ChannelPlugin interface to integrate MAX messenger.
  */
 
-import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
-import type { ChannelPlugin } from 'openclaw/plugin-sdk/channel-core';
 import type { ChannelMeta } from 'openclaw/plugin-sdk/channel-contract';
-import {
-  DEFAULT_ACCOUNT_ID,
-  normalizeAccountId,
-  buildChannelConfigSchema,
-  formatPairingApproveHint,
-  setAccountEnabledInConfigSection,
-  deleteAccountFromConfigSection,
-  applyAccountNameToChannelSection,
-  migrateBaseNameToDefaultAccount,
-} from 'openclaw/plugin-sdk/core';
-import { PAIRING_APPROVED_MESSAGE } from 'openclaw/plugin-sdk/channel-status';
-import { resolveToolsBySender } from 'openclaw/plugin-sdk/channel-policy';
-
+import type { ChannelPlugin } from 'openclaw/plugin-sdk/channel-core';
 import type { GroupToolPolicyConfig } from 'openclaw/plugin-sdk/channel-policy';
+import { resolveToolsBySender } from 'openclaw/plugin-sdk/channel-policy';
+import { PAIRING_APPROVED_MESSAGE } from 'openclaw/plugin-sdk/channel-status';
+import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
+import {
+  applyAccountNameToChannelSection,
+  buildChannelConfigSchema,
+  DEFAULT_ACCOUNT_ID,
+  deleteAccountFromConfigSection,
+  formatPairingApproveHint,
+  migrateBaseNameToDefaultAccount,
+  normalizeAccountId,
+  setAccountEnabledInConfigSection,
+} from 'openclaw/plugin-sdk/core';
 
 import {
   listMaxAccountIds,
-  resolveDefaultMaxAccountId,
-  resolveMaxAccount,
   type ResolvedMaxAccount,
+  resolveMaxAccount,
 } from './accounts.js';
-import { MaxApi, type MaxUser } from './api.js';
-import { pinMaxMessage, readMaxChannelButtons, sendMaxMessage, sendMaxMediaGroup, sendMaxMediaMessage } from './send.js';
-import {
-  MAX_PRESENTATION_CAPABILITIES,
-  MAX_TEXT_LIMIT,
-  materializeMaxPresentation,
-  renderMaxPresentation,
-} from './presentation.js';
-import { startMaxPolling } from './monitor.js';
-import { getMaxRuntime, loadMaxConfig, writeMaxConfig } from './runtime.js';
-import { maxSetupWizard } from './onboarding.js';
-import { MaxConfigSchema } from './config-schema.js';
 import { maxMessageActions } from './actions.js';
-import { loadMaxAccountState } from './state.js';
+import { MaxApi } from './api.js';
+import { MaxConfigSchema } from './config-schema.js';
 import {
   buildMaxModelBrowseChannelData,
   buildMaxModelsAddProviderChannelData,
@@ -49,6 +36,17 @@ import {
   buildMaxModelsMenuChannelData,
   buildMaxModelsProviderChannelData,
 } from './model-buttons.js';
+import { startMaxPolling } from './monitor.js';
+import { maxSetupWizard } from './onboarding.js';
+import {
+  materializeMaxPresentation,
+  MAX_PRESENTATION_CAPABILITIES,
+  MAX_TEXT_LIMIT,
+  renderMaxPresentation,
+} from './presentation.js';
+import { getMaxRuntime, loadMaxConfig, writeMaxConfig } from './runtime.js';
+import { pinMaxMessage, readMaxChannelButtons, sendMaxMediaGroup, sendMaxMediaMessage,sendMaxMessage } from './send.js';
+import { loadMaxAccountState } from './state.js';
 
 // ── MAX group policy helpers ──
 // These mirror resolveChannelGroupRequireMention/resolveChannelGroupToolsPolicy

@@ -2,17 +2,18 @@
  * Tests for MAX runtime bridge
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { setMaxRuntime, getMaxRuntime, loadMaxConfig, writeMaxConfig } from './runtime.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { getMaxRuntime, loadMaxConfig, setMaxRuntime, writeMaxConfig } from './runtime.js';
 
 describe('MAX Runtime Bridge', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const mockRuntime = {
     channel: {} as never,
     config: {} as never,
     agent: {} as never,
     logging: {} as never,
-  } as any;
+  } as unknown as Parameters<typeof setMaxRuntime>[0];
 
   beforeEach(() => {
     // Reset runtime

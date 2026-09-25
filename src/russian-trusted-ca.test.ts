@@ -4,7 +4,9 @@
  */
 
 import { X509Certificate } from "node:crypto";
-import { describe, it, expect } from "vitest";
+
+import { describe, expect,it } from "vitest";
+
 import { RUSSIAN_TRUSTED_ROOT_CA, RUSSIAN_TRUSTED_SUB_CA } from "./russian-trusted-ca.js";
 
 describe("Russian Trusted CA bundle", () => {
