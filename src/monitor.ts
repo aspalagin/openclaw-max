@@ -287,7 +287,8 @@ function sendReadReceipt(chatId: number | undefined, opts: MaxMonitorOptions): v
   });
 }
 
-async function dispatchUpdate(
+/** @internal - Exported for testing only */
+export async function dispatchUpdate(
   update: MaxUpdate,
   opts: MaxMonitorOptions,
 ): Promise<void> {
@@ -321,7 +322,7 @@ async function dispatchUpdate(
     case "message_callback": {
       if (!update.callback) break;
       statusSink?.({ lastInboundAt: Date.now() });
-      await processCallback(update.callback, opts);
+      await processCallback(update.callback, update.message ?? null, update.user_locale, opts);
       break;
     }
 
@@ -598,6 +599,12 @@ export async function processIncomingMessage(
         log?.debug?.(`[${account.accountId}] Reply to bot message treated as mention`);
       }
     }
+  }
+
+  // Pressing a button on the bot's own keyboard is addressed to the bot, like a
+  // reply to its message — don't drop it at the group mention gate.
+  if (isGroup && isCallbackCommand) {
+    wasMentioned = true;
   }
 
   // DM security: check pairing/allowlist
@@ -934,27 +941,41 @@ export async function processIncomingMessage(
   await draftClear();
 }
 
+/**
+ * Synthesize a regular message from a button press. The keyboard's message is
+ * a sibling of `callback` in the update; its recipient is the real chat
+ * (dialog chat_id ≠ user_id). Only when that message is gone (null) do we fall
+ * back to addressing the pressing user.
+ * callback_id is not a valid MAX message id, so replies to callback-originated
+ * commands must not use it as replyToMessageId.
+ * @internal - Exported for testing only
+ */
+export function buildCallbackMessage(
+  callback: MaxCallback,
+  message: MaxMessage | null,
+): MaxMessage & { __maxCallback: true } {
+  return {
+    __maxCallback: true,
+    sender: callback.user,
+    recipient: message ? message.recipient : { chat_id: callback.user.user_id },
+    timestamp: callback.timestamp,
+    body: {
+      mid: callback.callback_id,
+      text: callback.payload ?? "",
+    },
+  };
+}
+
 async function processCallback(
   callback: MaxCallback,
+  message: MaxMessage | null,
+  userLocale: string | null | undefined,
   opts: MaxMonitorOptions,
 ): Promise<void> {
   const payload = callback.payload ?? "";
   if (!payload.trim()) return;
 
-  // Synthesize as a regular message. callback_id is not a valid MAX message id,
-  // so replies to callback-originated commands must not use it as replyToMessageId.
-  const syntheticMessage: MaxMessage & { __maxCallback?: boolean } = {
-    __maxCallback: true,
-    sender: callback.user,
-    recipient: callback.message?.recipient ?? { chat_id: callback.user.user_id },
-    timestamp: callback.timestamp,
-    body: {
-      mid: callback.callback_id,
-      text: payload,
-    },
-  };
-
-  await processIncomingMessage(syntheticMessage, null, opts);
+  await processIncomingMessage(buildCallbackMessage(callback, message), userLocale, opts);
 }
 
 async function processBotStarted(

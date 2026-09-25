@@ -245,3 +245,150 @@ describe("processIncomingMessage inbound media", () => {
     expect(dispatchedCtx?.MediaPath ?? (dispatchedCtx?.media as { path?: string }[])[0]?.path).toBe(saved[0].path);
   });
 });
+
+// Raw `message_callback` update captured live on 2026-09-26 (names/usernames
+// neutralized). `message` is a sibling of `callback`, not nested in it.
+const LIVE_MESSAGE_CALLBACK = {
+  callback: {
+    timestamp: 1790372541327,
+    callback_id: "f9LHodD0cOIcE0GTHf8RdfJDkzGZdg6GFHBI3eVxF-WDgGebGQjICTeb13K9VXDTSAxWIX9unc3bYj__sVyQ2AhBa3jV9ItunfosDJPY084qccjSZiQo",
+    user: { user_id: 4260364, first_name: "User", is_bot: false, last_name: "", last_activity_time: 1790372539000, name: "User" },
+    payload: "live-callback-test",
+  },
+  timestamp: 1790372541327,
+  message: {
+    recipient: { chat_type: "dialog", chat_id: 242316535, user_id: 4260364 },
+    timestamp: 1790372383780,
+    body: {
+      mid: "mid.000000000e7174f701a0da828c245855",
+      seq: 117333844543428693,
+      text: "Live-тест 3: нажми кнопку",
+      attachments: [
+        {
+          payload: { buttons: [[{ payload: "live-callback-test", text: "Нажми меня", type: "callback" }]] },
+          type: "inline_keyboard",
+        },
+      ],
+    },
+    sender: { user_id: 238057211, first_name: "Bot", is_bot: true, username: "test_bot", last_activity_time: 1790372542172, name: "Bot" },
+  },
+  user_locale: "ru",
+  update_type: "message_callback",
+} as const;
+
+function makeCallbackRuntime() {
+  const dispatched: Record<string, unknown>[] = [];
+  const core = {
+    channel: {
+      pairing: { readAllowFromStore: vi.fn(async () => []) },
+      routing: {
+        resolveAgentRoute: vi.fn(({ peer }: { peer: { kind: string; id: string } }) => ({
+          agentId: "main",
+          accountId: "default",
+          sessionKey: `agent:main:max:${peer.kind}:${peer.id}`,
+        })),
+      },
+      session: {
+        resolveStorePath: vi.fn(() => "/tmp/store"),
+        readSessionUpdatedAt: vi.fn(() => undefined),
+        recordSessionMetaFromInbound: vi.fn(async () => undefined),
+      },
+      reply: {
+        resolveEnvelopeFormatOptions: vi.fn(() => ({})),
+        formatAgentEnvelope: vi.fn(({ body }: { body: string }) => body),
+        finalizeInboundContext: (ctx: Record<string, unknown>) => ctx,
+        dispatchReplyWithBufferedBlockDispatcher: vi.fn(async ({ ctx }: { ctx: Record<string, unknown> }) => {
+          dispatched.push(ctx);
+        }),
+      },
+    },
+  };
+  return { core, dispatched };
+}
+
+function makeCallbackOpts(accountConfig: Record<string, unknown>) {
+  return {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    api: { sendAction: vi.fn(async () => ({ success: true })) } as any,
+    account: {
+      accountId: "default",
+      enabled: true,
+      token: "t",
+      tokenSource: "config" as const,
+      config: accountConfig,
+    },
+    config: { channels: {} },
+    abortSignal: new AbortController().signal,
+  };
+}
+
+describe("message_callback", () => {
+  it("takes the recipient from the sibling message of the live update", async () => {
+    const { buildCallbackMessage } = await import("./monitor.js");
+    const update = structuredClone(LIVE_MESSAGE_CALLBACK) as unknown as MaxUpdate;
+
+    const synthetic = buildCallbackMessage(update.callback!, update.message ?? null);
+
+    expect(synthetic.recipient).toEqual({ chat_type: "dialog", chat_id: 242316535, user_id: 4260364 });
+    expect(synthetic.sender?.user_id).toBe(4260364);
+    expect(synthetic.body).toEqual({ mid: LIVE_MESSAGE_CALLBACK.callback.callback_id, text: "live-callback-test" });
+    expect(synthetic.__maxCallback).toBe(true);
+  });
+
+  it("falls back to the pressing user only when the keyboard message is gone", async () => {
+    const { buildCallbackMessage } = await import("./monitor.js");
+    const update = structuredClone(LIVE_MESSAGE_CALLBACK) as unknown as MaxUpdate;
+
+    const synthetic = buildCallbackMessage(update.callback!, null);
+
+    expect(synthetic.recipient).toEqual({ chat_id: 4260364 });
+  });
+
+  it("dispatches a live DM callback into the dialog chat, routed by the sender", async () => {
+    const { setMaxRuntime } = await import("./runtime.js");
+    const { dispatchUpdate } = await import("./monitor.js");
+    const { core, dispatched } = makeCallbackRuntime();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setMaxRuntime(core as any);
+
+    await dispatchUpdate(
+      structuredClone(LIVE_MESSAGE_CALLBACK) as unknown as MaxUpdate,
+      makeCallbackOpts({ dmPolicy: "allowlist", allowFrom: ["4260364"] }),
+    );
+
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]).toMatchObject({
+      ChatType: "direct",
+      From: "max:4260364",
+      To: "max:242316535",
+      OriginatingTo: "max:242316535",
+      RawBody: "live-callback-test",
+    });
+    expect(core.channel.routing.resolveAgentRoute).toHaveBeenCalledWith(
+      expect.objectContaining({ peer: { kind: "direct", id: "4260364" } }),
+    );
+  });
+
+  it("keeps a group callback in the group chat and lets it past the mention gate", async () => {
+    const { setMaxRuntime } = await import("./runtime.js");
+    const { dispatchUpdate } = await import("./monitor.js");
+    const { core, dispatched } = makeCallbackRuntime();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setMaxRuntime(core as any);
+
+    const update = structuredClone(LIVE_MESSAGE_CALLBACK) as unknown as MaxUpdate;
+    update.message!.recipient = { chat_type: "chat", chat_id: -71158913982654 };
+
+    await dispatchUpdate(update, makeCallbackOpts({ groupPolicy: "allowlist", groups: { "-71158913982654": {} } }));
+
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]).toMatchObject({
+      ChatType: "group",
+      To: "max:-71158913982654",
+      WasMentioned: true,
+    });
+    expect(core.channel.routing.resolveAgentRoute).toHaveBeenCalledWith(
+      expect.objectContaining({ peer: { kind: "group", id: "-71158913982654" } }),
+    );
+  });
+});

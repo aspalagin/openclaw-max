@@ -247,8 +247,10 @@ export interface MessageCallbackUpdate extends BaseUpdate {
     callback_id: string;
     payload?: string;
     user: User;
-    message?: Message;
   };
+  /** Message with the pressed keyboard — a sibling of `callback`; null if already deleted */
+  message: Message | null;
+  user_locale?: string | null;
 }
 
 export interface BotStartedUpdate extends BaseUpdate {
@@ -459,7 +461,8 @@ export type MaxUpdateType =
 export interface MaxUpdate {
   update_type: MaxUpdateType;
   timestamp: number;
-  message?: MaxMessage;
+  /** message_callback: the keyboard's message, null when it was deleted */
+  message?: MaxMessage | null;
   callback?: MaxCallback;
   chat_id?: number;
   user?: MaxUser;
@@ -571,12 +574,12 @@ export interface MaxMessage {
   url?: string | null;
 }
 
+/** Callback object; the keyboard's message arrives next to it in the update, not inside. */
 export interface MaxCallback {
   timestamp: number;
   callback_id: string;
   payload?: string;
   user: MaxUser;
-  message?: MaxMessage;
 }
 
 export interface MaxSendResult {

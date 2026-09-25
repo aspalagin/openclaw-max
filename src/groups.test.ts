@@ -603,36 +603,21 @@ describe("MAX Group Functionality", () => {
   });
 
   describe("Group callback (button) handling", () => {
-    // Callbacks from group chats should be routed correctly
+    it("should synthesize a group callback in the keyboard's chat", async () => {
+      const { buildCallbackMessage } = await import("./monitor.js");
+      const synthetic = buildCallbackMessage(
+        { timestamp: 1, callback_id: "cb-1", payload: "/models", user: { user_id: 5975998, first_name: "Evgeniy", is_bot: false } },
+        {
+          sender: { user_id: 186310742, first_name: "Bot", is_bot: true },
+          recipient: { chat_id: -71158913982654, chat_type: "chat" },
+          timestamp: 1,
+          body: { mid: "original-msg" },
+        },
+      );
 
-    it("should synthesize callback as message with correct chat context", () => {
-      // This tests the logic in processCallback (monitor.ts)
-      // The callback is converted to a synthetic MaxMessage with:
-      // - sender: callback.user
-      // - recipient: callback.message.recipient (the original chat)
-      // - body.text: callback.payload
-
-      const callbackUser = {
-        user_id: 5975998,
-        first_name: "Evgeniy",
-        is_bot: false,
-      };
-
-      const callbackMessage = {
-        sender: { user_id: 186310742, first_name: "Bot", is_bot: true },
-        recipient: { chat_id: -71158913982654, chat_type: "chat" },
-        timestamp: Date.now(),
-        body: { mid: "original-msg" },
-      };
-
-      // Synthesized message should have:
-      const syntheticRecipient = callbackMessage.recipient;
-      expect(syntheticRecipient.chat_id).toBe(-71158913982654);
-      expect(syntheticRecipient.chat_type).toBe("chat");
-
-      // Verify it would be classified as group
-      const isGroup = syntheticRecipient.chat_type === "chat" || syntheticRecipient.chat_type === "channel";
-      expect(isGroup).toBe(true);
+      expect(synthetic.recipient).toEqual({ chat_id: -71158913982654, chat_type: "chat" });
+      expect(synthetic.sender?.user_id).toBe(5975998);
+      expect(synthetic.body.text).toBe("/models");
     });
   });
 
