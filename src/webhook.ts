@@ -5,8 +5,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
-import { readJsonBodyWithLimit } from "openclaw/plugin-sdk/infra-runtime";
-import { requestBodyErrorToText } from "openclaw/plugin-sdk/webhook-ingress";
+import { readJsonWebhookBodyOrReject } from "openclaw/plugin-sdk/webhook-ingress";
 import type { MaxUpdate } from "./api.js";
 import type { ResolvedMaxAccount } from "./accounts.js";
 import { MaxApi } from "./api.js";
@@ -95,20 +94,17 @@ export async function handleMaxWebhookRequest(
   // Verify webhook secret
   const webhookSecret = String(req.headers["x-max-bot-api-secret"] ?? "");
   
-  const body = await readJsonBodyWithLimit(req, {
+  // Size/timeout/closed-connection/malformed-JSON failures are answered by the
+  // SDK helper (413/408/400) — it has already written the response.
+  const body = await readJsonWebhookBodyOrReject({
+    req,
+    res,
     maxBytes: 1024 * 1024,
     timeoutMs: 30_000,
     emptyObjectOnEmpty: false,
+    invalidJsonMessage: "invalid payload",
   });
-  
   if (!body.ok) {
-    res.statusCode =
-      body.code === "PAYLOAD_TOO_LARGE" ? 413 : body.code === "REQUEST_BODY_TIMEOUT" ? 408 : 400;
-    res.end(
-      body.code === "REQUEST_BODY_TIMEOUT"
-        ? requestBodyErrorToText("REQUEST_BODY_TIMEOUT")
-        : body.error,
-    );
     return true;
   }
 

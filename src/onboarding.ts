@@ -10,7 +10,7 @@ import {
 import {
   formatDocsLink,
 } from "openclaw/plugin-sdk/setup";
-import type { DmPolicy } from "openclaw/plugin-sdk/config-runtime";
+import type { DmPolicy } from "openclaw/plugin-sdk/config-contracts";
 import type {
   ChannelSetupWizard,
   ChannelSetupDmPolicy,

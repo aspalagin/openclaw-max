@@ -32,11 +32,14 @@ function createMockRequest(
     },
   });
 
+  // The SDK body reader checks the socket for a closing connection, as a real
+  // IncomingMessage always carries one.
   return Object.assign(readable, {
     method,
     url,
     headers,
-  }) as IncomingMessage;
+    socket: { destroyed: false, writableEnded: false },
+  }) as unknown as IncomingMessage;
 }
 
 interface MockResponse extends ServerResponse {
@@ -280,6 +283,34 @@ describe("MAX Webhook Handler", () => {
       await handleMaxWebhookRequest(req3, res3);
       expect(res3._status).toBe(200);
       expect(target.onUpdate).toHaveBeenCalled();
+
+      unregister();
+    });
+
+    it("should reject a malformed JSON body with 400 before dispatch", async () => {
+      const onUpdate = vi.fn();
+      const unregister = registerMaxWebhookTarget({
+        account: {
+          accountId: "default",
+          enabled: true,
+          token: "token",
+          tokenSource: "config",
+          config: {},
+        },
+        config: { channels: {} },
+        path: "/bad-json",
+        secret: "s",
+        onUpdate,
+      });
+
+      const req = createMockRequest("POST", "/bad-json", { "x-max-bot-api-secret": "s" }, "{not json");
+      const res = createMockResponse();
+      const handled = await handleMaxWebhookRequest(req, res);
+
+      expect(handled).toBe(true);
+      expect(res._status).toBe(400);
+      expect(res._body).toBe("invalid payload");
+      expect(onUpdate).not.toHaveBeenCalled();
 
       unregister();
     });
