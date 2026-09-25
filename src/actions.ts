@@ -8,7 +8,9 @@ import { jsonResult } from "openclaw/plugin-sdk/agent-runtime";
 import { readStringParam } from "openclaw/plugin-sdk/param-readers";
 import { listMaxAccountIds, resolveMaxAccount } from "./accounts.js";
 import { getLastStickerCode } from "./sticker-cache.js";
-import { sendMaxMessage, editMaxMessage, deleteMaxMessage, sendMaxMediaMessage, sendMaxSticker, sendMaxContact, sendMaxLocation, pinMaxMessage, unpinMaxMessage, type MaxSendButton } from "./send.js";
+import { normalizeMessagePresentation } from "openclaw/plugin-sdk/interactive-runtime";
+import { sendMaxMessage, editMaxMessage, deleteMaxMessage, sendMaxMediaMessage, sendMaxSticker, sendMaxContact, sendMaxLocation, pinMaxMessage, unpinMaxMessage, readMaxChannelButtons, type MaxSendButton } from "./send.js";
+import { MAX_TEXT_LIMIT, materializeMaxPresentation, readMaxDeliveryPin } from "./presentation.js";
 import { getMaxRuntime } from "./runtime.js";
 
 const providerId = "max";
@@ -55,7 +57,9 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
     }
     return {
       actions: ["send", "edit", "delete", "sticker", "sendAttachment", "pin", "unpin"],
-      capabilities: ["buttons"] as unknown as readonly ("presentation" | "delivery-pin")[],
+      // presentation → inline keyboard + MAX markdown (presentation.ts);
+      // delivery-pin → PUT /chats/{chatId}/pin on the sent message.
+      capabilities: ["presentation", "delivery-pin"],
     };
   },
 
@@ -99,10 +103,47 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
 
     if (action === "send") {
       const to = stripPrefix(readTargetParam(params))!;
+      const presentation = normalizeMessagePresentation(params.presentation);
+      const pin = readMaxDeliveryPin(params.delivery, params.pin);
       const content = readStringParam(params, "message", {
-        required: true,
+        required: !presentation,
         allowEmpty: true,
-      });
+      }) ?? "";
+
+      // Pin the sent message when delivery.pin (or pin=true) was requested.
+      // Optional pin failures degrade; a required one fails the action.
+      const withPin = async (messageId: string) => {
+        if (!pin || !messageId) return jsonResult({ ok: true, to, messageId });
+        try {
+          await pinMaxMessage(to, messageId, { token: account.token, pinNotify: pin.notify === true });
+          return jsonResult({ ok: true, to, messageId, pinned: true });
+        } catch (err) {
+          if (pin.required) throw err;
+          return jsonResult({ ok: true, to, messageId, pinned: false, pinError: String(err) });
+        }
+      };
+
+      // Core normally renders presentation through the outbound adapter; this
+      // path covers direct plugin dispatch with the same render policy.
+      if (presentation) {
+        const rendered = await materializeMaxPresentation({ text: content, presentation });
+        const renderedButtons = readMaxChannelButtons(rendered.channelData);
+        const text = rendered.text ?? "";
+        const chunks = text.length > MAX_TEXT_LIMIT
+          ? getMaxRuntime().channel.text.chunkMarkdownText(text, MAX_TEXT_LIMIT)
+          : [text];
+        let firstMessageId = "";
+        for (let index = 0; index < chunks.length; index += 1) {
+          const sent = await sendMaxMessage(to, chunks[index], {
+            token: account.token,
+            replyToMessageId: index === 0 ? readStringParam(params, "replyTo") ?? undefined : undefined,
+            format: "markdown",
+            buttons: index === chunks.length - 1 ? renderedButtons : undefined,
+          });
+          if (index === 0) firstMessageId = sent.messageId;
+        }
+        return withPin(firstMessageId);
+      }
       const replyTo = readStringParam(params, "replyTo");
       const stickerId = readStringParam(params, "stickerId");
 
@@ -136,7 +177,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
             token: account.token,
             replyToMessageId: replyTo ?? undefined,
           });
-          return jsonResult({ ok: true, to, messageId: result.messageId });
+          return withPin(result.messageId);
         }
       }
 
@@ -164,7 +205,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
             replyToMessageId: replyTo ?? undefined,
             format: "markdown",
           });
-          return jsonResult({ ok: true, to, messageId: result.messageId });
+          return withPin(result.messageId);
         }
       }
 
@@ -181,7 +222,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
           token: account.token,
           replyToMessageId: replyTo ?? undefined,
         });
-        return jsonResult({ ok: true, to, messageId: result.messageId });
+        return withPin(result.messageId);
       }
 
       // Resolve media source: direct media fields or structured attachments[].
@@ -207,7 +248,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
               replyToMessageId: replyTo ?? undefined,
               format: "markdown",
             });
-            return jsonResult({ ok: true, to, messageId: result.messageId });
+            return withPin(result.messageId);
           } finally {
             // Cleanup
             await fs.unlink(tmpPath).catch(() => {});
@@ -219,7 +260,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
             replyToMessageId: replyTo ?? undefined,
             format: "markdown",
           });
-          return jsonResult({ ok: true, to, messageId: result.messageId });
+          return withPin(result.messageId);
         }
       }
 
@@ -229,7 +270,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
         format: "markdown",
         buttons,
       });
-      return jsonResult({ ok: true, to, messageId: result.messageId });
+      return withPin(result.messageId);
     }
 
     if (action === "edit") {

@@ -329,6 +329,50 @@ describe("outbound adapter", () => {
   });
 });
 
+describe("message tool", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("declares presentation and delivery-pin capabilities", async () => {
+    const { maxMessageActions } = await import("./actions.js");
+    const discovery = maxMessageActions.describeMessageTool!({
+      cfg: { channels: { max: { botToken: "tok" } } } as never,
+    } as never);
+    expect(discovery?.capabilities).toEqual(["presentation", "delivery-pin"]);
+  });
+
+  it("sends a presentation with its keyboard and pins it on request", async () => {
+    const { maxMessageActions } = await import("./actions.js");
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ message: { body: { mid: "mid.card" }, recipient: { chat_id: -7002 } } }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) });
+
+    const result = await maxMessageActions.handleAction!({
+      action: "send",
+      params: { target: "-7002", presentation: CARD, delivery: { pin: true } },
+      cfg: { channels: { max: { botToken: "tok" } } },
+      accountId: undefined,
+    } as never);
+
+    const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
+    const body = JSON.parse(calls[0][1].body);
+    expect(body.text).toContain("**Deploy approval**");
+    expect(body.attachments[0].type).toBe("inline_keyboard");
+    expect(body.attachments[0].payload.buttons[0][0]).toEqual({
+      type: "callback",
+      text: "Approve",
+      payload: "mxcb1:deploy:approve",
+    });
+    expect(String(calls[1][0])).toContain("/chats/-7002/pin");
+    expect(JSON.stringify(result)).toContain("pinned");
+    expect(JSON.stringify(result)).not.toContain("pinError");
+  });
+});
+
 // ── Round trip: render → press (message_callback in the live fixture shape) → dispatchUpdate ──
 
 function makeRuntime() {
