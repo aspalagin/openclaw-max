@@ -170,6 +170,9 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
     nativeCommands: true,
     blockStreaming: false,
     edit: true,
+    // DELETE /messages backs the "delete" action; replies use link.type=reply.
+    unsend: true,
+    reply: true,
     polls: false,
   },
 

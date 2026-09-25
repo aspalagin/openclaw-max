@@ -459,6 +459,10 @@ describe("MAX Group Functionality", () => {
     it("should support direct chat type", () => {
       expect(maxPlugin.capabilities.chatTypes).toContain("direct");
     });
+
+    it("should declare edit, unsend and reply", () => {
+      expect(maxPlugin.capabilities).toMatchObject({ edit: true, unsend: true, reply: true });
+    });
   });
 
   describe("directory.listGroups", () => {

@@ -23,6 +23,10 @@ All notable changes to this project are documented in this file.
 - `getMessages` принимает `before`/`after` (Unix-время, мс) вместо устаревших `from`/`to`; добавлен `getMessageById` (`GET /messages/{messageId}`).
 - Контракт с Bot API сверен с `schema.yaml`: из подписки (`GET /updates types`, `POST /subscriptions update_types`) и типов убрано несуществующее событие `message_chat_created`; удалены тип кнопки `chat` и поле `intent` (не входят в `Button`, `intent` больше не отправляется); кнопка `open_app` адресуется полем `web_app` (прежний `url` переносится туда, `url` не отправляется), поддержан `payload`; в известные `update_type` добавлены `bot_admin_permissions_changed` и `comment_*`; `MaxVideoInfo.thumbnail` — объект `{url}`; `MaxRecipient.post_id`; `MaxSubscription` без `version/secret` (secret — только в теле `POST /subscriptions`). Тест сверяет подписку со списком `Update` из схемы.
 
+### Added
+
+- `capabilities.unsend` и `capabilities.reply` (`DELETE /messages` и ответы через `link.type=reply` уже поддерживались, но не объявлялись).
+
 ## 0.6.1 - 2026-07-18
 
 ### Changed
