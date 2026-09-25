@@ -214,6 +214,35 @@ describe("MaxApi", () => {
     });
   });
 
+  describe("getMessages / getMessageById", () => {
+    it("should page with before/after instead of the deprecated from/to", async () => {
+      global.fetch = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ messages: [] }) });
+
+      await api.getMessages(-100, { before: 1790000000000, after: 0, count: 10 });
+
+      const [url] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
+      const query = new URL(url).searchParams;
+      expect(query.get("chat_id")).toBe("-100");
+      expect(query.get("before")).toBe("1790000000000");
+      expect(query.get("after")).toBe("0");
+      expect(query.get("count")).toBe("10");
+      expect(query.has("from")).toBe(false);
+      expect(query.has("to")).toBe(false);
+    });
+
+    it("should fetch a single message via GET /messages/{messageId}", async () => {
+      const message = { body: { mid: "mid.abc_1" }, timestamp: 1, recipient: { chat_id: 5 } };
+      global.fetch = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => message });
+
+      const result = await api.getMessageById("mid.abc_1");
+
+      const [url, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { method: string }];
+      expect(url).toBe(`${MOCK_BASE_URL}/messages/mid.abc_1`);
+      expect(init.method).toBe("GET");
+      expect(result.body.mid).toBe("mid.abc_1");
+    });
+  });
+
   describe("setMyCommands", () => {
     it("should register commands via PATCH /me/commands (PATCH /me is 404)", async () => {
       global.fetch = vi.fn().mockResolvedValueOnce({

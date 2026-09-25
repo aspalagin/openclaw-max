@@ -20,6 +20,7 @@ All notable changes to this project are documented in this file.
 - Входящие медиа передаются агенту упорядоченными фактами `media` (`toInboundMediaFacts` из `plugin-sdk/channel-inbound`) вместо устаревших `MediaPath/MediaPaths/MediaUrl/MediaUrls/MediaType/MediaTypes` (снимаются гейтом 2026-10-01). Каждому вложению — локальный путь, `contentType`, имя файла и `messageId`; подписанные ссылки CDN MAX в контекст не попадают. Заодно исчез рассинхрон индексов, когда у части вложений не было `contentType`.
 - `devDependencies.openclaw` поднят до `^2026.9.6`, lockfile обновлён; в CI добавлен прогон typecheck+test на последней опубликованной версии OpenClaw, в том числе с минимальной zod 4.4.3.
 - Контакт-вложение отправляется полями из схемы `ContactAttachmentRequestPayload` в snake_case — `name`, `contact_id`, `vcf_phone`, `vcf_info` (раньше camelCase без `name`; сервер принимал обе формы, но документирована только snake_case). Тесты на payload всех трёх веток.
+- `getMessages` принимает `before`/`after` (Unix-время, мс) вместо устаревших `from`/`to`; добавлен `getMessageById` (`GET /messages/{messageId}`).
 
 ## 0.6.1 - 2026-07-18
 

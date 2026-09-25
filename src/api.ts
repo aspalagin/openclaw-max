@@ -414,18 +414,27 @@ export class MaxApi {
     return this.request<MaxSimpleResult>("DELETE", "/messages", { message_id: messageId });
   }
 
+  /**
+   * List messages in a chat, newest first (GET /messages). `before`/`after` are
+   * Unix-time bounds in ms; they replace the deprecated `from`/`to`.
+   */
   async getMessages(chatId: number, params?: {
     message_ids?: string[];
-    from?: number;
-    to?: number;
+    before?: number;
+    after?: number;
     count?: number;
   }): Promise<{ messages: MaxMessage[] }> {
     const qp: Record<string, string | number> = { chat_id: chatId };
     if (params?.message_ids) qp.message_ids = params.message_ids.join(",");
-    if (params?.from) qp.from = params.from;
-    if (params?.to) qp.to = params.to;
+    if (params?.before != null) qp.before = params.before;
+    if (params?.after != null) qp.after = params.after;
     if (params?.count) qp.count = params.count;
     return this.request("GET", "/messages", qp);
+  }
+
+  /** Get a single message by its mid (GET /messages/{messageId}); 404 if gone or inaccessible. */
+  async getMessageById(messageId: string): Promise<MaxMessage> {
+    return this.request<MaxMessage>("GET", `/messages/${encodeURIComponent(messageId)}`);
   }
 
   // ── Chats ──
