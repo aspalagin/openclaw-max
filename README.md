@@ -41,7 +41,7 @@ openclaw-max/
 │   ├── send.ts                 # Send-хелперы (текст, медиа, кнопки, pin)
 │   ├── format.ts               # Конвертация markdown в MAX-диалект
 │   ├── monitor.ts              # Long polling / диспетчеризация update'ов
-│   ├── webhook.ts              # Webhook-приёмник (secret, быстрый ACK)
+│   ├── webhook.ts              # Webhook: роут gateway, secret, быстрый ACK, дедупликация
 │   ├── state.ts                # Персист: marker поллинга + реестр чатов
 │   ├── channel.ts              # OpenClaw channel adapter
 │   ├── accounts.ts             # Резолвинг аккаунтов из конфига
@@ -115,14 +115,93 @@ openclaw gateway restart
 | `dmPolicy` | string | нет | Политика DM: pairing (по умолчанию) / allowlist / open / disabled |
 | `groupPolicy` | string | нет | Политика групп: allowlist (по умолчанию) / open / disabled |
 | `groups` | object | нет | Пер-групповые настройки (requireMention, tools, …) |
-| `webhookUrl` | string | нет | Включает webhook-режим вместо long polling |
-| `webhookSecret` | string | нет | Секрет вебхука (автогенерируется, если не задан) |
+| `transport` | string | нет | `polling` / `webhook`; по умолчанию `webhook`, если задан `webhookUrl`, иначе `polling` |
+| `webhookUrl` | string | нет | Публичный HTTPS-адрес для MAX; включает webhook-режим (см. «Webhook») |
+| `webhookSecretFile` | string | нет | Файл с секретом вебхука (как `tokenFile`) |
+| `webhookSecret` | string | нет | Секрет вебхука строкой; если не задан ни он, ни файл — генерируется и хранится в state-файле аккаунта |
+| `webhookPath` | string | нет | Путь роута на gateway, если отличается от pathname `webhookUrl` (по умолчанию `/max/webhook`) |
 | `streamMode` | string | нет | off (по умолчанию) / partial / block |
 | `mediaMaxMb` | number | нет | Лимит скачивания медиа, МБ (по умолчанию 20) |
 | `markSeen` | boolean | нет | Слать mark_seen на входящие (по умолчанию true) |
 | `commands` | array | нет | Команды бота `[{name, description}]` — регистрируются через PATCH /me/commands (до 32) |
 
 \* Обязательно при `dmPolicy: "allowlist"`.
+
+## Webhook
+
+По умолчанию плагин получает события long polling'ом. В webhook-режиме MAX сам
+присылает `POST` на публичный адрес, а плагин обслуживает его роутом на
+HTTP-сервере gateway (тот же порт, что и Control UI; отдельный сервер не
+поднимается).
+
+### Требования MAX
+
+- Только HTTPS на порту 443 с сертификатом доверенного CA (самоподписанный не подойдёт).
+- Ответ 200 не позже чем через 30 с. Плагин отвечает сразу после проверки
+  секрета и формы тела, а обработку (агент может думать минутами) ведёт асинхронно.
+- При неудаче MAX повторяет доставку до 10 раз с растущим интервалом, а после
+  8 часов без успеха **сам снимает подписку**. Повторы одного и того же
+  обновления плагин отсекает (LRU по `update_type` + `timestamp` + `mid`/`callback_id`).
+- Каждый запрос несёт заголовок `X-Max-Bot-Api-Secret`; без совпадения — 401.
+- **Пока подписка активна, long polling у MAX не работает.** Поэтому в
+  polling-режиме плагин при старте удаляет найденную подписку (с warning в логе).
+
+### Как устроено
+
+1. При старте аккаунта регистрируется роут `auth: "plugin"`, `match: "exact"` на
+   пути `webhookPath` → pathname `webhookUrl` → `/max/webhook`. Не удалось
+   зарегистрировать (например, путь занят другим плагином) — старт аккаунта падает.
+2. `GET /subscriptions`: подписки этого бота на другие URL удаляются
+   (`DELETE /subscriptions?url=`).
+3. `POST /subscriptions {url, update_types, secret}` — на каждом старте, чтобы
+   секрет и список событий совпадали с текущим конфигом.
+4. При остановке роут снимается, **подписка остаётся**: рестарт gateway не
+   теряет события (MAX повторит недоставленные). Чтобы выключить webhook,
+   переключите `transport: "polling"` — плагин удалит подписку при старте, —
+   или удалите её вручную `DELETE /subscriptions?url=<webhookUrl>`.
+
+Секрет берётся из `webhookSecret`, иначе из `webhookSecretFile`, иначе
+генерируется один раз и сохраняется в `~/.openclaw/max/state-<account>.json`
+(переживает рестарты). Формат MAX: 5–256 символов `A-Z a-z 0-9 _ -`.
+
+### Пример (эта установка)
+
+Публичный адрес `https://max.kotbanzai.com/max/webhook` проксируется Cloudflare
+Tunnel на `http://127.0.0.1:18789` (наружу открыт только путь `/max/webhook`).
+
+```bash
+umask 077
+head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9_-' | head -c 48 \
+  > /root/.openclaw/secrets/max-webhook-secret
+```
+
+```json
+{
+  "channels": {
+    "max": {
+      "tokenFile": "/root/.openclaw/secrets/gateway-max-bot-token",
+      "transport": "webhook",
+      "webhookUrl": "https://max.kotbanzai.com/max/webhook",
+      "webhookSecretFile": "/root/.openclaw/secrets/max-webhook-secret"
+    }
+  }
+}
+```
+
+### Порядок включения
+
+1. Сначала задеплоить эту версию плагина и **полностью перезапустить gateway**
+   с новым кодом, оставаясь в polling-режиме. Старые версии плагина при
+   `webhookUrl` подписывались, но роут не регистрировали — бот глох.
+2. Затем добавить в конфиг `transport`/`webhookUrl`/`webhookSecretFile`
+   (поля `transport` и `webhookSecretFile` знает только новая схема) и
+   перезапустить канал/gateway. Подписку создаёт сам плагин при старте.
+3. Проверить: `GET /subscriptions` показывает ровно один URL, в логе
+   `MAX webhook subscribed`, сообщение боту доходит до агента.
+
+Откат: `transport: "polling"` (или убрать `webhookUrl`) и перезапуск — подписка
+удаляется при старте polling. Если плагин не стартует, снять подписку руками:
+`curl -X DELETE "https://platform-api2.max.ru/subscriptions?url=<webhookUrl>" -H "Authorization: <token>"`.
 
 ## Использование
 

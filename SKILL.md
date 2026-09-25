@@ -48,8 +48,10 @@ cd openclaw-max && npm install && npm run build
 }
 ```
 
-Webhook-режим: добавить `"webhookUrl": "https://ваш-домен/max"` (только HTTPS:443,
-сертификат должен быть доверенным; secret генерируется автоматически).
+Webhook-режим: добавить `"transport": "webhook"`, `"webhookUrl": "https://ваш-домен/max/webhook"`
+(только HTTPS:443, доверенный сертификат) и `"webhookSecretFile"` (без него secret
+генерируется и хранится в state-файле). Роут поднимается на HTTP-сервере gateway,
+подписку создаёт плагин; порядок включения и откат — README, раздел «Webhook».
 
 ## Примеры использования
 
