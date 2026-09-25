@@ -9,7 +9,7 @@ import { join } from "node:path";
 
 import type { ChannelLogSink } from "openclaw/plugin-sdk/channel-contract";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MaxAccountConfig, ResolvedMaxAccount } from "./accounts.js";
 import type { MaxApi } from "./api.js";
@@ -18,8 +18,10 @@ import {
   MAX_SUBSCRIBED_UPDATE_TYPES,
   type MaxStatusPatch,
   resolveMaxTransport,
+  MAX_SUBSCRIPTION_CHECK_INTERVAL_MS,
   resolveMaxWebhookSecret,
   startMaxPolling,
+  startMaxSubscriptionWatch,
 } from "./monitor.js";
 import { MaxStateStore } from "./state.js";
 import { handleMaxWebhookRequest } from "./webhook.js";
@@ -294,5 +296,97 @@ describe("polling mode", () => {
     await clearMaxSubscriptionsForPolling({ api: api as unknown as MaxApi, account: account({}), log });
     expect(api.unsubscribe).not.toHaveBeenCalled();
     expect(log.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("webhook subscription watch", () => {
+  const url = "https://max.example/max/webhook";
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  function watch(api: ReturnType<typeof mockApi>, controller = new AbortController()) {
+    const log = mockLog();
+    const stop = startMaxSubscriptionWatch({
+      api: api as unknown as MaxApi,
+      accountId: "default",
+      webhookUrl: url,
+      secret: "watch-secret",
+      abortSignal: controller.signal,
+      log,
+    });
+    return { log, stop, controller };
+  }
+
+  it("checks every 10–15 minutes and leaves a present subscription alone", async () => {
+    expect(MAX_SUBSCRIPTION_CHECK_INTERVAL_MS).toBeGreaterThanOrEqual(10 * 60_000);
+    expect(MAX_SUBSCRIPTION_CHECK_INTERVAL_MS).toBeLessThanOrEqual(15 * 60_000);
+    const api = mockApi([{ url, time: 1 }]);
+    const { stop } = watch(api);
+    await vi.advanceTimersByTimeAsync(MAX_SUBSCRIPTION_CHECK_INTERVAL_MS - 1);
+    expect(api.getSubscriptions).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(api.getSubscriptions).toHaveBeenCalledTimes(1);
+    expect(api.subscribe).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it("re-subscribes with a warning when MAX dropped our URL", async () => {
+    const api = mockApi([{ url: "https://other.example/hook", time: 1 }]);
+    const { log, stop } = watch(api);
+    await vi.advanceTimersByTimeAsync(MAX_SUBSCRIPTION_CHECK_INTERVAL_MS);
+    expect(api.subscribe).toHaveBeenCalledWith({ url, update_types: MAX_SUBSCRIBED_UPDATE_TYPES, secret: "watch-secret" });
+    expect(api.unsubscribe).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("is gone"));
+    stop();
+  });
+
+  it("only logs network errors and retries on the next tick", async () => {
+    const api = mockApi([]);
+    api.getSubscriptions.mockRejectedValueOnce(new Error("ECONNRESET"));
+    const { log, stop } = watch(api);
+    await vi.advanceTimersByTimeAsync(MAX_SUBSCRIPTION_CHECK_INTERVAL_MS);
+    expect(api.subscribe).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("ECONNRESET"));
+    await vi.advanceTimersByTimeAsync(MAX_SUBSCRIPTION_CHECK_INTERVAL_MS);
+    expect(api.subscribe).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it("logs a failed re-subscribe without throwing", async () => {
+    const api = mockApi([]);
+    api.subscribe.mockRejectedValueOnce(new Error("503"));
+    const { log, stop } = watch(api);
+    await vi.advanceTimersByTimeAsync(MAX_SUBSCRIPTION_CHECK_INTERVAL_MS);
+    expect(log.error).toHaveBeenCalledWith(expect.stringContaining("re-subscribe failed"));
+    stop();
+  });
+
+  it("stops when the account is aborted", async () => {
+    const api = mockApi([]);
+    const { controller } = watch(api);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(MAX_SUBSCRIPTION_CHECK_INTERVAL_MS * 3);
+    expect(api.getSubscriptions).not.toHaveBeenCalled();
+  });
+
+  it("runs inside webhook mode and is cleared on stop", async () => {
+    const api = mockApi([]);
+    const controller = new AbortController();
+    const start = startMaxPolling({
+      api: api as unknown as MaxApi,
+      account: account({ webhookUrl: url, webhookSecret: "hook-secret-3" }),
+      config: {} as OpenClawConfig,
+      abortSignal: controller.signal,
+      registerWebhookRoute: (() => () => {}) as never,
+    });
+    await vi.waitFor(() => expect(api.subscribe).toHaveBeenCalledTimes(1));
+    api.getSubscriptions.mockClear();
+    await vi.advanceTimersByTimeAsync(MAX_SUBSCRIPTION_CHECK_INTERVAL_MS);
+    expect(api.getSubscriptions).toHaveBeenCalledTimes(1);
+    expect(api.subscribe).toHaveBeenCalledTimes(2);
+    controller.abort();
+    await start;
+    await vi.advanceTimersByTimeAsync(MAX_SUBSCRIPTION_CHECK_INTERVAL_MS * 2);
+    expect(api.getSubscriptions).toHaveBeenCalledTimes(1);
   });
 });

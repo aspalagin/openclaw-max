@@ -313,6 +313,63 @@ export async function syncMaxWebhookSubscription(params: {
   });
 }
 
+/** How often webhook mode re-checks that MAX still holds our subscription. */
+export const MAX_SUBSCRIPTION_CHECK_INTERVAL_MS = 12 * 60 * 1000;
+
+/**
+ * MAX drops a subscription after 8 hours of failed deliveries (tunnel or
+ * gateway outage), and then nothing arrives until the next restart. Re-check
+ * periodically and re-subscribe when our URL is gone. Network/API errors on
+ * the check are only logged; the next tick tries again.
+ * Returns a stop function; the timer is also cleared when abortSignal fires.
+ * @internal exported for testing.
+ */
+export function startMaxSubscriptionWatch(params: {
+  api: MaxApi;
+  accountId: string;
+  webhookUrl: string;
+  secret: string;
+  abortSignal: AbortSignal;
+  log?: ChannelLogSink;
+  intervalMs?: number;
+}): () => void {
+  const { api, accountId, webhookUrl, secret, abortSignal, log } = params;
+  let running = false;
+
+  const check = async (): Promise<void> => {
+    if (running || abortSignal.aborted) return;
+    running = true;
+    try {
+      let subscriptions: MaxSubscription[];
+      try {
+        subscriptions = (await api.getSubscriptions()).subscriptions ?? [];
+      } catch (err) {
+        log?.warn(`[${accountId}] MAX subscription check failed: ${String(err)}`);
+        return;
+      }
+      if (abortSignal.aborted || subscriptions.some((s) => s.url === webhookUrl)) return;
+      log?.warn(`[${accountId}] MAX webhook subscription to ${webhookUrl} is gone (MAX unsubscribes after 8 h of failed deliveries); re-subscribing`);
+      try {
+        await subscribeMaxWebhook({ api, webhookUrl, secret, updateTypes: MAX_SUBSCRIBED_UPDATE_TYPES });
+        log?.info(`[${accountId}] MAX webhook re-subscribed: ${webhookUrl}`);
+      } catch (err) {
+        log?.error(`[${accountId}] MAX webhook re-subscribe failed: ${String(err)}`);
+      }
+    } finally {
+      running = false;
+    }
+  };
+
+  const timer = setInterval(() => void check(), params.intervalMs ?? MAX_SUBSCRIPTION_CHECK_INTERVAL_MS);
+  timer.unref?.();
+  const stop = (): void => {
+    clearInterval(timer);
+    abortSignal.removeEventListener("abort", stop);
+  };
+  abortSignal.addEventListener("abort", stop, { once: true });
+  return stop;
+}
+
 async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
   const { api, account, config, abortSignal, log, statusSink } = opts;
 
@@ -390,7 +447,17 @@ async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
 
   statusSink?.(channelReadyPatch({ mode: "webhook" }) as MaxStatusPatch);
 
+  const stopSubscriptionWatch = startMaxSubscriptionWatch({
+    api,
+    accountId: account.accountId,
+    webhookUrl,
+    secret: webhookSecret,
+    abortSignal,
+    log,
+  });
+
   await waitForAbort(abortSignal);
+  stopSubscriptionWatch();
 
   // The subscription is kept on purpose: a restart or config reload must not
   // lose updates, and MAX retries undelivered ones while the route is back.
