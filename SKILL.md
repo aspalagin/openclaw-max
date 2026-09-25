@@ -61,7 +61,7 @@ Webhook-режим: добавить `"transport": "webhook"`, `"webhookUrl": "h
 openclaw message send --channel max --target "144660345" --message "Привет из OpenClaw!"
 ```
 
-Цели: числовой chat_id/user_id, `user:<id>` (адресация в личку), `@username`/публичная ссылка (только публичные каналы/чаты — резолв через GET /chats/{link}; для обычных групп используйте числовой chat_id).
+Цели: числовой chat_id/user_id, `user:<id>` (адресация в личку), `@username` и ссылки max.ru не поддерживаются: MAX Bot API не резолвит их (`chat.not.found`), плагин сразу отвечает понятной ошибкой — для чатов и каналов используйте числовой chat_id.
 
 ### Кнопки (из message-tool агента)
 

@@ -569,16 +569,13 @@ describe("resolveMaxTarget", () => {
     expect(await resolveMaxTarget(api, "max:user:777")).toEqual({ user_id: 777 });
   });
 
-  it("should resolve @username via GET /chats/{chatLink}", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ chat_id: 4242, type: "chat", status: "active" }),
-    });
-
+  it("rejects @username and max.ru links without calling the API", async () => {
+    global.fetch = vi.fn();
     const api = new MaxApi({ token: MOCK_TOKEN });
-    expect(await resolveMaxTarget(api, "@mygroup")).toEqual({ chat_id: 4242 });
-    const [url] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
-    expect(url).toContain("/chats/mygroup");
+    for (const target of ["@mygroup", "max:@mygroup", "https://max.ru/mygroup", "max.ru/join/abc"]) {
+      await expect(resolveMaxTarget(api, target)).rejects.toThrow(/does not resolve @username.*numeric chat_id/);
+    }
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it("should reject garbage targets", async () => {

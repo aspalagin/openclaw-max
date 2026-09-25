@@ -439,12 +439,9 @@ export class MaxApi {
 
   // ── Chats ──
 
-  /** Get chat by numeric id or by public link/username (GET /chats/{chatLink}). */
-  async getChat(chatIdOrLink: number | string): Promise<MaxChat> {
-    const ref = typeof chatIdOrLink === "string"
-      ? encodeURIComponent(chatIdOrLink.replace(/^@/, ""))
-      : chatIdOrLink;
-    return this.request("GET", `/chats/${ref}`);
+  /** Get chat info by numeric id (GET /chats/{chatId}). */
+  async getChat(chatId: number): Promise<MaxChat> {
+    return this.request("GET", `/chats/${chatId}`);
   }
 
   /** Bot's own membership in a chat — is_admin matters: long polling delivers group updates only to admin bots. */

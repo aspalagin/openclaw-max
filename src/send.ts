@@ -59,13 +59,14 @@ function resolveToken(opts: MaxSendOptions): string {
 /**
  * Resolve a target string into API send params.
  * Supported forms: "12345", "max:12345" (chat id), "user:12345" / "max:user:12345"
- * (user id), "@username" / public link (resolved via GET /chats/{chatLink}).
+ * (user id).
  *
- * Note: GET /chats/{chatLink} resolves only PUBLIC channels/chats that have a
- * link. For ordinary group chats address by numeric chat_id (from bot_added),
- * for users by "user:<id>".
+ * "@username" and max.ru links are rejected with an explicit error: the Bot API
+ * schema has only GET /chats/{chatId} (numeric), and a link lookup answers
+ * `chat.not.found` live. Address groups by chat_id (from bot_added), users by
+ * "user:<id>".
  */
-export async function resolveMaxTarget(api: MaxApi, to: string): Promise<MaxSendTarget> {
+export async function resolveMaxTarget(_api: MaxApi, to: string): Promise<MaxSendTarget> {
   let normalized = to.trim();
   if (normalized.startsWith("max:")) normalized = normalized.slice(4);
 
@@ -80,18 +81,11 @@ export async function resolveMaxTarget(api: MaxApi, to: string): Promise<MaxSend
     return { chat_id: chatId };
   }
 
-  // @username or public chat link — resolve through the API
-  if (normalized.startsWith("@") || normalized.includes("max.ru/")) {
-    const link = normalized.replace(/^(https?:\/\/)?(www\.)?max\.ru\//i, "").replace(/^@/, "");
-    try {
-      const chat = await api.getChat(link);
-      if (chat?.chat_id != null) return { chat_id: chat.chat_id };
-    } catch (err) {
-      throw new Error(
-        `Could not resolve MAX target "${to}" via chat link (only public channels/chats are resolvable; ` +
-        `use a numeric chat_id for groups or user:<id> for users): ${String(err)}`,
-      );
-    }
+  if (normalized.startsWith("@") || /(^|\/\/|www\.)max\.ru\//i.test(normalized)) {
+    throw new Error(
+      `MAX API does not resolve @username or chat links ("${to}"); ` +
+      "use a numeric chat_id for chats and channels or user:<id> for users",
+    );
   }
 
   throw new Error(`Invalid MAX target: ${to}`);
