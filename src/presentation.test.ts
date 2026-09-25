@@ -398,6 +398,100 @@ function buttonPayload(label: string): string {
   return button!.payload!;
 }
 
+describe("presentation button round trip", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    approvalMock.resolve.mockResolvedValue({ applied: true });
+    questionMock.resolveOption.mockResolvedValue({ status: "answered", questionId: QUESTION_ID, optionValue: "yes" });
+  });
+
+  it("delivers an opaque callback to the agent labelled, not as a command", async () => {
+    const { setMaxRuntime } = await import("./runtime.js");
+    const { dispatchUpdate } = await import("./monitor.js");
+    const { core, dispatched } = makeRuntime();
+    setMaxRuntime(core as never);
+
+    await dispatchUpdate(pressUpdate(buttonPayload("Approve")), makeOpts({ dmPolicy: "allowlist", allowFrom: ["4260364"] }) as never);
+
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]).toMatchObject({ RawBody: "callback_data: deploy:approve", To: "max:242316535" });
+  });
+
+  it("re-enters a command button as the command text", async () => {
+    const { setMaxRuntime } = await import("./runtime.js");
+    const { dispatchUpdate } = await import("./monitor.js");
+    const { core, dispatched } = makeRuntime();
+    setMaxRuntime(core as never);
+
+    await dispatchUpdate(pressUpdate(buttonPayload("Status")), makeOpts({ dmPolicy: "allowlist", allowFrom: ["4260364"] }) as never);
+
+    expect(dispatched[0]).toMatchObject({ RawBody: "/status" });
+  });
+
+  it("resolves an approval through the canonical approval service", async () => {
+    const { setMaxRuntime } = await import("./runtime.js");
+    const { dispatchUpdate } = await import("./monitor.js");
+    const { core, dispatched } = makeRuntime();
+    setMaxRuntime(core as never);
+    const opts = makeOpts({ dmPolicy: "allowlist", allowFrom: ["max:4260364"] });
+
+    await dispatchUpdate(pressUpdate(buttonPayload("Allow once")), opts as never);
+
+    expect(approvalMock.resolve).toHaveBeenCalledWith(expect.objectContaining({
+      approvalId: APPROVAL_ID,
+      approvalKind: "exec",
+      decision: "allow-once",
+      channel: "max",
+      accountId: "default",
+      senderId: "4260364",
+    }));
+    expect(opts.api.answerCallback).toHaveBeenCalledWith("cb.presentation.1", { notification: "Decision recorded: allow-once." });
+    expect(dispatched).toHaveLength(0);
+  });
+
+  it("refuses approvals from senders outside allowFrom (wildcard is not enough)", async () => {
+    const { setMaxRuntime } = await import("./runtime.js");
+    const { dispatchUpdate } = await import("./monitor.js");
+    setMaxRuntime(makeRuntime().core as never);
+    const opts = makeOpts({ dmPolicy: "open", allowFrom: ["*"] });
+
+    await dispatchUpdate(pressUpdate(buttonPayload("Allow once"), 999), opts as never);
+
+    expect(approvalMock.resolve).not.toHaveBeenCalled();
+    expect(opts.api.answerCallback).toHaveBeenCalledWith("cb.presentation.1", { notification: "You are not allowed to answer this." });
+  });
+
+  it("answers an ask_user question through the question gateway", async () => {
+    const { setMaxRuntime } = await import("./runtime.js");
+    const { dispatchUpdate } = await import("./monitor.js");
+    setMaxRuntime(makeRuntime().core as never);
+    const opts = makeOpts({ allowFrom: ["4260364"] });
+
+    await dispatchUpdate(pressUpdate(buttonPayload("Yes")), opts as never);
+
+    expect(questionMock.resolveOption).toHaveBeenCalledWith(expect.objectContaining({
+      questionId: QUESTION_ID,
+      optionValue: "yes",
+      senderId: "4260364",
+    }));
+    const authorize = questionMock.resolveOption.mock.calls[0][0].authorize as () => boolean;
+    expect(authorize()).toBe(true);
+    expect(opts.api.answerCallback).toHaveBeenCalledWith("cb.presentation.1", { notification: "Answer recorded." });
+  });
+
+  it("reports a failed resolution instead of throwing", async () => {
+    const { setMaxRuntime } = await import("./runtime.js");
+    const { dispatchUpdate } = await import("./monitor.js");
+    setMaxRuntime(makeRuntime().core as never);
+    approvalMock.resolve.mockRejectedValue(new Error("gateway unreachable"));
+    const opts = makeOpts({ allowFrom: ["4260364"] });
+
+    await dispatchUpdate(pressUpdate(buttonPayload("Allow once")), opts as never);
+
+    expect(opts.api.answerCallback).toHaveBeenCalledWith("cb.presentation.1", { notification: "Could not apply this action." });
+  });
+});
+
 describe("agent reply funnel", () => {
   it("renders a presentation reply as a keyboard message and pins it", async () => {
     const { setMaxRuntime } = await import("./runtime.js");
