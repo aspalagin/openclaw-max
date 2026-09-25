@@ -490,9 +490,8 @@ function sendReadReceipt(chatId: number | undefined, opts: MaxMonitorOptions): v
       log?.debug?.(`[${account.accountId}] mark_seen failed: ${String(err)}`);
     });
   }
-  opts.api.sendAction(chatId, "typing_on").catch((err) => {
-    log?.debug?.(`[${account.accountId}] typing_on failed: ${String(err)}`);
-  });
+  // typing_on is sent once, by processIncomingMessage right before the agent
+  // run — only for messages that pass the group/DM gates.
 }
 
 /** @internal - Exported for testing only */
@@ -508,7 +507,7 @@ export async function dispatchUpdate(
       // Skip messages from the bot itself
       if (opts.botUserId && update.message.sender?.user_id === opts.botUserId) break;
       statusSink?.({ lastInboundAt: Date.now() });
-      // Mark message as read + show typing indicator
+      // Mark message as read (typing starts once the message reaches the agent)
       sendReadReceipt(update.message.recipient?.chat_id, opts);
       // Passive chat discovery: GET /chats is deprecated, register group chats
       // the bot actually sees so directory.listGroups keeps working.
@@ -540,7 +539,7 @@ export async function dispatchUpdate(
       if (opts.botUserId && update.message.sender?.user_id === opts.botUserId) break;
       log?.debug?.(`[${account.accountId}] Message edited: ${update.message?.body?.mid} text="${update.message?.body?.text ?? "<null>"}" hasBody=${!!update.message?.body}`);
       statusSink?.({ lastInboundAt: Date.now() });
-      // Mark as read + show typing indicator
+      // Mark as read (typing starts once the message reaches the agent)
       sendReadReceipt(update.message.recipient?.chat_id, opts);
       // Process edited message through the same pipeline as new messages.
       // Use a unique mid suffix to avoid OpenClaw dedup (same mid = skipped).

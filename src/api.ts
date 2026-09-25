@@ -11,7 +11,7 @@
  * Trusted Root/Sub CA. Trust is scoped to this client only, never process-wide.
  */
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import * as tls from "node:tls";
 import { retryAsync } from "openclaw/plugin-sdk/runtime-env";
 import { Agent, buildConnector, fetch as undiciFetch } from "undici";
@@ -192,6 +192,64 @@ export interface MaxApiOptions {
   timeoutMs?: number;
   /** Retry attempts for transient errors (429 / 502-504 / network). 0 disables. Default 3. */
   retryAttempts?: number;
+  /** Per-chat send limiter for POST /messages; defaults to the process-wide one, null disables. */
+  sendLimiter?: MaxChatSendLimiter | null;
+}
+
+/** MAX docs (POST /messages): at most 2 messages per second into one dialog, chat or channel. */
+export const MAX_SENDS_PER_CHAT_PER_SECOND = 2;
+
+/**
+ * Sliding-window limiter for sends into one chat. Callers for the same key are
+ * served in order; a caller over the limit waits until the oldest send in the
+ * window is a full window old. Keys are independent, long polling and other
+ * requests never pass through it.
+ */
+export class MaxChatSendLimiter {
+  private recent = new Map<string, number[]>();
+  private tails = new Map<string, Promise<void>>();
+
+  constructor(
+    private limit = MAX_SENDS_PER_CHAT_PER_SECOND,
+    private windowMs = 1000,
+  ) {}
+
+  acquire(key: string): Promise<void> {
+    const take = async (): Promise<void> => {
+      for (;;) {
+        const now = Date.now();
+        const times = (this.recent.get(key) ?? []).filter((t) => now - t < this.windowMs);
+        if (times.length < this.limit) {
+          times.push(now);
+          this.recent.set(key, times);
+          return;
+        }
+        this.recent.set(key, times);
+        await new Promise((resolve) => setTimeout(resolve, times[0] + this.windowMs - now));
+      }
+    };
+    const slot = (this.tails.get(key) ?? Promise.resolve()).then(take);
+    this.tails.set(key, slot);
+    void slot.finally(() => {
+      if (this.tails.get(key) === slot) this.tails.delete(key);
+    });
+    if (this.recent.size > 1000) this.prune();
+    return slot;
+  }
+
+  private prune(): void {
+    const now = Date.now();
+    for (const [key, times] of this.recent) {
+      if (!this.tails.has(key) && times.every((t) => now - t >= this.windowMs)) this.recent.delete(key);
+    }
+  }
+}
+
+let sharedSendLimiter = new MaxChatSendLimiter();
+
+/** @internal Fresh process-wide send limiter (test isolation). */
+export function resetMaxSendLimiterForTests(): void {
+  sharedSendLimiter = new MaxChatSendLimiter();
 }
 
 export class MaxApiError extends Error {
@@ -260,9 +318,14 @@ export class MaxApi {
   private baseUrl: string;
   private timeoutMs: number;
   private retryAttempts: number;
+  private sendLimiter: MaxChatSendLimiter | null;
+  /** Limiter key prefix: the same chat under two bots has two budgets. */
+  private tokenKey: string;
 
   constructor(opts: MaxApiOptions) {
     this.token = opts.token;
+    this.sendLimiter = opts.sendLimiter === undefined ? sharedSendLimiter : opts.sendLimiter;
+    this.tokenKey = createHash("sha256").update(opts.token).digest("hex").slice(0, 12);
     this.baseUrl = opts.baseUrl ?? BASE_URL;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const envAttempts = Number(process.env.OPENCLAW_MAX_RETRY_ATTEMPTS);
@@ -400,6 +463,8 @@ export class MaxApi {
     body: MaxNewMessageBody,
     params: { chat_id?: number; user_id?: number; disable_link_preview?: boolean },
   ): Promise<MaxSendResult> {
+    const chat = params.chat_id != null ? `c${params.chat_id}` : `u${params.user_id}`;
+    await this.sendLimiter?.acquire(`${this.tokenKey}:${chat}`);
     return this.request<MaxSendResult>("POST", "/messages", params as Record<string, string | number>, body);
   }
 

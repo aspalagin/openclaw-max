@@ -29,6 +29,8 @@ All notable changes to this project are documented in this file.
 - README: в списке возможностей — `presentation`, `delivery.pin` и webhook на HTTP-сервере gateway.
 - Внутреннее: импорты новых модулей отсортированы по правилам eslint, число предупреждений lint вернулось к уровню до этапа (74, ошибок 0).
 - Уход с устаревших SDK-подпутей: `retryAsync` импортируется из `plugin-sdk/runtime-env` (вместо `retry-runtime`, приватного с июля 2026), `jsonResult` — из `plugin-sdk/tool-results` (вместо широкого barrel `agent-runtime`).
+- Троттлинг отправки по лимиту MAX «не более 2 сообщений в секунду в один диалог, чат или канал» (docs `POST /messages`): `MaxApi.sendMessage` проходит через общий на процесс `MaxChatSendLimiter` (скользящее окно 1 с, ключ — бот + `chat_id`/`user_id`, очередь в порядке вызова). Длинные ответы, нарезанные по 4000 символов, и альбомы больше не упираются в 429. Long polling, правки, `typing_on` и прочие запросы через лимитер не идут; `sendLimiter: null` в `MaxApiOptions` отключает его.
+- `typing_on` отправляется один раз на сообщение — перед запуском агента. Раньше он уходил ещё и вместе с `mark_seen` на каждое входящее, в том числе на сообщения группы без упоминания, которые бот игнорирует (индикатор «печатает» без ответа).
 
 ### Added
 

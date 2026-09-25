@@ -518,3 +518,40 @@ describe("edit streaming (streamMode: partial)", () => {
     ]);
   });
 });
+
+describe("typing indicator", () => {
+  async function run(message: Record<string, unknown>, accountConfig: Record<string, unknown>, botUsername?: string) {
+    const { setMaxRuntime } = await import("./runtime.js");
+    const { dispatchUpdate } = await import("./monitor.js");
+    const { core, dispatched } = makeCallbackRuntime();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setMaxRuntime(core as any);
+    const opts = { ...makeCallbackOpts(accountConfig), botUserId: 900, botUsername };
+    await dispatchUpdate({ update_type: "message_created", timestamp: 1, message } as unknown as MaxUpdate, opts);
+    const actions = (opts.api.sendAction as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1]);
+    return { actions, dispatched };
+  }
+
+  it("sends typing_on once per message that reaches the agent", async () => {
+    const { actions, dispatched } = await run({
+      sender: { user_id: 7, first_name: "Ann", is_bot: false },
+      recipient: { chat_id: 70, chat_type: "dialog" },
+      timestamp: 1,
+      body: { mid: "mid.t1", text: "привет" },
+    }, { dmPolicy: "open" });
+    expect(dispatched).toHaveLength(1);
+    expect(actions.filter((a) => a === "typing_on")).toHaveLength(1);
+    expect(actions.filter((a) => a === "mark_seen")).toHaveLength(1);
+  });
+
+  it("does not show typing for a group message the bot ignores", async () => {
+    const { actions, dispatched } = await run({
+      sender: { user_id: 7, first_name: "Ann", is_bot: false },
+      recipient: { chat_id: -100, chat_type: "chat" },
+      timestamp: 1,
+      body: { mid: "mid.t2", text: "просто болтаем" },
+    }, { groupPolicy: "open" }, "banzai_bot");
+    expect(dispatched).toHaveLength(0);
+    expect(actions).not.toContain("typing_on");
+  });
+});

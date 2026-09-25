@@ -526,3 +526,63 @@ describe("MaxApi", () => {
     });
   });
 });
+
+describe("per-chat send limiter (2 messages/s)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("lets two sends into a chat through at once and delays the third by the window", async () => {
+    vi.useFakeTimers();
+    const { MaxChatSendLimiter, MAX_SENDS_PER_CHAT_PER_SECOND } = await import("./api.js");
+    expect(MAX_SENDS_PER_CHAT_PER_SECOND).toBe(2);
+    const limiter = new MaxChatSendLimiter();
+    const done: number[] = [];
+    const start = Date.now();
+    for (let i = 0; i < 5; i += 1) void limiter.acquire("chat-a").then(() => done.push(Date.now() - start));
+    void limiter.acquire("chat-b").then(() => done.push(-1));
+
+    const chatA = () => done.filter((t) => t >= 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(chatA()).toEqual([0, 0]);
+    expect(done).toContain(-1); // another chat is not held back
+    await vi.advanceTimersByTimeAsync(999);
+    expect(chatA()).toEqual([0, 0]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(chatA()).toEqual([0, 0, 1000, 1000]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(chatA()).toEqual([0, 0, 1000, 1000, 2000]);
+  });
+
+  it("throttles POST /messages per chat and bot, not other requests", async () => {
+    vi.useFakeTimers();
+    const { MaxChatSendLimiter } = await import("./api.js");
+    const sendLimiter = new MaxChatSendLimiter();
+    const calls: string[] = [];
+    global.fetch = vi.fn(async (url: string, init?: { method?: string }) => {
+      calls.push(`${init?.method} ${new URL(url).pathname}${new URL(url).search}`);
+      return { ok: true, status: 200, json: async () => ({ success: true }) };
+    }) as never;
+    const api = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, sendLimiter });
+    const otherBot = new MaxApi({ token: "other-token", baseUrl: MOCK_BASE_URL, sendLimiter });
+
+    const sends = [1, 2, 3].map((n) => api.sendMessage({ text: String(n) }, { chat_id: 10 }));
+    void otherBot.sendMessage({ text: "x" }, { chat_id: 10 });
+    void api.sendMessage({ text: "u" }, { user_id: 5 });
+    void api.getMe();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.filter((c) => c === "POST /messages?chat_id=10")).toHaveLength(3); // 2 + other bot
+    expect(calls).toContain("POST /messages?user_id=5");
+    expect(calls).toContain("GET /me");
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await Promise.all(sends);
+    expect(calls.filter((c) => c === "POST /messages?chat_id=10")).toHaveLength(4);
+  });
+
+  it("can be disabled with sendLimiter: null", async () => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })) as never;
+    const api = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, sendLimiter: null });
+    await Promise.all([1, 2, 3, 4].map(() => api.sendMessage({ text: "t" }, { chat_id: 1 })));
+    expect(global.fetch).toHaveBeenCalledTimes(4);
+  });
+});

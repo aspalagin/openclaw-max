@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach } from "vitest";
 
-import { setMaxFetchForTests } from "./api.js";
+import { resetMaxSendLimiterForTests, setMaxFetchForTests } from "./api.js";
 
 process.env.OPENCLAW_STATE_DIR = mkdtempSync(join(tmpdir(), "openclaw-max-test-"));
 // Tests assert on exact fetch call sequences — retries would consume queued mocks.
@@ -20,4 +20,6 @@ type AnyFetch = (url: string, init?: Record<string, unknown>) => Promise<never>;
 beforeEach(() => {
   // Late-bound: tests reassign global.fetch per test case
   setMaxFetchForTests((url, init) => (globalThis.fetch as unknown as AnyFetch)(url, init));
+  // The 2 msg/s per-chat budget must not leak waits from one test into the next.
+  resetMaxSendLimiterForTests();
 });
