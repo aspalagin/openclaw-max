@@ -215,7 +215,7 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
         '- MAX location: use `message(action="sendAttachment", target="CHAT_ID", type="location", latitude="55.75", longitude="37.62")` to send a native map pin.',
         '- MAX contact: use `message(action="sendAttachment", target="CHAT_ID", type="contact", contactName="Name", vcfPhone="+70001234567")` to send a native contact card.',
         '- MAX pin: use `message(action="pin", target="CHAT_ID", messageId="MID")` to pin a message; `message(action="unpin", target="CHAT_ID")` to unpin.',
-        '- MAX buttons support types: callback (default), link, message (sends the button text as a user message — great for suggested replies), clipboard (copies payload), open_app, request_contact, request_geo_location. Pass via buttons=[[{"text":"...","type":"message"}]].',
+        '- MAX buttons support types: callback (default), link, message (sends the button text as a user message — great for suggested replies), clipboard (copies payload), open_app (webApp = public name of the bot wired to the mini app), request_contact, request_geo_location. Pass via buttons=[[{"text":"...","type":"message"}]].',
       ];
     },
   },

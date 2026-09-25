@@ -167,7 +167,6 @@ export async function subscribeMaxWebhook(params: {
       "message_callback",
       "message_edited",
       "message_removed",
-      "message_chat_created",
       "bot_started",
       "bot_stopped",
       "bot_added",

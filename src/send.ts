@@ -26,8 +26,7 @@ export type MaxSendButton = {
   payload?: string;
   callback_data?: string;
   url?: string;
-  intent?: "default" | "positive" | "negative";
-  /** open_app: public name of the mini-app/bot to open */
+  /** open_app: public name of the bot wired to the mini app (falls back to `url`) */
   webApp?: string;
 };
 
@@ -108,7 +107,6 @@ export function readMaxChannelButtons(channelData: unknown): MaxSendButton[][] |
   const validTypes = new Set([
     "callback", "link", "message", "clipboard", "open_app", "request_contact", "request_geo_location",
   ]);
-  const validIntents = new Set(["default", "positive", "negative"]);
 
   const rows = rawButtons
     .map((row) => {
@@ -121,7 +119,6 @@ export function readMaxChannelButtons(channelData: unknown): MaxSendButton[][] |
           payload: button.payload != null ? String(button.payload) : undefined,
           callback_data: button.callback_data != null ? String(button.callback_data) : undefined,
           url: button.url != null ? String(button.url) : undefined,
-          intent: validIntents.has(String(button.intent)) ? (String(button.intent) as MaxSendButton["intent"]) : undefined,
           webApp: button.webApp != null ? String(button.webApp) : button.web_app != null ? String(button.web_app) : undefined,
         }))
         .filter((button) => button.text.trim().length > 0);
@@ -153,13 +150,17 @@ function buildMaxButton(btn: MaxSendButton): MaxInlineKeyboardButton {
       return { type: "message", text: btn.text, ...(btn.payload ? { payload: btn.payload } : {}) };
     case "clipboard":
       return { type: "clipboard", text: btn.text, payload: btn.payload ?? btn.text };
-    case "open_app":
+    case "open_app": {
+      // OpenAppButton has no `url`: the mini app is addressed by `web_app`
+      // (the wired bot's public name). A legacy `url` is carried over there.
+      const webApp = btn.webApp ?? btn.url;
       return {
         type: "open_app",
         text: btn.text,
-        ...(btn.webApp ? { web_app: btn.webApp } : {}),
-        ...(btn.url ? { url: btn.url } : {}),
+        ...(webApp ? { web_app: webApp } : {}),
+        ...(btn.payload ? { payload: btn.payload } : {}),
       };
+    }
     case "request_contact":
       return { type: "request_contact", text: btn.text };
     case "request_geo_location":
@@ -170,7 +171,6 @@ function buildMaxButton(btn: MaxSendButton): MaxInlineKeyboardButton {
         type: "callback",
         text: btn.text,
         payload: btn.payload ?? btn.callback_data ?? btn.text,
-        ...(btn.intent ? { intent: btn.intent } : {}),
       };
   }
 }

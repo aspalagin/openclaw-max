@@ -142,6 +142,22 @@ describe("MAX_SUBSCRIBED_UPDATE_TYPES", () => {
     // validation would 400 the whole polling loop.
     expect(MAX_SUBSCRIBED_UPDATE_TYPES).not.toContain("message_reaction_created");
     expect(MAX_SUBSCRIBED_UPDATE_TYPES).not.toContain("message_reaction_updated");
+    // Not an Update type in the published schema (max-messenger/api-schema).
+    expect(MAX_SUBSCRIBED_UPDATE_TYPES).not.toContain("message_chat_created");
+  });
+
+  it("should only request update types from the schema's Update discriminator", () => {
+    // Update.discriminator.mapping in max-messenger/api-schema schema.yaml (2026-09)
+    const schemaUpdateTypes = new Set([
+      "message_created", "message_callback", "message_edited", "message_removed",
+      "comment_created", "comment_edited", "comment_removed",
+      "bot_added", "bot_removed", "user_added", "user_removed",
+      "bot_started", "bot_stopped", "dialog_cleared", "dialog_removed",
+      "dialog_muted", "dialog_unmuted", "chat_title_changed", "bot_admin_permissions_changed",
+    ]);
+    for (const type of MAX_SUBSCRIBED_UPDATE_TYPES) {
+      expect(schemaUpdateTypes.has(type), type).toBe(true);
+    }
   });
 
   it("should include the lifecycle events added to the API in 2026", () => {
@@ -149,7 +165,6 @@ describe("MAX_SUBSCRIBED_UPDATE_TYPES", () => {
     expect(MAX_SUBSCRIBED_UPDATE_TYPES).toContain("dialog_cleared");
     expect(MAX_SUBSCRIBED_UPDATE_TYPES).toContain("dialog_removed");
     expect(MAX_SUBSCRIBED_UPDATE_TYPES).toContain("chat_title_changed");
-    expect(MAX_SUBSCRIBED_UPDATE_TYPES).toContain("message_chat_created");
   });
 });
 

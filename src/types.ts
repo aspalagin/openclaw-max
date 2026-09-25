@@ -51,6 +51,8 @@ export interface Recipient {
   chat_type?: ChatType;
   /** user_id when sent to a user */
   user_id?: number;
+  /** Post identifier for comments */
+  post_id?: string | null;
 }
 
 // ─── Attachments ────────────────────────────────────────────────
@@ -69,12 +71,12 @@ export interface VideoAttachment {
   payload: {
     token: string;
     url: string;
-    id?: number;
-    thumbnail?: string;
-    width?: number;
-    height?: number;
-    duration?: number;
   };
+  /** Thumbnail, width, height and duration are siblings of payload */
+  thumbnail?: { url: string } | null;
+  width?: number | null;
+  height?: number | null;
+  duration?: number | null;
 }
 
 export interface AudioAttachment {
@@ -143,7 +145,10 @@ export interface InlineButton {
   text: string;
   payload?: string;
   url?: string;
-  intent?: "default" | "positive" | "negative";
+  /** open_app: public name of the bot wired to the mini app */
+  web_app?: string;
+  /** open_app: id of the bot wired to the mini app */
+  contact_id?: number | null;
 }
 
 export type Attachment =
@@ -204,7 +209,9 @@ export type UpdateType =
   | "message_callback"
   | "message_edited"
   | "message_removed"
-  | "message_chat_created"
+  | "comment_created"
+  | "comment_edited"
+  | "comment_removed"
   | "bot_added"
   | "bot_removed"
   | "bot_started"
@@ -215,7 +222,8 @@ export type UpdateType =
   | "dialog_unmuted"
   | "user_added"
   | "user_removed"
-  | "chat_title_changed";
+  | "chat_title_changed"
+  | "bot_admin_permissions_changed";
 
 interface BaseUpdate {
   update_type: UpdateType;
@@ -321,9 +329,8 @@ export interface UpdatesResponse {
 
 export interface Subscription {
   url: string;
-  time?: number;
-  update_types?: UpdateType[];
-  version?: string;
+  time: number;
+  update_types?: UpdateType[] | null;
 }
 
 // ─── Account config (for OpenClaw plugin) ──────────────────────
@@ -408,6 +415,8 @@ export interface MaxRecipient {
   chat_id?: number;
   chat_type?: string;
   user_id?: number;
+  /** Post identifier for comments */
+  post_id?: string | null;
 }
 
 export interface MaxMessageBody {
@@ -445,7 +454,9 @@ export type MaxUpdateType =
   | "message_callback"
   | "message_edited"
   | "message_removed"
-  | "message_chat_created"
+  | "comment_created"
+  | "comment_edited"
+  | "comment_removed"
   | "bot_added"
   | "bot_removed"
   | "bot_started"
@@ -456,7 +467,8 @@ export type MaxUpdateType =
   | "dialog_unmuted"
   | "user_added"
   | "user_removed"
-  | "chat_title_changed";
+  | "chat_title_changed"
+  | "bot_admin_permissions_changed";
 
 export interface MaxUpdate {
   update_type: MaxUpdateType;
@@ -477,16 +489,14 @@ export interface MaxUpdate {
 }
 
 export interface MaxInlineKeyboardButton {
-  type: "callback" | "link" | "request_contact" | "request_geo_location" | "open_app" | "message" | "clipboard" | "chat";
+  type: "callback" | "link" | "request_contact" | "request_geo_location" | "open_app" | "message" | "clipboard";
   text: string;
   payload?: string;
   url?: string;
-  intent?: "default" | "positive" | "negative";
-  /** open_app: public name of the bot/mini-app to open */
+  /** open_app: public name of the bot wired to the mini app (required for open_app) */
   web_app?: string;
-  /** chat button: title for the chat to create */
-  chat_title?: string;
-  chat_description?: string;
+  /** open_app: id of the bot wired to the mini app */
+  contact_id?: number | null;
 }
 
 export interface MaxInlineKeyboardAttachment {
@@ -558,7 +568,8 @@ export interface MaxVideoInfo {
     mp4_144?: string;
     hls?: string;
   } | null;
-  thumbnail?: string;
+  /** PhotoAttachmentPayload */
+  thumbnail?: { url: string; photo_id?: number; token?: string } | null;
   width?: number;
   height?: number;
   duration?: number;
@@ -591,12 +602,11 @@ export interface MaxSimpleResult {
   message?: string;
 }
 
+/** GET /subscriptions item. The secret is write-only (POST /subscriptions) and never returned. */
 export interface MaxSubscription {
   url: string;
-  time?: number;
-  update_types?: string[];
-  secret?: string;
-  version?: string;
+  time: number;
+  update_types?: string[] | null;
 }
 
 export interface MaxSubscriptionsResponse {

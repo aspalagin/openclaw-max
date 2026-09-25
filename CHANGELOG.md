@@ -21,6 +21,7 @@ All notable changes to this project are documented in this file.
 - `devDependencies.openclaw` поднят до `^2026.9.6`, lockfile обновлён; в CI добавлен прогон typecheck+test на последней опубликованной версии OpenClaw, в том числе с минимальной zod 4.4.3.
 - Контакт-вложение отправляется полями из схемы `ContactAttachmentRequestPayload` в snake_case — `name`, `contact_id`, `vcf_phone`, `vcf_info` (раньше camelCase без `name`; сервер принимал обе формы, но документирована только snake_case). Тесты на payload всех трёх веток.
 - `getMessages` принимает `before`/`after` (Unix-время, мс) вместо устаревших `from`/`to`; добавлен `getMessageById` (`GET /messages/{messageId}`).
+- Контракт с Bot API сверен с `schema.yaml`: из подписки (`GET /updates types`, `POST /subscriptions update_types`) и типов убрано несуществующее событие `message_chat_created`; удалены тип кнопки `chat` и поле `intent` (не входят в `Button`, `intent` больше не отправляется); кнопка `open_app` адресуется полем `web_app` (прежний `url` переносится туда, `url` не отправляется), поддержан `payload`; в известные `update_type` добавлены `bot_admin_permissions_changed` и `comment_*`; `MaxVideoInfo.thumbnail` — объект `{url}`; `MaxRecipient.post_id`; `MaxSubscription` без `version/secret` (secret — только в теле `POST /subscriptions`). Тест сверяет подписку со списком `Update` из схемы.
 
 ## 0.6.1 - 2026-07-18
 

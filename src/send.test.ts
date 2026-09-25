@@ -468,7 +468,7 @@ describe("MAX button types", () => {
     ]);
   });
 
-  it("should pass intent on callback buttons", async () => {
+  it("should not send intent, which the Button schema does not define", async () => {
     global.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({ message: { body: { mid: "m1" }, timestamp: 1, recipient: { chat_id: 1 } } }),
@@ -476,7 +476,7 @@ describe("MAX button types", () => {
 
     await sendMaxMessage("123", "sure?", {
       token: MOCK_TOKEN,
-      buttons: [[{ text: "Удалить", payload: "del", intent: "negative" }]],
+      buttons: [[{ text: "Удалить", payload: "del", intent: "negative" } as never]],
     });
 
     const body = JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
@@ -484,8 +484,28 @@ describe("MAX button types", () => {
       type: "callback",
       text: "Удалить",
       payload: "del",
-      intent: "negative",
     });
+  });
+
+  it("should address open_app by web_app, carrying a legacy url over and never sending url", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ message: { body: { mid: "m1" }, timestamp: 1, recipient: { chat_id: 1 } } }),
+    });
+
+    await sendMaxMessage("123", "open", {
+      token: MOCK_TOKEN,
+      buttons: [[
+        { text: "App", type: "open_app", url: "someapp_bot" },
+        { text: "App2", type: "open_app", webApp: "other_bot", payload: "start-1" },
+      ]],
+    });
+
+    const body = JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    expect(body.attachments[0].payload.buttons[0]).toEqual([
+      { type: "open_app", text: "App", web_app: "someapp_bot" },
+      { type: "open_app", text: "App2", web_app: "other_bot", payload: "start-1" },
+    ]);
   });
 });
 

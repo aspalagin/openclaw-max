@@ -106,7 +106,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       const replyTo = readStringParam(params, "replyTo");
       const stickerId = readStringParam(params, "stickerId");
 
-      // Parse inline keyboard buttons: [[{text, type?, callback_data?, url?, intent?}]]
+      // Parse inline keyboard buttons: [[{text, type?, callback_data?, url?, webApp?}]]
       // type: callback (default) | link | message | clipboard | open_app | request_contact | request_geo_location
       const validButtonTypes = new Set([
         "callback", "link", "message", "clipboard", "open_app", "request_contact", "request_geo_location",
@@ -119,9 +119,6 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
             type: validButtonTypes.has(String(btn.type)) ? (String(btn.type) as MaxSendButton["type"]) : undefined,
             payload: btn.callback_data ? String(btn.callback_data) : btn.payload ? String(btn.payload) : undefined,
             url: btn.url ? String(btn.url) : undefined,
-            intent: ["default", "positive", "negative"].includes(String(btn.intent))
-              ? (String(btn.intent) as MaxSendButton["intent"])
-              : undefined,
             webApp: btn.webApp ? String(btn.webApp) : btn.web_app ? String(btn.web_app) : undefined,
           }))
         );

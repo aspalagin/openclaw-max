@@ -55,7 +55,6 @@ export const MAX_SUBSCRIBED_UPDATE_TYPES: MaxUpdateType[] = [
   "message_callback",
   "message_edited",
   "message_removed",
-  "message_chat_created",
   "bot_started",
   "bot_stopped",
   "bot_added",
@@ -423,20 +422,6 @@ export async function dispatchUpdate(
     case "chat_title_changed": {
       if (opts.state && update.chat_id != null && typeof update.title === "string") {
         opts.state.upsertChat(update.chat_id, { title: update.title });
-      }
-      break;
-    }
-
-    case "message_chat_created": {
-      // Chat created via a "chat" inline button
-      const chat = (update as { chat?: { chat_id?: number; type?: string; title?: string | null } }).chat;
-      log?.info(`[${account.accountId}] Chat created via button: ${chat?.chat_id ?? "?"}`);
-      if (opts.state && chat?.chat_id != null) {
-        opts.state.upsertChat(chat.chat_id, {
-          type: chat.type ?? "chat",
-          title: chat.title ?? undefined,
-          addedAt: Date.now(),
-        });
       }
       break;
     }
