@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { startMaxPolling, MAX_SUBSCRIBED_UPDATE_TYPES, createSerializedWebhookHandler } from "./monitor.js";
-import type { MaxUpdate } from "./api.js";
+import type { MaxMessage, MaxUpdate } from "./api.js";
 
 function makeMsgUpdate(chatId: number, mid: string): MaxUpdate {
   return {
@@ -150,5 +150,98 @@ describe("MAX_SUBSCRIBED_UPDATE_TYPES", () => {
     expect(MAX_SUBSCRIBED_UPDATE_TYPES).toContain("dialog_removed");
     expect(MAX_SUBSCRIBED_UPDATE_TYPES).toContain("chat_title_changed");
     expect(MAX_SUBSCRIBED_UPDATE_TYPES).toContain("message_chat_created");
+  });
+});
+
+describe("processIncomingMessage inbound media", () => {
+  it("passes downloaded attachments to the agent as ordered media facts", async () => {
+    const { finalizeInboundContext } = await import("openclaw/plugin-sdk/reply-dispatch-runtime");
+    const { setMaxRuntime } = await import("./runtime.js");
+    const { processIncomingMessage } = await import("./monitor.js");
+
+    const saved = [
+      { path: "/state/media/inbound/photo-1.jpg", contentType: "image/jpeg" },
+      { path: "/state/media/inbound/doc-2.bin", contentType: undefined },
+    ];
+    let saveIndex = 0;
+    let dispatchedCtx: Record<string, unknown> | undefined;
+    let finalizeInput: Record<string, unknown> | undefined;
+    const core = {
+      channel: {
+        media: {
+          fetchRemoteMedia: vi.fn(async ({ url }: { url: string }) => ({
+            buffer: Buffer.from(url),
+            contentType: "application/octet-stream",
+            fileName: url.endsWith("doc") ? "report.pdf" : undefined,
+          })),
+          saveMediaBuffer: vi.fn(async () => saved[saveIndex++]),
+        },
+        routing: {
+          resolveAgentRoute: vi.fn(() => ({ agentId: "main", accountId: "default", sessionKey: "agent:main:max:direct:7" })),
+        },
+        session: {
+          resolveStorePath: vi.fn(() => "/tmp/store"),
+          readSessionUpdatedAt: vi.fn(() => undefined),
+          recordSessionMetaFromInbound: vi.fn(async () => undefined),
+        },
+        reply: {
+          resolveEnvelopeFormatOptions: vi.fn(() => ({})),
+          formatAgentEnvelope: vi.fn(({ body }: { body: string }) => body),
+          finalizeInboundContext: (ctx: Record<string, unknown>) => {
+            finalizeInput = { ...ctx };
+            return finalizeInboundContext(ctx);
+          },
+          dispatchReplyWithBufferedBlockDispatcher: vi.fn(async ({ ctx }: { ctx: Record<string, unknown> }) => {
+            dispatchedCtx = ctx;
+          }),
+        },
+      },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setMaxRuntime(core as any);
+
+    await processIncomingMessage(
+      {
+        sender: { user_id: 7, first_name: "Ann", is_bot: false },
+        recipient: { chat_id: 70, chat_type: "dialog" },
+        timestamp: 1,
+        body: {
+          mid: "mid.media",
+          text: "look",
+          attachments: [
+            { type: "image", payload: { url: "https://cdn.max.test/photo" } },
+            { type: "file", payload: { url: "https://cdn.max.test/doc" }, filename: "report.pdf" },
+          ],
+        },
+      } as unknown as MaxMessage,
+      null,
+      {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        api: { sendAction: vi.fn(async () => ({ success: true })) } as any,
+        account: {
+          accountId: "default",
+          enabled: true,
+          token: "t",
+          tokenSource: "config",
+          config: { dmPolicy: "open" },
+        },
+        config: { channels: {} },
+        abortSignal: new AbortController().signal,
+      },
+    );
+
+    expect(dispatchedCtx).toBeDefined();
+    expect(dispatchedCtx?.media).toEqual([
+      expect.objectContaining({ path: saved[0].path, contentType: "image/jpeg", messageId: "mid.media" }),
+      expect.objectContaining({ path: saved[1].path, fileName: "report.pdf", messageId: "mid.media" }),
+    ]);
+    // Signed CDN URLs never reach the agent context.
+    expect(JSON.stringify(dispatchedCtx?.media)).not.toContain("cdn.max.test");
+    // The plugin hands over only `media`; any legacy Media* projection is the SDK's.
+    for (const key of ["MediaPath", "MediaPaths", "MediaUrl", "MediaUrls", "MediaType", "MediaTypes"]) {
+      expect(finalizeInput).not.toHaveProperty(key);
+    }
+    // The agent still sees the local file path of the first attachment.
+    expect(dispatchedCtx?.MediaPath ?? (dispatchedCtx?.media as { path?: string }[])[0]?.path).toBe(saved[0].path);
   });
 });

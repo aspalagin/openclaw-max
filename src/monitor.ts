@@ -8,6 +8,7 @@
 import { randomBytes } from "node:crypto";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import type { ChannelAccountSnapshot, ChannelLogSink } from "openclaw/plugin-sdk/channel-contract";
+import { type ChannelInboundMediaInput, toInboundMediaFacts } from "openclaw/plugin-sdk/channel-inbound";
 import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-outbound";
 import { channelReadyPatch, createTransportActivityStatusPatch } from "openclaw/plugin-sdk/gateway-runtime";
 import { MaxApi, type MaxUpdate, type MaxMessage, type MaxUser, type MaxCallback, type MaxUpdateType } from "./api.js";
@@ -482,9 +483,8 @@ export async function processIncomingMessage(
 
   // Process attachments: download media, build descriptions for non-downloadable types
   const attachmentDescriptions: string[] = [];
-  const mediaPaths: string[] = [];
-  const mediaUrls: string[] = [];
-  const mediaTypes: string[] = [];
+  // One entry per downloaded attachment; array position is attachment identity.
+  const mediaInputs: ChannelInboundMediaInput[] = [];
 
   for (const att of attachments) {
     const attType = att.type ?? "unknown";
@@ -530,9 +530,14 @@ export async function processIncomingMessage(
             maxBytes,
             fetched.fileName,
           );
-          mediaPaths.push(saved.path);
-          mediaUrls.push(saved.path);
-          if (saved.contentType) mediaTypes.push(saved.contentType);
+          // Only the local copy goes to the agent: MAX download URLs are signed
+          // and short-lived, so they are not recorded as the media url.
+          mediaInputs.push({
+            path: saved.path,
+            contentType: saved.contentType,
+            fileName: fetched.fileName,
+            messageId,
+          });
         } catch (err) {
           log?.error?.(`[${account.accountId}] Failed to download ${attType}: ${String(err)}`);
           // Fall back to text description (sticker code already added above)
@@ -568,7 +573,7 @@ export async function processIncomingMessage(
   }
 
   const attachmentText = attachmentDescriptions.join(" ");
-  const hasMedia = mediaPaths.length > 0;
+  const hasMedia = mediaInputs.length > 0;
   const effectiveText = rawText.trim() || attachmentText;
 
   // Skip truly empty messages (no text, no media, no meaningful attachments)
@@ -746,13 +751,8 @@ export async function processIncomingMessage(
     ReplyToIdFull: replyToId,
     OriginatingChannel: "max",
     OriginatingTo: `max:${chatIdStr}`,
-    // Media attachments (downloaded to local paths)
-    MediaPath: mediaPaths[0],
-    MediaPaths: mediaPaths.length > 0 ? mediaPaths : undefined,
-    MediaUrl: mediaUrls[0],
-    MediaUrls: mediaUrls.length > 0 ? mediaUrls : undefined,
-    MediaType: mediaTypes[0],
-    MediaTypes: mediaTypes.length > 0 ? mediaTypes : undefined,
+    // Media attachments (downloaded to local paths) as ordered media facts
+    media: hasMedia ? toInboundMediaFacts(mediaInputs) : undefined,
     // Text-slash command detection: treat /status, /models etc. as text commands
     // so OpenClaw routes them through handleCommands instead of silently dropping
     ...(isTextSlashCommand ? {

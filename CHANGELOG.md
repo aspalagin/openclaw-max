@@ -14,6 +14,7 @@ All notable changes to this project are documented in this file.
 - Клиентский дедлайн теперь бросает типизированную `MaxRequestTimeoutError` с фазой (`awaiting-response`/`reading-body`), а текстовая отправка (`sendMaxMessage`) при таком таймауте делает один безопасный повтор на новом соединении.
 - Диагностика: медленные (> 5 с) и оборвавшиеся запросы, а также медленные (> 2 с) или неудавшиеся установки соединения логируются с таймингом фаз, не раскрывая тело запроса.
 - Уход с SDK-подпутей, закрываемых гейтом 2026-10-01: webhook читает тело через `readJsonWebhookBodyOrReject` из `plugin-sdk/webhook-ingress` (вместо `readJsonBodyWithLimit` из `infra-runtime`; ошибки размера/таймаута/обрыва/битого JSON — 413/408/400), тип `DmPolicy` импортируется из `plugin-sdk/config-contracts` (вместо `config-runtime`).
+- Входящие медиа передаются агенту упорядоченными фактами `media` (`toInboundMediaFacts` из `plugin-sdk/channel-inbound`) вместо устаревших `MediaPath/MediaPaths/MediaUrl/MediaUrls/MediaType/MediaTypes` (снимаются гейтом 2026-10-01). Каждому вложению — локальный путь, `contentType`, имя файла и `messageId`; подписанные ссылки CDN MAX в контекст не попадают. Заодно исчез рассинхрон индексов, когда у части вложений не было `contentType`.
 
 ## 0.6.1 - 2026-07-18
 
