@@ -62,9 +62,27 @@
                 "type": "object",
                 "additionalProperties": { "$ref": "#/definitions/groupConfig" }
               },
-              "webhookUrl": { "type": "string" },
-              "webhookSecret": { "type": "string" },
-              "webhookPath": { "type": "string" },
+              "transport": {
+                "type": "string",
+                "enum": ["polling", "webhook"],
+                "description": "Update transport. Default: webhook when webhookUrl is set, otherwise polling. MAX does not serve long polling while a webhook subscription exists."
+              },
+              "webhookUrl": {
+                "type": "string",
+                "description": "Public HTTPS URL (port 443, trusted CA) MAX posts updates to; its path is served on the gateway HTTP server."
+              },
+              "webhookSecret": {
+                "type": "string",
+                "description": "X-Max-Bot-Api-Secret value, 5-256 of A-Z a-z 0-9 _ -. Prefer webhookSecretFile; generated and kept in the account state file when neither is set."
+              },
+              "webhookSecretFile": {
+                "type": "string",
+                "description": "File holding the webhook secret (like tokenFile)."
+              },
+              "webhookPath": {
+                "type": "string",
+                "description": "Gateway route path when it differs from the webhookUrl pathname (default: webhookUrl pathname, else /max/webhook)."
+              },
               "historyLimit": { "type": "integer", "minimum": 0 },
               "dmHistoryLimit": { "type": "integer", "minimum": 0 },
               "dms": {

@@ -132,6 +132,29 @@ describe("MAX Config Schema", () => {
       expect(result.webhookPath).toBe("/max-webhook");
     });
 
+    it("should accept transport and webhookSecretFile", () => {
+      const result = MaxAccountSchema.parse({
+        transport: "webhook",
+        webhookUrl: "https://max.example.com/max/webhook",
+        webhookSecretFile: "/run/secrets/max-webhook",
+      });
+      expect(result.transport).toBe("webhook");
+      expect(result.webhookSecretFile).toBe("/run/secrets/max-webhook");
+      expect(MaxAccountSchema.parse({ transport: "polling" }).transport).toBe("polling");
+    });
+
+    it("should reject an unknown transport", () => {
+      expect(() => MaxAccountSchema.parse({ transport: "websocket" })).toThrow();
+    });
+
+    it("should require webhookUrl for transport=webhook", () => {
+      expect(() => MaxAccountSchema.parse({ transport: "webhook" })).toThrow(/requires channels.max.webhookUrl/);
+      expect(() => MaxConfigSchema.parse({ transport: "webhook" })).toThrow(/requires channels.max.webhookUrl/);
+      expect(() => MaxConfigSchema.parse({
+        accounts: { work: { transport: "webhook" } },
+      })).toThrow(/requires channels.max.webhookUrl/);
+    });
+
     it("should accept history limits", () => {
       const config = {
         historyLimit: 100,
@@ -270,5 +293,17 @@ describe("MAX Config Schema", () => {
       expect(result.dmPolicy).toBe("pairing");
       expect(result.groupPolicy).toBe("allowlist");
     });
+  });
+});
+
+describe("openclaw.plugin.json channel schema", () => {
+  it("declares every account field of the zod schema, including transport and webhookSecretFile", async () => {
+    const { readFileSync } = await import("node:fs");
+    const manifest = JSON.parse(readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"));
+    const properties = manifest.channelConfigs.max.schema.definitions.accountConfig.properties;
+    expect(properties.transport.enum).toEqual(["polling", "webhook"]);
+    expect(properties.webhookSecretFile.type).toBe("string");
+    const { MaxAccountSchemaBase } = await import("./config-schema.js");
+    expect(Object.keys(properties).sort()).toEqual(Object.keys(MaxAccountSchemaBase.shape).sort());
   });
 });

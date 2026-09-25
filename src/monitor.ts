@@ -1,5 +1,6 @@
 /**
- * MAX long-polling monitor — receives updates and dispatches them to OpenClaw.
+ * MAX monitor — receives updates (long polling or webhook) and dispatches them
+ * to OpenClaw.
  *
  * Uses the same inbound pipeline as other channel plugins:
  * finalizeInboundContext → dispatchReplyWithBufferedBlockDispatcher
@@ -11,18 +12,19 @@ import type { ChannelAccountSnapshot, ChannelLogSink } from "openclaw/plugin-sdk
 import { type ChannelInboundMediaInput, toInboundMediaFacts } from "openclaw/plugin-sdk/channel-inbound";
 import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-outbound";
 import { channelReadyPatch, createTransportActivityStatusPatch } from "openclaw/plugin-sdk/gateway-runtime";
-import { MaxApi, type MaxUpdate, type MaxMessage, type MaxUser, type MaxCallback, type MaxUpdateType } from "./api.js";
-import { resolveMaxAccount, type ResolvedMaxAccount } from "./accounts.js";
+import { MaxApi, type MaxUpdate, type MaxMessage, type MaxUser, type MaxCallback, type MaxUpdateType, type MaxSubscription } from "./api.js";
+import { readSecretFile, resolveMaxAccount, type MaxAccountConfig, type ResolvedMaxAccount } from "./accounts.js";
 import { answerMaxCallback, sendMaxMessage, sendMaxMediaMessage, editMaxMessage, readMaxChannelButtons, readMaxChannelSendOptions } from "./send.js";
 import { getMaxRuntime } from "./runtime.js";
 import { MaxStateStore } from "./state.js";
 import { rememberStickerCode } from "./sticker-cache.js";
 import {
+  registerMaxWebhookRoute,
   registerMaxWebhookTarget,
   resolveMaxWebhookPath,
   subscribeMaxWebhook,
-  unsubscribeMaxWebhook,
   type MaxWebhookTarget,
+  type RegisterMaxWebhookRoute,
 } from "./webhook.js";
 
 /**
@@ -44,6 +46,8 @@ export interface MaxMonitorOptions {
   statusSink?: (patch: MaxStatusPatch) => void;
   /** Persistent marker + chat registry (created by startMaxPolling when absent) */
   state?: MaxStateStore;
+  /** Gateway route registration; defaults to plugin-sdk registerPluginHttpRoute (tests inject a mock) */
+  registerWebhookRoute?: RegisterMaxWebhookRoute;
 }
 
 /**
@@ -64,10 +68,18 @@ export const MAX_SUBSCRIBED_UPDATE_TYPES: MaxUpdateType[] = [
   "chat_title_changed",
 ];
 
+export type MaxTransport = "polling" | "webhook";
+
+/** Explicit `transport` wins; otherwise a configured webhookUrl selects webhook mode. */
+export function resolveMaxTransport(config: MaxAccountConfig): MaxTransport {
+  if (config.transport === "polling" || config.transport === "webhook") return config.transport;
+  return config.webhookUrl?.trim() ? "webhook" : "polling";
+}
+
 export async function startMaxPolling(opts: MaxMonitorOptions): Promise<void> {
   const { account, log } = opts;
 
-  // Persistent state: polling marker + chat registry
+  // Persistent state: polling marker + chat registry + webhook secret
   if (!opts.state) {
     opts.state = new MaxStateStore(account.accountId, (err) => {
       log?.error(`[${account.accountId}] MAX state persist failed: ${String(err)}`);
@@ -79,16 +91,41 @@ export async function startMaxPolling(opts: MaxMonitorOptions): Promise<void> {
     log?.error(`[${account.accountId}] MAX state load failed: ${String(err)}`);
   }
 
-  // Check if webhook mode is configured
-  const webhookUrl = account.config.webhookUrl?.trim();
-  const useWebhook = Boolean(webhookUrl);
-
-  if (useWebhook) {
-    // Webhook mode
-    await startMaxWebhook({ ...opts, webhookUrl: webhookUrl! });
+  if (resolveMaxTransport(account.config) === "webhook") {
+    await startMaxWebhook(opts);
   } else {
-    // Polling mode
+    // An active subscription silently disables long polling on the MAX side.
+    await clearMaxSubscriptionsForPolling(opts);
     await startMaxPollingLoop(opts);
+  }
+}
+
+/**
+ * Polling mode: MAX stops serving GET /updates while any webhook subscription
+ * exists, so a leftover subscription (another deploy, a manual test) would
+ * leave the bot deaf without a single error. Remove it and say so.
+ * @internal exported for testing.
+ */
+export async function clearMaxSubscriptionsForPolling(
+  opts: Pick<MaxMonitorOptions, "api" | "account" | "log">,
+): Promise<void> {
+  const { api, account, log } = opts;
+  let subscriptions: MaxSubscription[];
+  try {
+    subscriptions = (await api.getSubscriptions()).subscriptions ?? [];
+  } catch (err) {
+    log?.warn(`[${account.accountId}] MAX subscriptions check failed: ${String(err)}`);
+    return;
+  }
+  for (const subscription of subscriptions) {
+    log?.warn(
+      `[${account.accountId}] MAX webhook subscription ${subscription.url} is active — long polling gets no updates while it exists; removing it`,
+    );
+    try {
+      await api.unsubscribe(subscription.url);
+    } catch (err) {
+      log?.error(`[${account.accountId}] MAX unsubscribe ${subscription.url} failed: ${String(err)}`);
+    }
   }
 }
 
@@ -193,77 +230,173 @@ export function createSerializedWebhookHandler(params: {
   };
 }
 
-async function startMaxWebhook(opts: MaxMonitorOptions & { webhookUrl: string }): Promise<void> {
-  const { api, account, config, abortSignal, log, webhookUrl } = opts;
+/** MAX secret format (SubscriptionRequestBody.secret): 5–256 of [A-Za-z0-9_-]. */
+const MAX_WEBHOOK_SECRET_PATTERN = /^[\w-]{5,256}$/;
 
-  const webhookPath = resolveMaxWebhookPath(
-    account.config.webhookPath,
-    account.config.webhookUrl,
-  );
-  // MAX supports a shared secret (X-Max-Bot-Api-Secret). Without one, anybody
-  // who finds the endpoint can inject updates — generate one when not configured.
-  const webhookSecret = account.config.webhookSecret?.trim() || generateWebhookSecret();
+/**
+ * Webhook secret: `webhookSecret`, else `webhookSecretFile`, else one generated
+ * once and kept in the account state file so restarts re-subscribe with the
+ * same value (a fresh secret per start would reject MAX retries of updates
+ * sent before the restart).
+ * @internal exported for testing.
+ */
+export async function resolveMaxWebhookSecret(
+  account: ResolvedMaxAccount,
+  state?: MaxStateStore,
+): Promise<string> {
+  const validate = (secret: string, source: string): string => {
+    if (!MAX_WEBHOOK_SECRET_PATTERN.test(secret)) {
+      throw new Error(`MAX ${source} must be 5–256 characters of A-Z, a-z, 0-9, _ and -`);
+    }
+    return secret;
+  };
+
+  const configured = account.config.webhookSecret?.trim();
+  if (configured) return validate(configured, "webhookSecret");
+
+  const secretFile = account.config.webhookSecretFile?.trim();
+  if (secretFile) {
+    const fromFile = readSecretFile(secretFile);
+    if (!fromFile) throw new Error(`MAX webhookSecretFile ${secretFile} is missing, empty or not a regular file`);
+    return validate(fromFile, "webhookSecretFile");
+  }
+
+  const stored = state?.webhookSecret;
+  if (stored && MAX_WEBHOOK_SECRET_PATTERN.test(stored)) return stored;
+
+  const generated = generateWebhookSecret();
+  if (state) {
+    state.setWebhookSecret(generated);
+    await state.flush();
+  }
+  return generated;
+}
+
+/**
+ * Make the MAX side point at exactly one URL: drop this bot's subscriptions to
+ * other URLs, then (re)subscribe ours. POST is repeated on every start so the
+ * secret and update_types always match the running config.
+ * @internal exported for testing.
+ */
+export async function syncMaxWebhookSubscription(params: {
+  api: MaxApi;
+  accountId: string;
+  webhookUrl: string;
+  secret: string;
+  log?: ChannelLogSink;
+}): Promise<void> {
+  const { api, accountId, webhookUrl, secret, log } = params;
+  let existing: MaxSubscription[] = [];
+  try {
+    existing = (await api.getSubscriptions()).subscriptions ?? [];
+  } catch (err) {
+    log?.warn(`[${accountId}] MAX subscriptions check failed, subscribing anyway: ${String(err)}`);
+  }
+  for (const subscription of existing) {
+    if (subscription.url === webhookUrl) continue;
+    log?.warn(`[${accountId}] MAX webhook: removing subscription to another URL ${subscription.url}`);
+    await api.unsubscribe(subscription.url);
+  }
+  await subscribeMaxWebhook({
+    api,
+    webhookUrl,
+    secret,
+    updateTypes: MAX_SUBSCRIBED_UPDATE_TYPES,
+  });
+}
+
+async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
+  const { api, account, config, abortSignal, log, statusSink } = opts;
+
+  const webhookUrl = account.config.webhookUrl?.trim();
+  if (!webhookUrl) {
+    throw new Error(`MAX transport "webhook" requires webhookUrl (account ${account.accountId})`);
+  }
+  if (!webhookUrl.startsWith("https://")) {
+    log?.warn(`[${account.accountId}] MAX accepts only HTTPS webhook URLs on port 443; got ${webhookUrl}`);
+  }
+
+  const webhookPath = resolveMaxWebhookPath(account.config.webhookPath, webhookUrl);
+  const webhookSecret = await resolveMaxWebhookSecret(account, opts.state);
 
   log?.info(`[${account.accountId}] MAX webhook mode: ${webhookUrl} (path: ${webhookPath})`);
 
+  // Like Telegram webhook mode: no transport-activity timestamp, so the health
+  // policy never flags a quiet (but healthy) webhook as a stale socket.
+  statusSink?.({
+    mode: "webhook",
+    connected: false,
+    lastConnectedAt: null,
+    lastEventAt: null,
+    lastTransportActivityAt: null,
+  } as MaxStatusPatch);
+
   // MAX requires HTTP 200 within 30s while agent runs regularly take minutes.
-  // Ack immediately and process updates through per-chat serialized queues.
-  const onUpdate = createSerializedWebhookHandler({
+  // The handler acks first; updates go through per-chat serialized queues.
+  const enqueue = createSerializedWebhookHandler({
     dispatch: (update) => dispatchUpdate(update, opts),
     abortSignal,
     onError: (err) => log?.error(`[${account.accountId}] Webhook update dispatch failed: ${String(err)}`),
   });
+  const onUpdate = (update: MaxUpdate): Promise<void> => {
+    const at = Date.now();
+    statusSink?.(channelReadyPatch({ lastConnectedAt: at, lastEventAt: at, mode: "webhook" }) as MaxStatusPatch);
+    return enqueue(update);
+  };
 
-  // Register webhook handler
   const target: MaxWebhookTarget = {
     account,
     config,
     path: webhookPath,
     secret: webhookSecret,
     onUpdate,
-    log: (msg) => log?.info?.(msg),
-    error: (msg) => log?.error?.(msg),
+    log: (msg) => log?.debug?.(msg),
+    error: (msg) => log?.error(msg),
   };
 
-  const unregister = registerMaxWebhookTarget(target);
-
-  // Subscribe to webhook
+  const unregisterTarget = registerMaxWebhookTarget(target);
+  let unregisterRoute: () => void = () => {};
   try {
-    await subscribeMaxWebhook({
+    // Route first: MAX may deliver the moment the subscription exists.
+    unregisterRoute = registerMaxWebhookRoute({
+      path: webhookPath,
+      accountId: account.accountId,
+      log: (msg) => log?.warn(`[${account.accountId}] ${msg}`),
+      register: opts.registerWebhookRoute,
+    });
+    await syncMaxWebhookSubscription({
       api,
+      accountId: account.accountId,
       webhookUrl,
       secret: webhookSecret,
-      updateTypes: MAX_SUBSCRIBED_UPDATE_TYPES,
+      log,
     });
     log?.info(`[${account.accountId}] MAX webhook subscribed: ${webhookUrl}`);
   } catch (err) {
-    log?.error(`[${account.accountId}] MAX webhook subscription failed: ${String(err)}`);
-    unregister();
+    log?.error(`[${account.accountId}] MAX webhook start failed: ${String(err)}`);
+    unregisterRoute();
+    unregisterTarget();
+    statusSink?.({ mode: "webhook", connected: false, lastError: String(err) } as MaxStatusPatch);
     throw err;
   }
 
-  // Wait for abort signal
-  await new Promise<void>((resolve) => {
-    const checkAbort = () => {
-      if (abortSignal.aborted) {
-        resolve();
-      } else {
-        setTimeout(checkAbort, 1000);
-      }
-    };
-    checkAbort();
-  });
+  statusSink?.(channelReadyPatch({ mode: "webhook" }) as MaxStatusPatch);
 
-  // Unsubscribe on stop
-  try {
-    await unsubscribeMaxWebhook({ api, webhookUrl });
-    log?.info(`[${account.accountId}] MAX webhook unsubscribed`);
-  } catch (err) {
-    log?.error(`[${account.accountId}] MAX webhook unsubscribe failed: ${String(err)}`);
-  }
+  await waitForAbort(abortSignal);
 
-  unregister();
-  log?.info(`[${account.accountId}] MAX webhook mode stopped`);
+  // The subscription is kept on purpose: a restart or config reload must not
+  // lose updates, and MAX retries undelivered ones while the route is back.
+  // To leave webhook mode, switch transport to "polling" (the polling start
+  // removes it) or call DELETE /subscriptions?url=… by hand.
+  unregisterRoute();
+  unregisterTarget();
+  statusSink?.({ mode: "webhook", connected: false } as MaxStatusPatch);
+  log?.info(`[${account.accountId}] MAX webhook mode stopped (subscription kept)`);
+}
+
+function waitForAbort(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
 }
 
 // ── Dispatch ──

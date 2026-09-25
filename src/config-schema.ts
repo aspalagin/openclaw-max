@@ -74,8 +74,13 @@ export const MaxAccountSchemaBase = z
     groupAllowFrom: z.array(z.union([z.string(), z.number()])).optional(),
     groupPolicy: GroupPolicySchema.optional().default("allowlist"),
     groups: z.record(z.string(), MaxGroupSchema.optional()).optional(),
+    /** Update transport; default: "webhook" when webhookUrl is set, otherwise "polling" */
+    transport: z.enum(["polling", "webhook"]).optional(),
     webhookUrl: z.string().optional(),
+    /** MAX secret: 5–256 of [A-Za-z0-9_-]; checked at start */
     webhookSecret: z.string().optional(),
+    /** File holding the webhook secret (regular file, not a symlink) */
+    webhookSecretFile: z.string().optional(),
     webhookPath: z.string().optional(),
     historyLimit: z.number().int().min(0).optional(),
     dmHistoryLimit: z.number().int().min(0).optional(),
@@ -96,6 +101,19 @@ export const MaxAccountSchemaBase = z
   })
   .strict();
 
+function requireWebhookUrl(params: {
+  transport: string | undefined;
+  webhookUrl: string | undefined;
+  ctx: z.RefinementCtx;
+}): void {
+  if (params.transport !== "webhook" || params.webhookUrl?.trim()) return;
+  params.ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ["webhookUrl"],
+    message: 'channels.max.transport="webhook" requires channels.max.webhookUrl',
+  });
+}
+
 /**
  * Individual account schema (with open-policy validation)
  */
@@ -107,6 +125,7 @@ export const MaxAccountSchema = MaxAccountSchemaBase.superRefine((value, ctx) =>
     path: ["allowFrom"],
     message: 'channels.max.dmPolicy="open" requires channels.max.allowFrom to include "*"',
   });
+  requireWebhookUrl({ transport: value.transport, webhookUrl: value.webhookUrl, ctx });
 });
 
 /** Bot command registered via PATCH /me/commands (name ≤64 chars without slash, description ≤128) */
@@ -131,4 +150,5 @@ export const MaxConfigSchema = MaxAccountSchemaBase.extend({
     path: ["allowFrom"],
     message: 'channels.max.dmPolicy="open" requires channels.max.allowFrom to include "*"',
   });
+  requireWebhookUrl({ transport: value.transport, webhookUrl: value.webhookUrl, ctx });
 });

@@ -16,8 +16,12 @@ export interface MaxAccountConfig {
   groups?: Record<string, { requireMention?: boolean; [key: string]: unknown }>;
   groupPolicy?: string;
   groupAllowFrom?: Array<string | number>;
+  /** Update transport; default: "webhook" when webhookUrl is set, otherwise "polling" */
+  transport?: "polling" | "webhook";
   webhookUrl?: string;
   webhookSecret?: string;
+  /** File holding the webhook secret (like tokenFile) */
+  webhookSecretFile?: string;
   webhookPath?: string;
   mediaMaxMb?: number;
   streamMode?: "off" | "partial" | "block";
@@ -39,6 +43,11 @@ export interface ResolvedMaxAccount {
  */
 function getMaxSection(cfg: OpenClawConfig): Record<string, unknown> | undefined {
   return (cfg.channels as Record<string, unknown>)?.max as Record<string, unknown> | undefined;
+}
+
+/** Read a secret from a regular (non-symlink) file; "" when missing or unreadable. */
+export function readSecretFile(filePath?: string): string {
+  return readTokenFile(filePath);
 }
 
 function readTokenFile(tokenFile?: string): string {
@@ -119,8 +128,10 @@ export function resolveMaxAccount(params: {
       groups: section.groups as MaxAccountConfig["groups"],
       groupPolicy: section.groupPolicy as string | undefined,
       groupAllowFrom: section.groupAllowFrom as Array<string | number> | undefined,
+      transport: section.transport as MaxAccountConfig["transport"],
       webhookUrl: section.webhookUrl as string | undefined,
       webhookSecret: section.webhookSecret as string | undefined,
+      webhookSecretFile: section.webhookSecretFile as string | undefined,
       webhookPath: section.webhookPath as string | undefined,
       mediaMaxMb: section.mediaMaxMb as number | undefined,
       streamMode: section.streamMode as MaxAccountConfig["streamMode"],
@@ -151,8 +162,10 @@ export function resolveMaxAccount(params: {
       groups: raw.groups as MaxAccountConfig["groups"],
       groupPolicy: raw.groupPolicy as string | undefined,
       groupAllowFrom: raw.groupAllowFrom as Array<string | number> | undefined,
+      transport: raw.transport as MaxAccountConfig["transport"],
       webhookUrl: raw.webhookUrl as string | undefined,
       webhookSecret: raw.webhookSecret as string | undefined,
+      webhookSecretFile: raw.webhookSecretFile as string | undefined,
       webhookPath: raw.webhookPath as string | undefined,
       mediaMaxMb: raw.mediaMaxMb as number | undefined,
       streamMode: raw.streamMode as MaxAccountConfig["streamMode"],

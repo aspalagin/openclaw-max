@@ -1,5 +1,6 @@
 /**
- * Persistent per-account MAX state: long-polling marker + chat registry.
+ * Persistent per-account MAX state: long-polling marker, chat registry and the
+ * auto-generated webhook secret.
  *
  * The marker survives gateway restarts so updates are neither replayed nor
  * lost past the server-side retention window. The chat registry replaces the
@@ -27,6 +28,8 @@ export interface MaxChatRegistryEntry {
 export interface MaxAccountState {
   marker?: number | null;
   chats?: Record<string, MaxChatRegistryEntry>;
+  /** Auto-generated webhook secret, kept so a restart re-subscribes with the same one */
+  webhookSecret?: string;
 }
 
 export function resolveMaxStatePath(accountId: string): string {
@@ -78,6 +81,16 @@ export class MaxStateStore {
   setMarker(marker: number | null): void {
     if (this.state.marker === marker) return;
     this.state.marker = marker;
+    this.scheduleFlush();
+  }
+
+  get webhookSecret(): string | undefined {
+    return this.state.webhookSecret;
+  }
+
+  setWebhookSecret(secret: string): void {
+    if (this.state.webhookSecret === secret) return;
+    this.state.webhookSecret = secret;
     this.scheduleFlush();
   }
 
