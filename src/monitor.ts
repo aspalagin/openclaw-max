@@ -13,6 +13,7 @@ import { type ChannelInboundMediaInput, toInboundMediaFacts } from "openclaw/plu
 import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-outbound";
 import { channelReadyPatch, createTransportActivityStatusPatch } from "openclaw/plugin-sdk/gateway-runtime";
 import { MaxApi, type MaxAttachment, type MaxUpdate, type MaxMessage, type MaxUser, type MaxCallback, type MaxUpdateType, type MaxSubscription } from "./api.js";
+import type { MaxMarkupElement } from "./types.js";
 import { readSecretFile, resolveMaxAccount, type MaxAccountConfig, type ResolvedMaxAccount } from "./accounts.js";
 import { answerMaxCallback, sendMaxMessage, sendMaxMediaGroup, editMaxMessage, pinMaxMessage, readMaxChannelButtons, readMaxChannelSendOptions } from "./send.js";
 import { resolveApprovalOverGateway } from "openclaw/plugin-sdk/approval-gateway-runtime";
@@ -788,11 +789,14 @@ export async function processIncomingMessage(
 
   // Check for bot mention in group chats
   let wasMentioned: boolean | undefined;
-  if (isGroup && opts.botUsername) {
-    // MAX doesn't have annotation-based mentions like Google Chat,
-    // so we check if the text contains @botname
-    const mentionPattern = new RegExp(`@${opts.botUsername}\\b`, "i");
-    wasMentioned = mentionPattern.test(rawText);
+  if (isGroup && (opts.botUsername || opts.botUserId)) {
+    // body.markup marks mentions as user_mention elements; the @botname regex
+    // stays as a fallback for clients/messages that send no markup.
+    wasMentioned = isBotMentionedInMarkup(message.body?.markup, opts.botUserId, opts.botUsername);
+    if (!wasMentioned && opts.botUsername) {
+      const mentionPattern = new RegExp(`@${escapeRegExp(opts.botUsername)}\\b`, "i");
+      wasMentioned = mentionPattern.test(rawText);
+    }
 
     // Reply to bot's message also counts as mention (like Telegram behavior)
     if (!wasMentioned && message.link?.type === "reply") {
@@ -1401,6 +1405,30 @@ async function deliverMaxReply(params: {
 /** MAX webhook secret: 5–256 chars of [A-Za-z0-9-]. */
 function generateWebhookSecret(): string {
   return randomBytes(24).toString("base64url").replace(/_/g, "-");
+}
+
+/**
+ * Whether body.markup has a user_mention of this bot: by user_id (users
+ * without a username) or by user_link `@username` (case-insensitive).
+ * @internal exported for testing.
+ */
+export function isBotMentionedInMarkup(
+  markup: MaxMarkupElement[] | null | undefined,
+  botUserId?: number,
+  botUsername?: string,
+): boolean {
+  if (!Array.isArray(markup)) return false;
+  const username = botUsername?.replace(/^@/, "").toLowerCase();
+  return markup.some((element) => {
+    if (element?.type !== "user_mention") return false;
+    if (botUserId != null && element.user_id === botUserId) return true;
+    const link = typeof element.user_link === "string" ? element.user_link.replace(/^@/, "").toLowerCase() : "";
+    return Boolean(username && link === username);
+  });
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** channelData with `max.buttons` removed (other max options kept). */

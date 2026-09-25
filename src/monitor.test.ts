@@ -555,3 +555,60 @@ describe("typing indicator", () => {
     expect(actions).not.toContain("typing_on");
   });
 });
+
+describe("group mentions via body.markup", () => {
+  it("recognises user_mention by user_id or user_link", async () => {
+    const { isBotMentionedInMarkup } = await import("./monitor.js");
+    expect(isBotMentionedInMarkup([{ type: "user_mention", from: 0, length: 6, user_id: 900 }], 900, "banzai_bot")).toBe(true);
+    expect(isBotMentionedInMarkup([{ type: "user_mention", from: 0, length: 11, user_link: "@Banzai_Bot" }], 900, "banzai_bot")).toBe(true);
+    expect(isBotMentionedInMarkup([{ type: "user_mention", from: 0, length: 5, user_link: "@other" }], 900, "banzai_bot")).toBe(false);
+    expect(isBotMentionedInMarkup([{ type: "user_mention", from: 0, length: 5, user_id: 901 }], 900, "banzai_bot")).toBe(false);
+    expect(isBotMentionedInMarkup([{ type: "strong", from: 0, length: 5 }], 900, "banzai_bot")).toBe(false);
+    expect(isBotMentionedInMarkup(null, 900, "banzai_bot")).toBe(false);
+  });
+
+  async function runGroup(body: Record<string, unknown>, botUsername?: string) {
+    const { setMaxRuntime } = await import("./runtime.js");
+    const { dispatchUpdate } = await import("./monitor.js");
+    const { core, dispatched } = makeCallbackRuntime();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setMaxRuntime(core as any);
+    const opts = { ...makeCallbackOpts({ groupPolicy: "open" }), botUserId: 900, botUsername };
+    await dispatchUpdate({
+      update_type: "message_created",
+      timestamp: 1,
+      message: {
+        sender: { user_id: 7, first_name: "Ann", is_bot: false },
+        recipient: { chat_id: -100, chat_type: "chat" },
+        timestamp: 1,
+        body,
+      },
+    } as unknown as MaxUpdate, opts);
+    return dispatched;
+  }
+
+  it("passes the mention gate on a markup mention whose text differs from @username", async () => {
+    // Display-name mention: the text has no @banzai_bot, only the markup knows.
+    const dispatched = await runGroup({
+      mid: "mid.m1",
+      text: "Банзай, что нового?",
+      markup: [{ type: "user_mention", from: 0, length: 6, user_id: 900 }],
+    }, "banzai_bot");
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]?.WasMentioned).toBe(true);
+  });
+
+  it("keeps the @username regex as a fallback without markup", async () => {
+    expect(await runGroup({ mid: "mid.m2", text: "@banzai_bot привет" }, "banzai_bot")).toHaveLength(1);
+    expect(await runGroup({ mid: "mid.m3", text: "привет всем" }, "banzai_bot")).toHaveLength(0);
+  });
+
+  it("works with the bot user id alone (no username known)", async () => {
+    const dispatched = await runGroup({
+      mid: "mid.m4",
+      text: "Бот, ответь",
+      markup: [{ type: "user_mention", from: 0, length: 3, user_id: 900 }],
+    });
+    expect(dispatched).toHaveLength(1);
+  });
+});

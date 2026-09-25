@@ -426,7 +426,22 @@ export interface MaxMessageBody {
   seq?: number;
   text?: string | null;
   attachments?: MaxAttachment[];
-  markup?: string | null;
+  /** Text markup (MarkupElement[]); user mentions arrive as `user_mention` */
+  markup?: MaxMarkupElement[] | null;
+}
+
+/**
+ * MarkupElement (schema.yaml). `from`/`length` index into `text`. A
+ * `user_mention` carries `user_link` (`@username`) or, for users without a
+ * username, `user_id`; `link` carries `url`.
+ */
+export interface MaxMarkupElement {
+  type: string;
+  from: number;
+  length: number;
+  user_link?: string | null;
+  user_id?: number | null;
+  url?: string;
 }
 
 export interface MaxAttachment {
