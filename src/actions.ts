@@ -11,6 +11,7 @@ import { getLastStickerCode } from "./sticker-cache.js";
 import { normalizeMessagePresentation } from "openclaw/plugin-sdk/interactive-runtime";
 import { sendMaxMessage, editMaxMessage, deleteMaxMessage, sendMaxMediaMessage, sendMaxSticker, sendMaxContact, sendMaxLocation, pinMaxMessage, unpinMaxMessage, readMaxChannelButtons, type MaxSendButton } from "./send.js";
 import { MAX_TEXT_LIMIT, materializeMaxPresentation, readMaxDeliveryPin } from "./presentation.js";
+import { withRemoteMediaTempFile } from "./media-temp.js";
 import { getMaxRuntime } from "./runtime.js";
 
 const providerId = "max";
@@ -229,30 +230,17 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       const mediaSource = readMediaSource(params);
 
       if (mediaSource) {
-        // Upload media from URL or local path
-        const core = getMaxRuntime();
-
         // Download if URL, otherwise use as local file path
         if (mediaSource.startsWith("http://") || mediaSource.startsWith("https://")) {
           const maxBytes = (account.config.mediaMaxMb ?? 20) * 1024 * 1024;
-          const loaded = await core.channel.media.fetchRemoteMedia({ url: mediaSource, maxBytes });
-
-          // Write to temp file
-          const fs = await import("fs/promises");
-          const tmpPath = `/tmp/max-media-${Date.now()}-${loaded.fileName ?? "file"}`;
-          await fs.writeFile(tmpPath, loaded.buffer);
-
-          try {
-            const result = await sendMaxMediaMessage(to, content, tmpPath, {
+          return await withRemoteMediaTempFile(mediaSource, maxBytes, async ({ path }) => {
+            const result = await sendMaxMediaMessage(to, content, path, {
               token: account.token,
               replyToMessageId: replyTo ?? undefined,
               format: "markdown",
             });
             return withPin(result.messageId);
-          } finally {
-            // Cleanup
-            await fs.unlink(tmpPath).catch(() => {});
-          }
+          });
         } else {
           // Local file path (from media, buffer, or filePath params)
           const result = await sendMaxMediaMessage(to, content, mediaSource, {

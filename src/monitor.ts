@@ -23,6 +23,7 @@ import {
   readMaxDeliveryPin,
   type MaxPresentationCallback,
 } from "./presentation.js";
+import { sanitizeMaxFileName, withRemoteMediaTempFile } from "./media-temp.js";
 import { getMaxRuntime } from "./runtime.js";
 import { MaxStateStore } from "./state.js";
 import { rememberStickerCode } from "./sticker-cache.js";
@@ -725,19 +726,20 @@ export async function processIncomingMessage(
         try {
           const maxBytes = (account.config.mediaMaxMb ?? 20) * 1024 * 1024;
           const fetched = await core.channel.media.fetchRemoteMedia({ url, maxBytes });
+          const inboundFileName = fetched.fileName ? sanitizeMaxFileName(fetched.fileName, fetched.contentType) : undefined;
           const saved = await core.channel.media.saveMediaBuffer(
             Buffer.from(fetched.buffer),
             fetched.contentType,
             "inbound",
             maxBytes,
-            fetched.fileName,
+            inboundFileName,
           );
           // Only the local copy goes to the agent: MAX download URLs are signed
           // and short-lived, so they are not recorded as the media url.
           mediaInputs.push({
             path: saved.path,
             contentType: saved.contentType,
-            fileName: fetched.fileName,
+            fileName: inboundFileName,
             messageId,
             ...(transcription ? { transcribed: true } : {}),
           });
@@ -1375,25 +1377,15 @@ async function deliverMaxReply(params: {
       // Download media first if it's a URL
       if (mediaUrl.startsWith("http://") || mediaUrl.startsWith("https://")) {
         const maxBytes = (account.config.mediaMaxMb ?? 20) * 1024 * 1024;
-        const loaded = await core.channel.media.fetchRemoteMedia({ url: mediaUrl, maxBytes });
-        
-        // Write to temp file
-        const fs = await import("fs/promises");
-        const tmpPath = `/tmp/max-media-${Date.now()}-${loaded.fileName ?? "file"}`;
-        await fs.writeFile(tmpPath, loaded.buffer);
-        
-        try {
-          const sent = await sendMaxMediaMessage(chatId, "", tmpPath, {
+        await withRemoteMediaTempFile(mediaUrl, maxBytes, async ({ path }) => {
+          const sent = await sendMaxMediaMessage(chatId, "", path, {
             token: account.token,
             replyToMessageId: params.replyToId,
             ...sendOptions,
           });
           noteDelivered(sent.messageId);
           statusSink?.({ lastOutboundAt: Date.now() });
-        } finally {
-          // Cleanup temp file
-          await fs.unlink(tmpPath).catch(() => {});
-        }
+        });
       } else {
         // Local file path
         const sent = await sendMaxMediaMessage(chatId, "", mediaUrl, {
