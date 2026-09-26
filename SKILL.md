@@ -61,7 +61,7 @@ Webhook-режим: добавить `"transport": "webhook"`, `"webhookUrl": "h
 openclaw message send --channel max --target "144660345" --message "Привет из OpenClaw!"
 ```
 
-Цели: числовой chat_id/user_id, `user:<id>` (адресация в личку), `@username` и ссылки max.ru не поддерживаются: MAX Bot API не резолвит их (`chat.not.found`), плагин сразу отвечает понятной ошибкой — для чатов и каналов используйте числовой chat_id.
+Цели: числовой chat_id, `user:<id>` (адресация в личку; голое число, для которого MAX ответил `dialog.not.found`, повторяется как user_id), `@username` и ссылки max.ru не поддерживаются: MAX Bot API не резолвит их (`chat.not.found`), плагин сразу отвечает понятной ошибкой — для чатов и каналов используйте числовой chat_id.
 
 ### Кнопки (из message-tool агента)
 
@@ -77,6 +77,12 @@ message(action="send", target="CHAT_ID", message="Выберите:",
 message(action="pin", target="CHAT_ID", messageId="MID")
 message(action="unpin", target="CHAT_ID")
 ```
+
+В диалогах (личка, `user:<id>`) MAX не поддерживает закреп: плагин не вызывает API и возвращает `pinned: false` с причиной.
+
+### Несколько вложений
+
+`message(action="send", target=…, message="Подпись", attachments=[{"path": …}, {"path": …}])` отправляет все вложения: фото/видео альбомами до 12, файлы и аудио по одному; в ответе `messageIds`.
 
 ## Требования
 

@@ -2,7 +2,7 @@
 
 Канал-плагин для подключения AI-ассистента [OpenClaw](https://openclaw.ai) к мессенджеру [MAX](https://max.ru) (ex-VK Teams / ICQ New).
 
-Версия 0.7.0, изменения — в [CHANGELOG.md](CHANGELOG.md). Проверено на OpenClaw 2026.9.6 и схеме MAX Bot API 0.0.33.
+Версия 0.7.1, изменения — в [CHANGELOG.md](CHANGELOG.md). Проверено на OpenClaw 2026.9.6 и схеме MAX Bot API 0.0.33.
 
 ## Что это
 
