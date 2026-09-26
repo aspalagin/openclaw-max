@@ -461,6 +461,7 @@ describe('MAX Message Actions', () => {
             action: 'sendAttachment',
             params: { chatId: 'max:123', media: mediaPath, filename: 'clip.mp4', caption: 'Video' },
             cfg,
+            mediaLocalRoots: [tempDir],
           } as never),
         ).resolves.toBeDefined();
 
@@ -549,9 +550,9 @@ describe('message tool: several attachments and dialog pins', () => {
           message: { body: { mid: `m${++n}` }, recipient: { chat_id: 9, chat_type: 'dialog' } },
         }) as never,
     );
-    vi.spyOn(MaxApi.prototype, 'uploadMedia').mockImplementation(async (type, data) => ({
-      token: `tok:${type}:${String(data).split('/').pop()}`,
-    }));
+    vi.spyOn(MaxApi.prototype, 'uploadMedia').mockImplementation(
+      async (type, _data, _contentType, fileName) => ({ token: `tok:${type}:${fileName}` }),
+    );
     return { MaxApi, send };
   };
 
@@ -569,6 +570,7 @@ describe('message tool: several attachments and dialog pins', () => {
           attachments: files.map((path) => ({ path })),
         },
         cfg,
+        mediaLocalRoots: [tempDir],
       } as never);
 
       expect(send).toHaveBeenCalledTimes(2);

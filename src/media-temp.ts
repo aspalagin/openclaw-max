@@ -1,11 +1,8 @@
 /**
- * Remote media → temporary local file, for MAX uploads that need a path.
- * One place for the download, the file name policy and the cleanup.
+ * Remote media download for MAX uploads and the file name policy shared with
+ * inbound media. The download goes through the runtime media fetcher (core's
+ * SSRF-guarded reader); bytes stay in memory, no temporary file.
  */
-
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
 import { getMaxRuntime } from './runtime.js';
 
@@ -70,28 +67,24 @@ export function sanitizeMaxFileName(name: string | undefined, contentType?: stri
   return ext ? `${stem}.${ext}` : stem;
 }
 
-export type MaxTempMedia = { path: string; contentType?: string; fileName: string };
+/** Media bytes ready for a MAX upload. */
+export type MaxLoadedMedia = { buffer: Buffer; contentType?: string; fileName: string };
 
 /**
- * Download `url` through the runtime media fetcher (size-capped), write it to
- * a private temp directory under a sanitized name, run `use`, then remove the
- * directory whatever happens.
+ * Download `url` through the runtime media fetcher: core's readRemoteMediaBuffer
+ * (fetchWithSsrFGuard, strict mode: private, loopback and metadata hosts are
+ * refused), size-capped. The file name is sanitized to one safe segment.
  */
-export async function withRemoteMediaTempFile<T>(
+export async function downloadMaxRemoteMedia(
   url: string,
   maxBytes: number,
-  use: (media: MaxTempMedia) => Promise<T>,
-): Promise<T> {
+): Promise<MaxLoadedMedia> {
   const loaded = await getMaxRuntime().channel.media.fetchRemoteMedia({ url, maxBytes });
-  const fileName = sanitizeMaxFileName(loaded.fileName ?? fileNameFromUrl(url), loaded.contentType);
-  const dir = await mkdtemp(join(tmpdir(), 'max-media-'));
-  try {
-    const path = join(dir, fileName);
-    await writeFile(path, loaded.buffer, { mode: 0o600 });
-    return await use({ path, contentType: loaded.contentType, fileName });
-  } finally {
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
+  return {
+    buffer: Buffer.from(loaded.buffer),
+    contentType: loaded.contentType,
+    fileName: sanitizeMaxFileName(loaded.fileName ?? fileNameFromUrl(url), loaded.contentType),
+  };
 }
 
 function fileNameFromUrl(url: string): string | undefined {

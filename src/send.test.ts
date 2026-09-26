@@ -742,7 +742,10 @@ describe('attachment.not.ready retry', () => {
           }),
         });
 
-      const result = await sendMaxMediaMessage('123', 'видео', tmpFile, { token: MOCK_TOKEN });
+      const result = await sendMaxMediaMessage('123', 'видео', tmpFile, {
+        token: MOCK_TOKEN,
+        localMedia: { mediaLocalRoots: [os.tmpdir()] },
+      });
       expect(result.messageId).toBe('m-ok');
       expect(global.fetch).toHaveBeenCalledTimes(4);
     } finally {
@@ -763,9 +766,21 @@ describe('albums and images by URL', () => {
         async () => ({ message: { body: { mid: `m-${Math.random()}` } } }) as never,
       );
   const uploads = () =>
-    vi.spyOn(MaxApi.prototype, 'uploadMedia').mockImplementation(async (type, data) => ({
-      token: `tok:${type}:${String(data).split('/').pop()}`,
-    }));
+    vi
+      .spyOn(MaxApi.prototype, 'uploadMedia')
+      .mockImplementation(async (type, _data, _contentType, fileName) => ({
+        token: `tok:${type}:${fileName}`,
+      }));
+  /** Real files in a fresh directory: local media is read only under allowed roots. */
+  const mediaDir = async (names: string[]) => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'max-media-test-'));
+    const paths = names.map((name) => path.join(dir, name));
+    for (const file of paths) fs.writeFileSync(file, Buffer.from('x'));
+    return { localMedia: { mediaLocalRoots: [dir] }, paths };
+  };
 
   beforeEach(() => vi.restoreAllMocks());
 
@@ -786,10 +801,13 @@ describe('albums and images by URL', () => {
     const { sendMaxMediaGroup } = await import('./send.js');
     const send = sent();
     uploads();
-    const images = Array.from({ length: 13 }, (_, i) => `/tmp/p${i}.jpg`);
+    const { localMedia, paths: images } = await mediaDir(
+      Array.from({ length: 13 }, (_, i) => `p${i}.jpg`),
+    );
 
     const result = await sendMaxMediaGroup('123', 'Подпись', images, {
       token: MOCK_TOKEN,
+      localMedia,
       replyToMessageId: 'mid.q',
       buttons: [[{ text: 'Ок', payload: 'ok' }]],
     });
@@ -845,11 +863,7 @@ describe('albums and images by URL', () => {
       url: 'https://cdn.example/pic.png',
       maxBytes: 1000,
     });
-    expect(upload).toHaveBeenCalledWith(
-      'image',
-      expect.stringMatching(/max-media-.*pic\.png$/),
-      'image/png',
-    );
+    expect(upload).toHaveBeenCalledWith('image', Buffer.from('png'), 'image/png', 'pic.png');
     expect(send.mock.calls[1][0].attachments).toEqual([
       { type: 'image', payload: { token: 'tok:image:pic.png' } },
     ]);
@@ -868,8 +882,9 @@ describe('albums and images by URL', () => {
     await sendMaxMediaMessage('123', '', 'https://cdn.example/files/report', { token: MOCK_TOKEN });
     expect(upload).toHaveBeenCalledWith(
       'file',
-      expect.stringMatching(/report\.pdf$/),
+      Buffer.from('pdf'),
       'application/pdf',
+      'report.pdf',
     );
     expect(send.mock.calls[0][0].attachments).toEqual([
       { type: 'file', payload: { token: 'tok:file:report.pdf' } },
@@ -884,12 +899,14 @@ describe('albums and images by URL', () => {
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce({ message: { body: { mid: 'm-2' } } } as never);
     const onError = vi.fn();
-    const result = await sendMaxMediaGroup('123', '', ['/a.pdf', '/b.pdf'], {
+    const { localMedia, paths } = await mediaDir(['a.pdf', 'b.pdf']);
+    const result = await sendMaxMediaGroup('123', '', paths, {
       token: MOCK_TOKEN,
+      localMedia,
       onError,
     });
     expect(send).toHaveBeenCalledTimes(2);
-    expect(onError).toHaveBeenCalledWith(expect.any(Error), ['/a.pdf']);
+    expect(onError).toHaveBeenCalledWith(expect.any(Error), [paths[0]]);
     expect(result.messageIds).toEqual(['m-2']);
   });
 });

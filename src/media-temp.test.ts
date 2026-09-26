@@ -1,13 +1,9 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, sep } from 'node:path';
-
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  downloadMaxRemoteMedia,
   MAX_TEMP_FILE_NAME_LENGTH,
   sanitizeMaxFileName,
-  withRemoteMediaTempFile,
 } from './media-temp.js';
 import { setMaxRuntime } from './runtime.js';
 
@@ -47,7 +43,7 @@ describe('sanitizeMaxFileName', () => {
   });
 });
 
-describe('withRemoteMediaTempFile', () => {
+describe('downloadMaxRemoteMedia', () => {
   afterEach(() => vi.restoreAllMocks());
 
   function withRuntime(result: { buffer: Buffer; contentType?: string; fileName?: string }) {
@@ -57,46 +53,28 @@ describe('withRemoteMediaTempFile', () => {
     return fetchRemoteMedia;
   }
 
-  it('writes a sanitized file inside a private temp dir and removes it afterwards', async () => {
+  it('downloads through the runtime fetcher with a sanitized file name', async () => {
     const fetchRemoteMedia = withRuntime({
       buffer: Buffer.from('png-bytes'),
       contentType: 'image/png',
       fileName: '../../evil',
     });
-    let seenPath = '';
-    const out = await withRemoteMediaTempFile(
-      'https://cdn.example/x',
-      1024,
-      async ({ path, fileName, contentType }) => {
-        seenPath = path;
-        expect(fileName).toBe('evil.png');
-        expect(contentType).toBe('image/png');
-        expect(dirname(dirname(path))).toBe(tmpdir());
-        expect(path.split(sep).pop()).toBe('evil.png');
-        expect(readFileSync(path, 'utf8')).toBe('png-bytes');
-        expect(statSync(path).mode & 0o077).toBe(0);
-        return 'done';
-      },
-    );
-    expect(out).toBe('done');
+
+    const media = await downloadMaxRemoteMedia('https://cdn.example/x', 1024);
+
     expect(fetchRemoteMedia).toHaveBeenCalledWith({ url: 'https://cdn.example/x', maxBytes: 1024 });
-    expect(existsSync(dirname(seenPath))).toBe(false);
+    expect(media).toEqual({
+      buffer: Buffer.from('png-bytes'),
+      contentType: 'image/png',
+      fileName: 'evil.png',
+    });
   });
 
-  it('takes the name from the URL when the fetcher has none and cleans up on failure', async () => {
+  it('takes the name from the URL when the fetcher has none', async () => {
     withRuntime({ buffer: Buffer.from('x'), contentType: 'image/jpeg' });
-    let seenPath = '';
-    await expect(
-      withRemoteMediaTempFile(
-        'https://cdn.example/a/%2E%2E%2Fcat%20pic',
-        10,
-        async ({ path, fileName }) => {
-          seenPath = path;
-          expect(fileName).toBe('cat pic.jpg');
-          throw new Error('upload failed');
-        },
-      ),
-    ).rejects.toThrow('upload failed');
-    expect(existsSync(dirname(seenPath))).toBe(false);
+
+    const media = await downloadMaxRemoteMedia('https://cdn.example/a/%2E%2E%2Fcat%20pic', 10);
+
+    expect(media.fileName).toBe('cat pic.jpg');
   });
 });

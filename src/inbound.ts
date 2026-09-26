@@ -5,6 +5,7 @@
 
 import { toInboundMediaFacts } from 'openclaw/plugin-sdk/channel-inbound';
 import { createReplyPrefixOptions } from 'openclaw/plugin-sdk/channel-outbound';
+import { getAgentScopedMediaLocalRoots } from 'openclaw/plugin-sdk/media-local-roots';
 
 import type { MaxAttachment, MaxLinkedMessage, MaxMessage, MaxUser } from './api.js';
 import { deliverMaxReply } from './deliver.js';
@@ -348,6 +349,13 @@ export async function processIncomingMessage(
     isCallbackCommand || !messageBody ? undefined : messageId.replace(/_edited_\d+$/, '');
   const callbackId = isCallbackCommand ? messageId : undefined;
 
+  // Local reply media is read only under the agent's scoped media roots: core
+  // persists reply files into its media store, and the agent's own workspace
+  // is covered too.
+  const replyLocalMedia = {
+    mediaLocalRoots: getAgentScopedMediaLocalRoots(config, route.agentId),
+  };
+
   // Draft stream for edit-streaming (like Telegram's partial reply approach)
   const draft = createMaxDraftStream({
     account,
@@ -378,6 +386,7 @@ export async function processIncomingMessage(
           log,
           statusSink,
           draft: useEditStreaming ? draft : undefined,
+          localMedia: replyLocalMedia,
         });
       },
       onError: (err, info) => {

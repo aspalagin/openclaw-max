@@ -4,6 +4,8 @@
  */
 
 import type { ChannelPlugin } from 'openclaw/plugin-sdk/channel-core';
+import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
+import { getAgentScopedMediaLocalRoots } from 'openclaw/plugin-sdk/media-local-roots';
 
 import { type ResolvedMaxAccount, resolveMaxAccount } from './accounts.js';
 import {
@@ -14,6 +16,7 @@ import {
 } from './presentation.js';
 import { getMaxRuntime, loadMaxConfig } from './runtime.js';
 import {
+  type MaxLocalMediaAccess,
   pinMaxMessage,
   readMaxChannelButtons,
   sendMaxMediaGroup,
@@ -22,6 +25,25 @@ import {
 } from './send.js';
 
 type MaxChannelPlugin = ChannelPlugin<ResolvedMaxAccount>;
+
+/**
+ * Local media access for an outbound send: the roots and host reader core
+ * passed with the delivery; without them the default media roots (no agent
+ * workspace is known here). Local files are read only through this policy.
+ */
+function resolveOutboundLocalMedia(
+  cfg: OpenClawConfig,
+  ctx: MaxLocalMediaAccess,
+): MaxLocalMediaAccess {
+  if (ctx.mediaAccess || ctx.mediaLocalRoots?.length || ctx.mediaReadFile) {
+    return {
+      mediaAccess: ctx.mediaAccess,
+      mediaLocalRoots: ctx.mediaLocalRoots,
+      mediaReadFile: ctx.mediaReadFile,
+    };
+  }
+  return { mediaLocalRoots: getAgentScopedMediaLocalRoots(cfg) };
+}
 
 /** Direct delivery with 4000-character markdown chunks. */
 export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
@@ -49,7 +71,8 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
     });
   },
 
-  sendPayload: async ({ to, text, payload: rawPayload, mediaUrl, accountId, replyToId }) => {
+  sendPayload: async (ctx) => {
+    const { to, text, payload: rawPayload, mediaUrl, accountId, replyToId } = ctx;
     const cfg = await loadMaxConfig();
     const account = resolveMaxAccount({ cfg, accountId });
     if (!account.token) throw new Error('MAX bot token not configured');
@@ -78,6 +101,7 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
         format: 'markdown',
         buttons,
         mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
+        localMedia: resolveOutboundLocalMedia(cfg, ctx),
       });
       return {
         channel: 'max',
@@ -125,7 +149,8 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
     };
   },
 
-  sendMedia: async ({ to, text, mediaUrl, accountId, replyToId }) => {
+  sendMedia: async (ctx) => {
+    const { to, text, mediaUrl, accountId, replyToId } = ctx;
     const cfg = await loadMaxConfig();
     const account = resolveMaxAccount({ cfg, accountId });
     if (!account.token) throw new Error('MAX bot token not configured');
@@ -149,6 +174,7 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
       replyToMessageId: replyToId ?? undefined,
       format: 'markdown',
       mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
+      localMedia: resolveOutboundLocalMedia(cfg, ctx),
     });
 
     return {

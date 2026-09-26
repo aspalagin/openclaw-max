@@ -7,11 +7,22 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { beforeEach } from 'vitest';
+import type * as SsrfRuntime from 'openclaw/plugin-sdk/ssrf-runtime';
+import { beforeEach, vi } from 'vitest';
 
 import { resetMaxSendLimiterForTests, setMaxFetchForTests } from './api.js';
 
 process.env.OPENCLAW_STATE_DIR = mkdtempSync(join(tmpdir(), 'openclaw-max-test-'));
+
+// No DNS in unit tests: a hostname that passes the literal SSRF checks
+// resolves as public. Tests override this mock for the private-DNS case.
+vi.mock('openclaw/plugin-sdk/ssrf-runtime', async (importOriginal) => ({
+  ...(await importOriginal<typeof SsrfRuntime>()),
+  resolvePinnedHostnameWithPolicy: vi.fn(async (hostname: string) => ({
+    hostname,
+    addresses: ['198.51.100.7'],
+  })),
+}));
 // Tests assert on exact fetch call sequences — retries would consume queued mocks.
 // Retry behavior itself is covered by tests that pass retryAttempts explicitly.
 process.env.OPENCLAW_MAX_RETRY_ATTEMPTS = '1';

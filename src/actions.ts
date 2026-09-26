@@ -2,9 +2,13 @@
  * MAX channel message actions adapter — implements message tool actions
  */
 
-import type { ChannelMessageActionAdapter } from 'openclaw/plugin-sdk/channel-contract';
+import type {
+  ChannelMessageActionAdapter,
+  ChannelMessageActionContext,
+} from 'openclaw/plugin-sdk/channel-contract';
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
 import { normalizeMessagePresentation } from 'openclaw/plugin-sdk/interactive-runtime';
+import { getAgentScopedMediaLocalRoots } from 'openclaw/plugin-sdk/media-local-roots';
 import { readStringParam } from 'openclaw/plugin-sdk/param-readers';
 import { jsonResult } from 'openclaw/plugin-sdk/tool-results';
 
@@ -14,6 +18,7 @@ import { getMaxRuntime } from './runtime.js';
 import {
   deleteMaxMessage,
   editMaxMessage,
+  type MaxLocalMediaAccess,
   type MaxMediaSendOptions,
   pinMaxMessage,
   readMaxChannelButtons,
@@ -30,6 +35,28 @@ import { getLastStickerCode } from './sticker-cache.js';
 
 const providerId = 'max';
 const mediaSourceKeys = ['media', 'filePath', 'path', 'fileUrl', 'url', 'buffer', 'image'] as const;
+/**
+ * Params that carry a media path or URL, per action: core normalizes them for
+ * the sandbox and scopes outbound media access to them. `buffer` is base64
+ * content for core, not a path, so it is not declared.
+ */
+const mediaSourceParams = mediaSourceKeys.filter((key) => key !== 'buffer');
+
+/**
+ * Local media access for an action: the roots and host reader core passed
+ * with the action; without them (direct plugin dispatch) the agent-scoped
+ * default roots. Local files are read only through this policy.
+ */
+function resolveActionLocalMedia(ctx: ChannelMessageActionContext): MaxLocalMediaAccess {
+  if (ctx.mediaAccess || ctx.mediaLocalRoots?.length || ctx.mediaReadFile) {
+    return {
+      mediaAccess: ctx.mediaAccess,
+      mediaLocalRoots: ctx.mediaLocalRoots,
+      mediaReadFile: ctx.mediaReadFile,
+    };
+  }
+  return { mediaLocalRoots: getAgentScopedMediaLocalRoots(ctx.cfg, ctx.agentId ?? undefined) };
+}
 
 function listEnabledAccounts(cfg: OpenClawConfig) {
   return listMaxAccountIds(cfg)
@@ -185,6 +212,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       // presentation → inline keyboard + MAX markdown (presentation.ts);
       // delivery-pin → PUT /chats/{chatId}/pin on the sent message.
       capabilities: ['presentation', 'delivery-pin'],
+      mediaSourceParams: { send: mediaSourceParams, sendAttachment: mediaSourceParams },
     };
   },
 
@@ -215,7 +243,8 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
     return { to, accountId };
   },
 
-  handleAction: async ({ action, params, cfg, accountId }) => {
+  handleAction: async (ctx) => {
+    const { action, params, cfg, accountId } = ctx;
     const account = resolveMaxAccount({
       cfg,
       accountId,
@@ -354,13 +383,15 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       const mediaSources = readMediaSources(params);
 
       if (mediaSources.length) {
-        // Local path or URL: https image links go by URL, other remote media
-        // is downloaded to a temp file and uploaded.
+        // Local paths only under the allowed roots (resolveActionLocalMedia);
+        // public https image links go by URL, other remote media is
+        // downloaded through the SSRF-guarded fetcher and uploaded.
         const result = await sendMaxMediaSources(to, content, mediaSources, {
           token: account.token,
           replyToMessageId: replyTo ?? undefined,
           format: 'markdown',
           mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
+          localMedia: resolveActionLocalMedia(ctx),
         });
         return withPin(result.messageId, result.chatType, mediaResultExtra(result));
       }
@@ -453,6 +484,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
           replyToMessageId: replyTo ?? undefined,
           format: 'markdown',
           mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
+          localMedia: resolveActionLocalMedia(ctx),
         });
         return jsonResult({
           ok: true,

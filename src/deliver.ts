@@ -9,6 +9,7 @@ import type { ChannelLogSink } from 'openclaw/plugin-sdk/channel-contract';
 import { createChannelPartialDeliveryError } from 'openclaw/plugin-sdk/channel-inbound';
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
 import { PlatformMessageNotDispatchedError } from 'openclaw/plugin-sdk/error-runtime';
+import { LocalMediaAccessError } from 'openclaw/plugin-sdk/web-media';
 
 import type { ResolvedMaxAccount } from './accounts.js';
 import { MaxApiError } from './api.js';
@@ -16,6 +17,7 @@ import { readMaxDeliveryPin } from './presentation.js';
 import { getMaxRuntime } from './runtime.js';
 import {
   answerMaxCallback,
+  type MaxLocalMediaAccess,
   pinMaxMessage,
   readMaxChannelButtons,
   readMaxChannelSendOptions,
@@ -36,8 +38,9 @@ interface MaxVisibleDelivery {
  * chunk, an album, the stream draft) the error keeps that subset
  * (createChannelPartialDeliveryError); a send MAX refused outright (4xx)
  * proves nothing was dispatched (PlatformMessageNotDispatchedError, retryable
- * only for 429); anything else (5xx, timeout, network) may have been applied
- * and is rethrown as is.
+ * only for 429), as does a local file refused by the media access policy;
+ * anything else (5xx, timeout, network) may have been applied and is
+ * rethrown as is.
  * @internal exported for testing.
  */
 export function toMaxDeliveryError(err: unknown, visible: MaxVisibleDelivery): unknown {
@@ -54,6 +57,9 @@ export function toMaxDeliveryError(err: unknown, visible: MaxVisibleDelivery): u
       cause: err,
       retryable: err.status === 429,
     });
+  }
+  if (err instanceof LocalMediaAccessError) {
+    return new PlatformMessageNotDispatchedError(err.message, { cause: err, retryable: false });
   }
   return err;
 }
@@ -88,6 +94,8 @@ export async function deliverMaxReply(params: {
   statusSink?: (patch: { lastInboundAt?: number; lastOutboundAt?: number }) => void;
   /** Edit-streaming draft: the first text chunk replaces it instead of a new message. */
   draft?: MaxDraftStream;
+  /** Allowed roots for local reply media (the agent's scoped media roots). */
+  localMedia?: MaxLocalMediaAccess;
 }): Promise<void> {
   const { payload, account, chatId, config, log, statusSink } = params;
   const core = getMaxRuntime();
@@ -183,13 +191,15 @@ export async function deliverMaxReply(params: {
       ? [payload.mediaUrl]
       : [];
 
-  // Images/videos go as albums (up to 12 per message); https image links are
-  // sent by URL, other remote media is downloaded and uploaded.
+  // Images/videos go as albums (up to 12 per message); public https image
+  // links are sent by URL, other remote media is downloaded (SSRF-guarded)
+  // and uploaded, local files are read only under the agent's media roots.
   if (mediaList.length) {
     const sent = await sendMaxMediaGroup(chatId, '', mediaList, {
       token: account.token,
       replyToMessageId: params.replyToId,
       mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
+      localMedia: params.localMedia,
       ...sendOptions,
       onError: (err, failed) => {
         log?.error(

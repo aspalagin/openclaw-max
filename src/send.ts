@@ -3,7 +3,16 @@
  */
 
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
+import {
+  buildOutboundMediaLoadOptions,
+  type OutboundMediaAccess,
+} from 'openclaw/plugin-sdk/media-runtime';
 import { retryAsync } from 'openclaw/plugin-sdk/runtime-env';
+import {
+  isBlockedHostnameOrIp,
+  resolvePinnedHostnameWithPolicy,
+} from 'openclaw/plugin-sdk/ssrf-runtime';
+import { loadWebMediaRaw } from 'openclaw/plugin-sdk/web-media';
 
 import { resolveMaxAccount } from './accounts.js';
 import {
@@ -18,7 +27,7 @@ import {
   type MaxStickerAttachment,
 } from './api.js';
 import { toMaxMarkdown } from './format.js';
-import { withRemoteMediaTempFile } from './media-temp.js';
+import { downloadMaxRemoteMedia, type MaxLoadedMedia, sanitizeMaxFileName } from './media-temp.js';
 
 export type MaxSendButton = {
   text: string;
@@ -554,9 +563,26 @@ export const MAX_VISUAL_MEDIA_PER_MESSAGE = 12;
 
 const DEFAULT_MEDIA_MAX_BYTES = 20 * 1024 * 1024;
 
+/**
+ * Host media access for local files, as core hands it to message actions and
+ * the outbound adapter (ChannelMessageActionContext / ChannelOutboundContext).
+ */
+export interface MaxLocalMediaAccess {
+  mediaAccess?: OutboundMediaAccess;
+  mediaLocalRoots?: readonly string[];
+  mediaReadFile?: (filePath: string) => Promise<Buffer>;
+}
+
 export interface MaxMediaSendOptions extends MaxSendOptions {
-  /** Download cap for remote media that has to be uploaded (default 20 MB). */
+  /** Size cap for media that has to be uploaded (default 20 MB). */
   mediaMaxBytes?: number;
+  /**
+   * Allowed roots and host reader for local paths. A local path is read only
+   * through core's guarded loader under these roots (realpath containment, so
+   * `..` and symlinks cannot escape); without them the gateway's default
+   * media roots apply.
+   */
+  localMedia?: MaxLocalMediaAccess;
 }
 
 function isRemoteUrl(source: string): boolean {
@@ -573,6 +599,24 @@ function isImageLink(source: string): boolean {
   }
 }
 
+/**
+ * An image link handed to MAX by URL must point to a public host: not a
+ * private, loopback, link-local or metadata address, also after DNS
+ * resolution. Anything else is downloaded through the guarded fetcher (which
+ * refuses such hosts as well) and uploaded.
+ */
+async function isPublicImageLink(source: string): Promise<boolean> {
+  if (!isImageLink(source)) return false;
+  try {
+    const { hostname } = new URL(source);
+    if (isBlockedHostnameOrIp(hostname)) return false;
+    await resolvePinnedHostnameWithPolicy(hostname);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function mediaKind(source: string): 'image' | 'video' | 'audio' | 'file' {
   if (!isRemoteUrl(source)) return detectMaxMediaType(source);
   try {
@@ -582,34 +626,54 @@ function mediaKind(source: string): 'image' | 'video' | 'audio' | 'file' {
   }
 }
 
-/** Upload a local path, or a remote URL through a temporary file. */
+/**
+ * A local media file through core's guarded loader (loadWebMediaRaw): only
+ * under the allowed roots, through the host reader when core passed one,
+ * capped at the media size limit. A path outside the roots fails with
+ * LocalMediaAccessError ("Local media path is not under an allowed
+ * directory") before any byte is read.
+ */
+async function loadLocalMaxMedia(
+  source: string,
+  opts: MaxMediaSendOptions,
+): Promise<MaxLoadedMedia> {
+  const loaded = await loadWebMediaRaw(
+    source,
+    buildOutboundMediaLoadOptions({
+      maxBytes: opts.mediaMaxBytes ?? DEFAULT_MEDIA_MAX_BYTES,
+      mediaAccess: opts.localMedia?.mediaAccess,
+      mediaLocalRoots: opts.localMedia?.mediaLocalRoots,
+      mediaReadFile: opts.localMedia?.mediaReadFile,
+      optimizeImages: false,
+    }),
+  );
+  return {
+    buffer: loaded.buffer,
+    contentType: loaded.contentType,
+    fileName: sanitizeMaxFileName(loaded.fileName, loaded.contentType),
+  };
+}
+
+/** Upload a local path (guarded loader) or a remote URL (SSRF-guarded download). */
 async function uploadMaxAttachment(
   api: MaxApi,
   source: string,
   opts: MaxMediaSendOptions,
 ): Promise<MaxAttachment> {
-  if (isRemoteUrl(source)) {
-    return withRemoteMediaTempFile(
-      source,
-      opts.mediaMaxBytes ?? DEFAULT_MEDIA_MAX_BYTES,
-      async ({ path, contentType }) => {
-        const type = detectMaxMediaType(path);
-        const uploaded = await api.uploadMedia(type, path, contentType);
-        return { type, payload: { token: uploaded.token } };
-      },
-    );
-  }
-  const type = detectMaxMediaType(source);
-  const uploaded = await api.uploadMedia(type, source);
+  const media = isRemoteUrl(source)
+    ? await downloadMaxRemoteMedia(source, opts.mediaMaxBytes ?? DEFAULT_MEDIA_MAX_BYTES)
+    : await loadLocalMaxMedia(source, opts);
+  const type = detectMaxMediaType(media.fileName);
+  const uploaded = await api.uploadMedia(type, media.buffer, media.contentType, media.fileName);
   return { type, payload: { token: uploaded.token } };
 }
 
 /**
- * One message with the given media. https image links go as image.payload.url
- * (no download/upload round trip); if MAX refuses the message, those links are
- * uploaded and the message is sent once more. MAX processes video/file uploads
- * asynchronously — sendMessage may answer attachment.not.ready for a few
- * seconds; retry the send (not the upload).
+ * One message with the given media. Image links to public https hosts go as
+ * image.payload.url (no download/upload round trip); if MAX refuses the
+ * message, those links are uploaded and the message is sent once more. MAX
+ * processes video/file uploads asynchronously — sendMessage may answer
+ * attachment.not.ready for a few seconds; retry the send (not the upload).
  */
 async function sendMaxAttachmentsMessage(
   api: MaxApi,
@@ -618,11 +682,12 @@ async function sendMaxAttachmentsMessage(
   sources: string[],
   opts: MaxMediaSendOptions,
 ): Promise<MaxSendOutcome> {
+  const links = await Promise.all(sources.map(isPublicImageLink));
   const build = async (allowLinks: boolean): Promise<MaxNewMessageBody> => {
     const attachments: MaxAttachment[] = [];
-    for (const source of sources) {
+    for (const [index, source] of sources.entries()) {
       attachments.push(
-        allowLinks && isImageLink(source)
+        allowLinks && links[index]
           ? { type: 'image', payload: { url: source } }
           : await uploadMaxAttachment(api, source, opts),
       );
@@ -641,7 +706,7 @@ async function sendMaxAttachmentsMessage(
       retry: retryWhileAttachmentNotReady,
     });
 
-  if (!sources.some(isImageLink)) return send(false);
+  if (!links.some(Boolean)) return send(false);
   try {
     return await send(true);
   } catch (err) {
@@ -655,7 +720,7 @@ async function sendMaxAttachmentsMessage(
  * Send a media message to MAX (with upload).
  * @param to Chat ID or user ID
  * @param caption Text caption
- * @param mediaPath Local file path or URL (https image links are sent by URL)
+ * @param mediaPath Local file path (under the allowed roots) or URL (public https image links are sent by URL)
  * @param opts Send options
  */
 export async function sendMaxMediaMessage(

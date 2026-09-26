@@ -627,19 +627,23 @@ export class MaxApi {
   }
 
   /**
-   * Upload media file to MAX.
+   * Upload media bytes to MAX.
    * MAX upload requires multipart/form-data with field "data".
    * Response contains a token (in photos/videos/etc) to use in attachments.
+   * Takes bytes only: local files are read by the callers through the host
+   * media access policy (allowed roots, host reader), never by path here.
    *
    * @param type Media type (image, video, audio, file)
-   * @param data File path (string) or buffer (Buffer/Uint8Array)
-   * @param contentType MIME type (optional, auto-detected for common types)
+   * @param data File contents
+   * @param contentType MIME type (default application/octet-stream)
+   * @param fileName File name for the multipart part (default "file")
    * @returns Upload result with token (for use in attachment payload)
    */
   async uploadMedia(
     type: 'image' | 'video' | 'audio' | 'file',
-    data: string | Buffer | Uint8Array,
+    data: Buffer | Uint8Array,
     contentType?: string,
+    fileName = 'file',
   ): Promise<{ token: string; url?: string }> {
     // Step 1: Get upload URL and attachment token.
     // MAX returns the attachment token together with the upload URL. The
@@ -648,56 +652,10 @@ export class MaxApi {
     const uploadInfo = await this.getUploadUrl(type);
     const uploadUrl = uploadInfo.url;
 
-    // Step 2: Load file if data is a path
-    let fileBuffer: Buffer;
-    let mimeType = contentType;
-    let fileName = 'file';
+    const fileBuffer = Buffer.from(data);
+    const mimeType = contentType ?? 'application/octet-stream';
 
-    if (typeof data === 'string') {
-      // File path — read from disk
-      const fs = await import('fs/promises');
-      const path = await import('path');
-      fileBuffer = await fs.readFile(data);
-      fileName = path.basename(data);
-
-      // Auto-detect MIME type if not provided
-      if (!mimeType) {
-        const ext = data.split('.').pop()?.toLowerCase();
-        const mimeMap: Record<string, string> = {
-          jpg: 'image/jpeg',
-          jpeg: 'image/jpeg',
-          png: 'image/png',
-          gif: 'image/gif',
-          webp: 'image/webp',
-          heic: 'image/heic',
-          heif: 'image/heif',
-          tif: 'image/tiff',
-          tiff: 'image/tiff',
-          bmp: 'image/bmp',
-          mp4: 'video/mp4',
-          mov: 'video/quicktime',
-          avi: 'video/x-msvideo',
-          mkv: 'video/x-matroska',
-          webm: 'video/webm',
-          mp3: 'audio/mpeg',
-          wav: 'audio/wav',
-          ogg: 'audio/ogg',
-          m4a: 'audio/mp4',
-          aac: 'audio/aac',
-          flac: 'audio/flac',
-          opus: 'audio/opus',
-          pdf: 'application/pdf',
-          txt: 'text/plain',
-        };
-        mimeType = ext ? mimeMap[ext] : 'application/octet-stream';
-      }
-    } else {
-      // Already a buffer
-      fileBuffer = Buffer.from(data);
-      mimeType = mimeType ?? 'application/octet-stream';
-    }
-
-    // Step 3: POST file as multipart/form-data to upload URL. MAX upload hosts
+    // Step 2: POST file as multipart/form-data to upload URL. MAX upload hosts
     // reject Node's native FormData in some cases with 412, while curl-style
     // multipart with a known Content-Length is accepted.
     const multipart = buildMultipartFileBody('data', fileName, mimeType, fileBuffer);
@@ -719,7 +677,7 @@ export class MaxApi {
       );
     }
 
-    // Step 4: Parse response to extract token
+    // Step 3: Parse response to extract token
     // Image response: { photos: { "<id>": { token: "...", url: "..." } } }
     // Video/audio/file may respond with a top-level token or a similar nested map
     const result = (await uploadRes.json().catch(() => ({}))) as Record<string, unknown>;
