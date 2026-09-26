@@ -3,14 +3,14 @@
  * button types and presentation for the message tool.
  */
 
-import type { ChannelPlugin } from "openclaw/plugin-sdk/channel-core";
+import type { ChannelPlugin } from 'openclaw/plugin-sdk/channel-core';
 
-import type { ResolvedMaxAccount } from "./accounts.js";
+import type { ResolvedMaxAccount } from './accounts.js';
 
 type MaxChannelPlugin = ChannelPlugin<ResolvedMaxAccount>;
 
 /** message tool hints for MAX-specific actions. */
-export const maxAgentPromptAdapter: NonNullable<MaxChannelPlugin["agentPrompt"]> = {
+export const maxAgentPromptAdapter: NonNullable<MaxChannelPlugin['agentPrompt']> = {
   messageToolHints: () => {
     // Compact sticker emoji map: top 50 emojis → sticker codes
     // Codes are hex IDs derived from listmax.ru external_id: parseInt(extId).toString(16)

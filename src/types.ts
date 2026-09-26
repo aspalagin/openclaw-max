@@ -21,7 +21,7 @@ export interface MaxUser {
 
 export interface MaxChat {
   chat_id: number;
-  type: "dialog" | "chat" | "channel";
+  type: 'dialog' | 'chat' | 'channel';
   status: string;
   title?: string | null;
   icon?: { url?: string } | null;
@@ -76,7 +76,7 @@ export interface MaxAttachment {
 }
 
 export interface MaxLinkedMessage {
-  type: "forward" | "reply";
+  type: 'forward' | 'reply';
   sender?: MaxUser;
   chat_id?: number;
   message?: MaxMessage;
@@ -92,25 +92,25 @@ export interface MaxUploadResult {
 }
 
 export type MaxUpdateType =
-  | "message_created"
-  | "message_callback"
-  | "message_edited"
-  | "message_removed"
-  | "comment_created"
-  | "comment_edited"
-  | "comment_removed"
-  | "bot_added"
-  | "bot_removed"
-  | "bot_started"
-  | "bot_stopped"
-  | "dialog_cleared"
-  | "dialog_removed"
-  | "dialog_muted"
-  | "dialog_unmuted"
-  | "user_added"
-  | "user_removed"
-  | "chat_title_changed"
-  | "bot_admin_permissions_changed";
+  | 'message_created'
+  | 'message_callback'
+  | 'message_edited'
+  | 'message_removed'
+  | 'comment_created'
+  | 'comment_edited'
+  | 'comment_removed'
+  | 'bot_added'
+  | 'bot_removed'
+  | 'bot_started'
+  | 'bot_stopped'
+  | 'dialog_cleared'
+  | 'dialog_removed'
+  | 'dialog_muted'
+  | 'dialog_unmuted'
+  | 'user_added'
+  | 'user_removed'
+  | 'chat_title_changed'
+  | 'bot_admin_permissions_changed';
 
 export interface MaxUpdate {
   update_type: MaxUpdateType;
@@ -131,7 +131,14 @@ export interface MaxUpdate {
 }
 
 export interface MaxInlineKeyboardButton {
-  type: "callback" | "link" | "request_contact" | "request_geo_location" | "open_app" | "message" | "clipboard";
+  type:
+    | 'callback'
+    | 'link'
+    | 'request_contact'
+    | 'request_geo_location'
+    | 'open_app'
+    | 'message'
+    | 'clipboard';
   text: string;
   payload?: string;
   url?: string;
@@ -142,14 +149,14 @@ export interface MaxInlineKeyboardButton {
 }
 
 export interface MaxInlineKeyboardAttachment {
-  type: "inline_keyboard";
+  type: 'inline_keyboard';
   payload: {
     buttons: MaxInlineKeyboardButton[][];
   };
 }
 
 export interface MaxStickerAttachment {
-  type: "sticker";
+  type: 'sticker';
   payload: {
     code: string;
   };
@@ -158,9 +165,9 @@ export interface MaxStickerAttachment {
 export interface MaxNewMessageBody {
   text?: string | null;
   attachments?: (MaxAttachment | MaxInlineKeyboardAttachment | MaxStickerAttachment)[] | null;
-  link?: { type: "forward" | "reply"; mid: string } | null;
+  link?: { type: 'forward' | 'reply'; mid: string } | null;
   notify?: boolean;
-  format?: "markdown" | "html" | null;
+  format?: 'markdown' | 'html' | null;
 }
 
 export interface MaxBotCommand {
@@ -178,12 +185,7 @@ export interface MaxBotCommandsInfo {
  * mark_seen disappeared from the current docs but is still accepted; treat as legacy.
  */
 export type MaxSenderAction =
-  | "typing_on"
-  | "sending_photo"
-  | "sending_video"
-  | "sending_audio"
-  | "sending_file"
-  | "mark_seen";
+  'typing_on' | 'sending_photo' | 'sending_video' | 'sending_audio' | 'sending_file' | 'mark_seen';
 
 /** GET /chats/{chatId}/members/me */
 export interface MaxChatMember {

@@ -4,14 +4,14 @@
  * pipeline as a synthesized message.
  */
 
-import { resolveApprovalOverGateway } from "openclaw/plugin-sdk/approval-gateway-runtime";
-import { questionGatewayRuntime } from "openclaw/plugin-sdk/question-gateway-runtime";
+import { resolveApprovalOverGateway } from 'openclaw/plugin-sdk/approval-gateway-runtime';
+import { questionGatewayRuntime } from 'openclaw/plugin-sdk/question-gateway-runtime';
 
-import type { ResolvedMaxAccount } from "./accounts.js";
-import type { MaxCallback, MaxMessage } from "./api.js";
-import { processIncomingMessage } from "./inbound.js";
-import type { MaxMonitorOptions } from "./monitor-types.js";
-import { decodeMaxPresentationCallback, type MaxPresentationCallback } from "./presentation.js";
+import type { ResolvedMaxAccount } from './accounts.js';
+import type { MaxCallback, MaxMessage } from './api.js';
+import { processIncomingMessage } from './inbound.js';
+import type { MaxMonitorOptions } from './monitor-types.js';
+import { decodeMaxPresentationCallback, type MaxPresentationCallback } from './presentation.js';
 
 /**
  * Synthesize a regular message from a button press. The keyboard's message is
@@ -25,7 +25,7 @@ import { decodeMaxPresentationCallback, type MaxPresentationCallback } from "./p
 export function buildCallbackMessage(
   callback: MaxCallback,
   message: MaxMessage | null,
-  text: string = callback.payload ?? "",
+  text: string = callback.payload ?? '',
 ): MaxMessage & { __maxCallback: true } {
   return {
     __maxCallback: true,
@@ -45,21 +45,22 @@ export async function processCallback(
   userLocale: string | null | undefined,
   opts: MaxMonitorOptions,
 ): Promise<void> {
-  const payload = callback.payload ?? "";
+  const payload = callback.payload ?? '';
   if (!payload.trim()) return;
 
   // Presentation buttons carry private envelopes (see presentation.ts).
   // Command buttons carry the command text itself and take the default path;
   // plain channelData.max.buttons payloads keep arriving as message text.
   const presentationCallback = decodeMaxPresentationCallback(payload);
-  if (presentationCallback?.kind === "approval" || presentationCallback?.kind === "question") {
+  if (presentationCallback?.kind === 'approval' || presentationCallback?.kind === 'question') {
     await resolveMaxRuntimeControlCallback(presentationCallback, callback, opts);
     return;
   }
   // Opaque callback data goes to the agent labelled, never as a slash command.
-  const text = presentationCallback?.kind === "callback"
-    ? `callback_data: ${presentationCallback.value}`
-    : payload;
+  const text =
+    presentationCallback?.kind === 'callback'
+      ? `callback_data: ${presentationCallback.value}`
+      : payload;
 
   await processIncomingMessage(buildCallbackMessage(callback, message, text), userLocale, opts);
 }
@@ -69,14 +70,20 @@ export async function processCallback(
  * explicitly in the account's allowFrom may press them (a wildcard is enough
  * for questions, never for approvals).
  */
-function isMaxRuntimeControlSender(account: ResolvedMaxAccount, senderId: string, kind: "approval" | "question"): boolean {
-  const allowFrom = (account.config.allowFrom ?? []).map((entry) => String(entry).trim().replace(/^max:/i, ""));
+function isMaxRuntimeControlSender(
+  account: ResolvedMaxAccount,
+  senderId: string,
+  kind: 'approval' | 'question',
+): boolean {
+  const allowFrom = (account.config.allowFrom ?? []).map((entry) =>
+    String(entry).trim().replace(/^max:/i, ''),
+  );
   if (allowFrom.includes(senderId)) return true;
-  return kind === "question" && allowFrom.includes("*");
+  return kind === 'question' && allowFrom.includes('*');
 }
 
 async function resolveMaxRuntimeControlCallback(
-  action: Extract<MaxPresentationCallback, { kind: "approval" | "question" }>,
+  action: Extract<MaxPresentationCallback, { kind: 'approval' | 'question' }>,
   callback: MaxCallback,
   opts: MaxMonitorOptions,
 ): Promise<void> {
@@ -85,38 +92,43 @@ async function resolveMaxRuntimeControlCallback(
   let notification: string;
 
   if (!isMaxRuntimeControlSender(account, senderId, action.kind)) {
-    log?.warn(`[${account.accountId}] MAX ${action.kind} button pressed by unauthorized sender ${senderId}`);
-    notification = "You are not allowed to answer this.";
+    log?.warn(
+      `[${account.accountId}] MAX ${action.kind} button pressed by unauthorized sender ${senderId}`,
+    );
+    notification = 'You are not allowed to answer this.';
   } else {
     try {
-      if (action.kind === "approval") {
+      if (action.kind === 'approval') {
         const result = await resolveApprovalOverGateway({
           cfg: config,
           approvalId: action.approvalId,
           approvalKind: action.approvalKind,
           decision: action.decision,
-          channel: "max",
+          channel: 'max',
           accountId: account.accountId,
           senderId,
         });
-        notification = result.applied ? `Decision recorded: ${action.decision}.` : "This approval was already resolved.";
+        notification = result.applied
+          ? `Decision recorded: ${action.decision}.`
+          : 'This approval was already resolved.';
       } else {
         const result = await questionGatewayRuntime.resolveOption({
           cfg: config,
           questionId: action.questionId,
           optionValue: action.optionValue,
           senderId,
-          authorize: () => isMaxRuntimeControlSender(account, senderId, "question"),
+          authorize: () => isMaxRuntimeControlSender(account, senderId, 'question'),
         });
-        notification = result.status === "answered"
-          ? "Answer recorded."
-          : result.status === "denied"
-            ? "You are not allowed to answer this."
-            : "This question is no longer open.";
+        notification =
+          result.status === 'answered'
+            ? 'Answer recorded.'
+            : result.status === 'denied'
+              ? 'You are not allowed to answer this.'
+              : 'This question is no longer open.';
       }
     } catch (err) {
       log?.error(`[${account.accountId}] MAX ${action.kind} callback failed: ${String(err)}`);
-      notification = "Could not apply this action.";
+      notification = 'Could not apply this action.';
     }
   }
 

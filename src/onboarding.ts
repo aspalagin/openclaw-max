@@ -2,28 +2,18 @@
  * MAX channel onboarding — setup wizard for `openclaw channel add max`
  */
 
-import type { DmPolicy } from "openclaw/plugin-sdk/config-contracts";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
-import {
-  DEFAULT_ACCOUNT_ID,
-} from "openclaw/plugin-sdk/core";
-import type {
-  ChannelSetupDmPolicy,
-  ChannelSetupWizard,
-} from "openclaw/plugin-sdk/setup";
-import {
-  formatDocsLink,
-} from "openclaw/plugin-sdk/setup";
+import type { DmPolicy } from 'openclaw/plugin-sdk/config-contracts';
+import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
+import { DEFAULT_ACCOUNT_ID } from 'openclaw/plugin-sdk/core';
+import type { ChannelSetupDmPolicy, ChannelSetupWizard } from 'openclaw/plugin-sdk/setup';
+import { formatDocsLink } from 'openclaw/plugin-sdk/setup';
 
-import {
-  listMaxAccountIds,
-  resolveMaxAccount,
-} from "./accounts.js";
-import { MaxApi } from "./api.js";
+import { listMaxAccountIds, resolveMaxAccount } from './accounts.js';
+import { MaxApi } from './api.js';
 
-const channel = "max" as const;
+const channel = 'max' as const;
 
-const ENV_MAX_BOT_TOKEN = "MAX_BOT_TOKEN";
+const ENV_MAX_BOT_TOKEN = 'MAX_BOT_TOKEN';
 
 function setMaxDmPolicy(cfg: OpenClawConfig, policy: DmPolicy): OpenClawConfig {
   return {
@@ -31,7 +21,7 @@ function setMaxDmPolicy(cfg: OpenClawConfig, policy: DmPolicy): OpenClawConfig {
     channels: {
       ...cfg.channels,
       max: {
-        ...cfg.channels?.["max"],
+        ...cfg.channels?.['max'],
         dmPolicy: policy,
       },
     },
@@ -39,11 +29,11 @@ function setMaxDmPolicy(cfg: OpenClawConfig, policy: DmPolicy): OpenClawConfig {
 }
 
 const dmPolicy: ChannelSetupDmPolicy = {
-  label: "MAX",
+  label: 'MAX',
   channel,
-  policyKey: "channels.max.dmPolicy",
-  allowFromKey: "channels.max.allowFrom",
-  getCurrent: (cfg: OpenClawConfig) => cfg.channels?.["max"]?.dmPolicy ?? "pairing",
+  policyKey: 'channels.max.dmPolicy',
+  allowFromKey: 'channels.max.allowFrom',
+  getCurrent: (cfg: OpenClawConfig) => cfg.channels?.['max']?.dmPolicy ?? 'pairing',
   setPolicy: (cfg: OpenClawConfig, policy: DmPolicy) => setMaxDmPolicy(cfg, policy),
 };
 
@@ -59,7 +49,7 @@ function applyAccountConfig(params: {
       channels: {
         ...cfg.channels,
         max: {
-          ...cfg.channels?.["max"],
+          ...cfg.channels?.['max'],
           enabled: true,
           ...patch,
         },
@@ -71,12 +61,12 @@ function applyAccountConfig(params: {
     channels: {
       ...cfg.channels,
       max: {
-        ...cfg.channels?.["max"],
+        ...cfg.channels?.['max'],
         enabled: true,
         accounts: {
-          ...cfg.channels?.["max"]?.accounts,
+          ...cfg.channels?.['max']?.accounts,
           [accountId]: {
-            ...cfg.channels?.["max"]?.accounts?.[accountId],
+            ...cfg.channels?.['max']?.accounts?.[accountId],
             enabled: true,
             ...patch,
           },
@@ -90,32 +80,32 @@ export const maxSetupWizard: ChannelSetupWizard = {
   channel,
 
   status: {
-    configuredLabel: "MAX (configured)",
-    unconfiguredLabel: "MAX Messenger",
-    configuredHint: "configured",
-    unconfiguredHint: "needs bot token",
+    configuredLabel: 'MAX (configured)',
+    unconfiguredLabel: 'MAX Messenger',
+    configuredHint: 'configured',
+    unconfiguredHint: 'needs bot token',
     resolveConfigured: ({ cfg }) => {
       return listMaxAccountIds(cfg).some(
-        (accountId) => resolveMaxAccount({ cfg, accountId }).tokenSource !== "none",
+        (accountId) => resolveMaxAccount({ cfg, accountId }).tokenSource !== 'none',
       );
     },
     resolveStatusLines: ({ configured }) => {
-      return [`MAX: ${configured ? "configured" : "needs bot token"}`];
+      return [`MAX: ${configured ? 'configured' : 'needs bot token'}`];
     },
   },
 
   introNote: {
-    title: "MAX setup",
+    title: 'MAX setup',
     lines: [
-      "MAX messenger bot requires a bot token from https://platform-api.max.ru",
-      "Create your bot via MAX Business or MAX API portal.",
-      "The bot can receive messages via polling (default) or webhook.",
-      `Docs: ${formatDocsLink("/channels/max", "channels/max")}`,
+      'MAX messenger bot requires a bot token from https://platform-api.max.ru',
+      'Create your bot via MAX Business or MAX API portal.',
+      'The bot can receive messages via polling (default) or webhook.',
+      `Docs: ${formatDocsLink('/channels/max', 'channels/max')}`,
     ],
   },
 
   envShortcut: {
-    prompt: "Use MAX_BOT_TOKEN env var?",
+    prompt: 'Use MAX_BOT_TOKEN env var?',
     preferredEnvVar: ENV_MAX_BOT_TOKEN,
     isAvailable: ({ accountId }) => {
       return accountId === DEFAULT_ACCOUNT_ID && Boolean(process.env[ENV_MAX_BOT_TOKEN]);
@@ -127,18 +117,19 @@ export const maxSetupWizard: ChannelSetupWizard = {
 
   credentials: [
     {
-      inputKey: "botToken",
-      providerHint: "MAX bot token",
-      credentialLabel: "bot token",
+      inputKey: 'botToken',
+      providerHint: 'MAX bot token',
+      credentialLabel: 'bot token',
       preferredEnvVar: ENV_MAX_BOT_TOKEN,
-      envPrompt: "Use MAX_BOT_TOKEN env var?",
-      keepPrompt: "Keep current bot token?",
-      inputPrompt: "MAX bot token",
+      envPrompt: 'Use MAX_BOT_TOKEN env var?',
+      keepPrompt: 'Keep current bot token?',
+      inputPrompt: 'MAX bot token',
 
       inspect: ({ cfg, accountId }) => {
         const account = resolveMaxAccount({ cfg, accountId });
         const hasToken = Boolean(account.token);
-        const envValue = accountId === DEFAULT_ACCOUNT_ID ? process.env[ENV_MAX_BOT_TOKEN] : undefined;
+        const envValue =
+          accountId === DEFAULT_ACCOUNT_ID ? process.env[ENV_MAX_BOT_TOKEN] : undefined;
 
         return {
           accountConfigured: hasToken,
@@ -161,7 +152,9 @@ export const maxSetupWizard: ChannelSetupWizard = {
         try {
           const api = new MaxApi({ token: tokenValue, timeoutMs: 5000 });
           const me = await api.getMe();
-          console.log(`✓ Token verified! Bot: ${me.first_name}${me.username ? ` (@${me.username})` : ""} (ID: ${me.user_id})`);
+          console.log(
+            `✓ Token verified! Bot: ${me.first_name}${me.username ? ` (@${me.username})` : ''} (ID: ${me.user_id})`,
+          );
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
           console.warn(`⚠ Token verification failed: ${errorMsg}`);
@@ -179,9 +172,9 @@ export const maxSetupWizard: ChannelSetupWizard = {
 
   textInputs: [
     {
-      inputKey: "tokenFile",
-      message: "Token file path (optional)",
-      placeholder: "/path/to/max-token.txt",
+      inputKey: 'tokenFile',
+      message: 'Token file path (optional)',
+      placeholder: '/path/to/max-token.txt',
       required: false,
 
       shouldPrompt: ({ credentialValues }) => {
@@ -210,7 +203,7 @@ export const maxSetupWizard: ChannelSetupWizard = {
         channels: {
           ...cfg.channels,
           max: {
-            ...cfg.channels?.["max"],
+            ...cfg.channels?.['max'],
             enabled: true,
           },
         },

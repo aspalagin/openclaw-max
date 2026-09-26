@@ -4,10 +4,10 @@
  * the draft together with its inline keyboard.
  */
 
-import type { ChannelLogSink } from "openclaw/plugin-sdk/channel-contract";
+import type { ChannelLogSink } from 'openclaw/plugin-sdk/channel-contract';
 
-import type { ResolvedMaxAccount } from "./accounts.js";
-import { editMaxMessage, type MaxSendButton, sendMaxMessage } from "./send.js";
+import type { ResolvedMaxAccount } from './accounts.js';
+import { editMaxMessage, type MaxSendButton, sendMaxMessage } from './send.js';
 
 const DRAFT_THROTTLE_MS = 1200;
 const DRAFT_MAX_CHARS = 4000;
@@ -34,7 +34,7 @@ export function createMaxDraftStream(params: {
 }): MaxDraftStream {
   const { account, chatId, log, statusSink } = params;
   let draftMid: string | null = null;
-  let draftLastText = "";
+  let draftLastText = '';
   let draftLastEditAt = 0;
   let draftTimer: ReturnType<typeof setTimeout> | null = null;
   let draftStopped = false;
@@ -50,13 +50,18 @@ export function createMaxDraftStream(params: {
     if (!draftMid && trimmed.length < DRAFT_MIN_CHARS) return; // wait for more text
 
     // Clear pending timer
-    if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; }
+    if (draftTimer) {
+      clearTimeout(draftTimer);
+      draftTimer = null;
+    }
 
     const now = Date.now();
     const elapsed = now - draftLastEditAt;
     if (elapsed < DRAFT_THROTTLE_MS) {
       // Schedule a deferred update
-      draftTimer = setTimeout(() => { draftUpdate(text); }, DRAFT_THROTTLE_MS - elapsed);
+      draftTimer = setTimeout(() => {
+        draftUpdate(text);
+      }, DRAFT_THROTTLE_MS - elapsed);
       return;
     }
 
@@ -69,7 +74,7 @@ export function createMaxDraftStream(params: {
         const res = await sendMaxMessage(chatId, trimmed, {
           token: account.token,
           replyToMessageId: params.replyToId,
-          format: "markdown",
+          format: 'markdown',
         });
         draftMid = res.messageId || null;
         statusSink?.({ lastOutboundAt: Date.now() });
@@ -77,7 +82,7 @@ export function createMaxDraftStream(params: {
         // Edit existing message
         await editMaxMessage(draftMid, trimmed, {
           token: account.token,
-          format: "markdown",
+          format: 'markdown',
         });
       }
     } catch (err) {
@@ -99,16 +104,21 @@ export function createMaxDraftStream(params: {
         try {
           await editMaxMessage(draftMid, finalText, {
             token: account.token,
-            format: "markdown",
+            format: 'markdown',
             buttons,
           });
           draftLastText = finalText;
-        } catch { /* best effort */ }
+        } catch {
+          /* best effort */
+        }
       }
       draftStopped = true;
     },
     clear: async () => {
-      if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; }
+      if (draftTimer) {
+        clearTimeout(draftTimer);
+        draftTimer = null;
+      }
       draftStopped = true;
     },
   };

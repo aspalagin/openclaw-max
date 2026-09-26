@@ -2,10 +2,10 @@
  * MAX account resolution — reads config and produces a resolved account object.
  */
 
-import { lstatSync, readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from 'node:fs';
 
-import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
-import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "openclaw/plugin-sdk/core";
+import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
+import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from 'openclaw/plugin-sdk/core';
 
 export interface MaxAccountConfig {
   enabled?: boolean;
@@ -18,14 +18,14 @@ export interface MaxAccountConfig {
   groupPolicy?: string;
   groupAllowFrom?: Array<string | number>;
   /** Update transport; default: "webhook" when webhookUrl is set, otherwise "polling" */
-  transport?: "polling" | "webhook";
+  transport?: 'polling' | 'webhook';
   webhookUrl?: string;
   webhookSecret?: string;
   /** File holding the webhook secret (like tokenFile) */
   webhookSecretFile?: string;
   webhookPath?: string;
   mediaMaxMb?: number;
-  streamMode?: "off" | "partial" | "block";
+  streamMode?: 'off' | 'partial' | 'block';
   /** Send mark_seen read receipts on inbound messages (default true) */
   markSeen?: boolean;
 }
@@ -35,7 +35,7 @@ export interface ResolvedMaxAccount {
   name?: string;
   enabled: boolean;
   token: string;
-  tokenSource: "config" | "env" | "file" | "none";
+  tokenSource: 'config' | 'env' | 'file' | 'none';
   config: MaxAccountConfig;
 }
 
@@ -53,13 +53,13 @@ export function readSecretFile(filePath?: string): string {
 
 function readTokenFile(tokenFile?: string): string {
   const filePath = tokenFile?.trim();
-  if (!filePath) return "";
+  if (!filePath) return '';
   try {
     const stat = lstatSync(filePath);
-    if (!stat.isFile() || stat.isSymbolicLink()) return "";
-    return readFileSync(filePath, "utf8").trim();
+    if (!stat.isFile() || stat.isSymbolicLink()) return '';
+    return readFileSync(filePath, 'utf8').trim();
   } catch {
-    return "";
+    return '';
   }
 }
 
@@ -114,8 +114,8 @@ export function resolveMaxAccount(params: {
   const accounts = section.accounts as Record<string, Record<string, unknown>> | undefined;
 
   let accountConfig: MaxAccountConfig;
-  let token = "";
-  let tokenSource: ResolvedMaxAccount["tokenSource"] = "none";
+  let token = '';
+  let tokenSource: ResolvedMaxAccount['tokenSource'] = 'none';
 
   if (accountId === DEFAULT_ACCOUNT_ID) {
     // Default account: top-level config
@@ -126,29 +126,29 @@ export function resolveMaxAccount(params: {
       name: section.name as string | undefined,
       dmPolicy: section.dmPolicy as string | undefined,
       allowFrom: section.allowFrom as Array<string | number> | undefined,
-      groups: section.groups as MaxAccountConfig["groups"],
+      groups: section.groups as MaxAccountConfig['groups'],
       groupPolicy: section.groupPolicy as string | undefined,
       groupAllowFrom: section.groupAllowFrom as Array<string | number> | undefined,
-      transport: section.transport as MaxAccountConfig["transport"],
+      transport: section.transport as MaxAccountConfig['transport'],
       webhookUrl: section.webhookUrl as string | undefined,
       webhookSecret: section.webhookSecret as string | undefined,
       webhookSecretFile: section.webhookSecretFile as string | undefined,
       webhookPath: section.webhookPath as string | undefined,
       mediaMaxMb: section.mediaMaxMb as number | undefined,
-      streamMode: section.streamMode as MaxAccountConfig["streamMode"],
+      streamMode: section.streamMode as MaxAccountConfig['streamMode'],
       markSeen: section.markSeen as boolean | undefined,
     };
 
     if (accountConfig.botToken?.trim()) {
       token = accountConfig.botToken.trim();
-      tokenSource = "config";
+      tokenSource = 'config';
     } else if (accountConfig.tokenFile?.trim()) {
       token = readTokenFile(accountConfig.tokenFile);
-      tokenSource = token ? "file" : "none";
+      tokenSource = token ? 'file' : 'none';
     }
     if (!token && process.env.MAX_BOT_TOKEN?.trim()) {
       token = process.env.MAX_BOT_TOKEN.trim();
-      tokenSource = "env";
+      tokenSource = 'env';
     }
   } else {
     // Named account
@@ -160,25 +160,25 @@ export function resolveMaxAccount(params: {
       name: raw.name as string | undefined,
       dmPolicy: raw.dmPolicy as string | undefined,
       allowFrom: raw.allowFrom as Array<string | number> | undefined,
-      groups: raw.groups as MaxAccountConfig["groups"],
+      groups: raw.groups as MaxAccountConfig['groups'],
       groupPolicy: raw.groupPolicy as string | undefined,
       groupAllowFrom: raw.groupAllowFrom as Array<string | number> | undefined,
-      transport: raw.transport as MaxAccountConfig["transport"],
+      transport: raw.transport as MaxAccountConfig['transport'],
       webhookUrl: raw.webhookUrl as string | undefined,
       webhookSecret: raw.webhookSecret as string | undefined,
       webhookSecretFile: raw.webhookSecretFile as string | undefined,
       webhookPath: raw.webhookPath as string | undefined,
       mediaMaxMb: raw.mediaMaxMb as number | undefined,
-      streamMode: raw.streamMode as MaxAccountConfig["streamMode"],
+      streamMode: raw.streamMode as MaxAccountConfig['streamMode'],
       markSeen: raw.markSeen as boolean | undefined,
     };
 
     if (accountConfig.botToken?.trim()) {
       token = accountConfig.botToken.trim();
-      tokenSource = "config";
+      tokenSource = 'config';
     } else if (accountConfig.tokenFile?.trim()) {
       token = readTokenFile(accountConfig.tokenFile);
-      tokenSource = token ? "file" : "none";
+      tokenSource = token ? 'file' : 'none';
     }
   }
 

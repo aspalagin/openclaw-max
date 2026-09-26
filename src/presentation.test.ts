@@ -3,10 +3,10 @@
  * callback round trip (render → press → dispatchUpdate).
  */
 
-import type { MessagePresentation } from "openclaw/plugin-sdk/interactive-runtime";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { MessagePresentation } from 'openclaw/plugin-sdk/interactive-runtime';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { MaxUpdate } from "./api.js";
+import type { MaxUpdate } from './api.js';
 import {
   decodeMaxPresentationCallback,
   materializeMaxPresentation,
@@ -14,37 +14,45 @@ import {
   readMaxDeliveryPin,
   renderMaxPresentation,
   renderMaxPresentationParts,
-} from "./presentation.js";
-import type { MaxSendButton } from "./send.js";
+} from './presentation.js';
+import type { MaxSendButton } from './send.js';
 
 const approvalMock = vi.hoisted(() => ({ resolve: vi.fn() }));
 const questionMock = vi.hoisted(() => ({ resolveOption: vi.fn() }));
 
-vi.mock("openclaw/plugin-sdk/approval-gateway-runtime", () => ({
+vi.mock('openclaw/plugin-sdk/approval-gateway-runtime', () => ({
   resolveApprovalOverGateway: approvalMock.resolve,
 }));
-vi.mock("openclaw/plugin-sdk/question-gateway-runtime", () => ({
+vi.mock('openclaw/plugin-sdk/question-gateway-runtime', () => ({
   questionGatewayRuntime: { resolveOption: questionMock.resolveOption },
 }));
 
-const APPROVAL_ID = "3f1c2b7e-0d7a-4a3e-9d1f-8f2c6a1b5e44";
-const QUESTION_ID = `ask_${"a1".repeat(16)}`;
+const APPROVAL_ID = '3f1c2b7e-0d7a-4a3e-9d1f-8f2c6a1b5e44';
+const QUESTION_ID = `ask_${'a1'.repeat(16)}`;
 
 const CARD: MessagePresentation = {
-  title: "Deploy approval",
-  tone: "warning",
+  title: 'Deploy approval',
+  tone: 'warning',
   blocks: [
-    { type: "text", text: "Canary is ready to promote." },
-    { type: "context", text: "Build 1234, staging passed." },
-    { type: "divider" },
+    { type: 'text', text: 'Canary is ready to promote.' },
+    { type: 'context', text: 'Build 1234, staging passed.' },
+    { type: 'divider' },
     {
-      type: "buttons",
+      type: 'buttons',
       buttons: [
-        { label: "Approve", action: { type: "callback", value: "deploy:approve" } },
-        { label: "Status", action: { type: "command", command: "/status" } },
-        { label: "Notes", action: { type: "url", url: "https://example.com/release" } },
-        { label: "Allow once", action: { type: "approval", approvalId: APPROVAL_ID, approvalKind: "exec", decision: "allow-once" } },
-        { label: "Yes", action: { type: "question", questionId: QUESTION_ID, optionValue: "yes" } },
+        { label: 'Approve', action: { type: 'callback', value: 'deploy:approve' } },
+        { label: 'Status', action: { type: 'command', command: '/status' } },
+        { label: 'Notes', action: { type: 'url', url: 'https://example.com/release' } },
+        {
+          label: 'Allow once',
+          action: {
+            type: 'approval',
+            approvalId: APPROVAL_ID,
+            approvalKind: 'exec',
+            decision: 'allow-once',
+          },
+        },
+        { label: 'Yes', action: { type: 'question', questionId: QUESTION_ID, optionValue: 'yes' } },
       ],
     },
   ],
@@ -54,152 +62,181 @@ function flat(buttons: MaxSendButton[][]): MaxSendButton[] {
   return buttons.flat();
 }
 
-describe("renderMaxPresentationParts", () => {
-  it("renders title/tone, text, context and divider into MAX markdown", () => {
+describe('renderMaxPresentationParts', () => {
+  it('renders title/tone, text, context and divider into MAX markdown', () => {
     const { text } = renderMaxPresentationParts({ presentation: CARD });
-    expect(text).toBe([
-      "⚠️ **Deploy approval**",
-      "Canary is ready to promote.",
-      "_Build 1234, staging passed._",
-      "———",
-    ].join("\n\n"));
+    expect(text).toBe(
+      [
+        '⚠️ **Deploy approval**',
+        'Canary is ready to promote.',
+        '_Build 1234, staging passed._',
+        '———',
+      ].join('\n\n'),
+    );
   });
 
-  it("does not repeat a title the message text already starts with", () => {
+  it('does not repeat a title the message text already starts with', () => {
     const { text } = renderMaxPresentationParts({
-      presentation: { title: "Deploy approval", blocks: [{ type: "text", text: "Body" }] },
-      text: "Deploy approval — please review",
+      presentation: { title: 'Deploy approval', blocks: [{ type: 'text', text: 'Body' }] },
+      text: 'Deploy approval — please review',
     });
-    expect(text.startsWith("Deploy approval — please review")).toBe(true);
-    expect(text).not.toContain("**Deploy approval**");
+    expect(text.startsWith('Deploy approval — please review')).toBe(true);
+    expect(text).not.toContain('**Deploy approval**');
   });
 
-  it("maps actions to MAX buttons and private callback payloads, 3 per row", () => {
+  it('maps actions to MAX buttons and private callback payloads, 3 per row', () => {
     const { buttons } = renderMaxPresentationParts({ presentation: CARD });
     expect(buttons.map((row) => row.length)).toEqual([3, 2]);
     expect(flat(buttons)).toEqual([
-      { text: "Approve", type: "callback", payload: "mxcb1:deploy:approve" },
-      { text: "Status", type: "callback", payload: "/status" },
-      { text: "Notes", type: "link", url: "https://example.com/release" },
-      { text: "Allow once", type: "callback", payload: `mxa1:e:o:${APPROVAL_ID}` },
-      { text: "Yes", type: "callback", payload: `mxq1:${QUESTION_ID}:yes` },
+      { text: 'Approve', type: 'callback', payload: 'mxcb1:deploy:approve' },
+      { text: 'Status', type: 'callback', payload: '/status' },
+      { text: 'Notes', type: 'link', url: 'https://example.com/release' },
+      { text: 'Allow once', type: 'callback', payload: `mxa1:e:o:${APPROVAL_ID}` },
+      { text: 'Yes', type: 'callback', payload: `mxq1:${QUESTION_ID}:yes` },
     ]);
   });
 
-  it("keeps legacy value buttons opaque and maps URL web apps to links", () => {
+  it('keeps legacy value buttons opaque and maps URL web apps to links', () => {
     const { buttons, text } = renderMaxPresentationParts({
       presentation: {
-        blocks: [{
-          type: "buttons",
-          buttons: [
-            { label: "Legacy", value: "/not-a-command" },
-            { label: "App", action: { type: "web-app", url: "https://app.example/x" } },
-            { label: "Widget", action: { type: "web-app", widgetId: "w1" } },
-            { label: "Other…", action: { type: "question", questionId: QUESTION_ID, intent: "custom-input" } },
-          ],
-        }],
+        blocks: [
+          {
+            type: 'buttons',
+            buttons: [
+              { label: 'Legacy', value: '/not-a-command' },
+              { label: 'App', action: { type: 'web-app', url: 'https://app.example/x' } },
+              { label: 'Widget', action: { type: 'web-app', widgetId: 'w1' } },
+              {
+                label: 'Other…',
+                action: { type: 'question', questionId: QUESTION_ID, intent: 'custom-input' },
+              },
+            ],
+          },
+        ],
       },
     });
     expect(flat(buttons)).toEqual([
-      { text: "Legacy", type: "callback", payload: "mxcb1:/not-a-command" },
-      { text: "App", type: "link", url: "https://app.example/x" },
+      { text: 'Legacy', type: 'callback', payload: 'mxcb1:/not-a-command' },
+      { text: 'App', type: 'link', url: 'https://app.example/x' },
     ]);
     // Dropped controls stay visible as labels.
-    expect(text).toContain("Widget");
-    expect(text).toContain("Other…");
+    expect(text).toContain('Widget');
+    expect(text).toContain('Other…');
   });
 
-  it("renders select options as callback rows of two", () => {
+  it('renders select options as callback rows of two', () => {
     const { buttons } = renderMaxPresentationParts({
       presentation: {
-        blocks: [{
-          type: "select",
-          placeholder: "Environment",
-          options: [
-            { label: "Canary", value: "env:canary" },
-            { label: "Production", action: { type: "callback", value: "env:prod" } },
-            { label: "Restart", action: { type: "command", command: "restart" } },
-          ],
-        }],
+        blocks: [
+          {
+            type: 'select',
+            placeholder: 'Environment',
+            options: [
+              { label: 'Canary', value: 'env:canary' },
+              { label: 'Production', action: { type: 'callback', value: 'env:prod' } },
+              { label: 'Restart', action: { type: 'command', command: 'restart' } },
+            ],
+          },
+        ],
       },
     });
     expect(buttons).toEqual([
       [
-        { text: "Canary", type: "callback", payload: "mxcb1:env:canary" },
-        { text: "Production", type: "callback", payload: "mxcb1:env:prod" },
+        { text: 'Canary', type: 'callback', payload: 'mxcb1:env:canary' },
+        { text: 'Production', type: 'callback', payload: 'mxcb1:env:prod' },
       ],
-      [{ text: "Restart", type: "callback", payload: "/restart" }],
+      [{ text: 'Restart', type: 'callback', payload: '/restart' }],
     ]);
   });
 
-  it("renders tables and charts as monospace blocks", () => {
+  it('renders tables and charts as monospace blocks', () => {
     const { text } = renderMaxPresentationParts({
       presentation: {
         blocks: [
           {
-            type: "table",
-            caption: "Open pipeline",
-            headers: ["Account", "Stage", "ARR"],
-            rows: [["Acme", "Won", 125000], ["Globex", "Review", 82000]],
+            type: 'table',
+            caption: 'Open pipeline',
+            headers: ['Account', 'Stage', 'ARR'],
+            rows: [
+              ['Acme', 'Won', 125000],
+              ['Globex', 'Review', 82000],
+            ],
           },
           {
-            type: "chart",
-            chartType: "bar",
-            title: "Revenue",
-            categories: ["Q1", "Q2"],
-            series: [{ name: "Product", values: [120, 145] }],
-            xLabel: "Quarter",
-            yLabel: "USD",
+            type: 'chart',
+            chartType: 'bar',
+            title: 'Revenue',
+            categories: ['Q1', 'Q2'],
+            series: [{ name: 'Product', values: [120, 145] }],
+            xLabel: 'Quarter',
+            yLabel: 'USD',
           },
-          { type: "chart", chartType: "pie", title: "Share", segments: [{ label: "A", value: 1 }, { label: "B", value: 3 }] },
+          {
+            type: 'chart',
+            chartType: 'pie',
+            title: 'Share',
+            segments: [
+              { label: 'A', value: 1 },
+              { label: 'B', value: 3 },
+            ],
+          },
         ],
       },
     });
-    expect(text).toContain([
-      "**Open pipeline**",
-      "```",
-      "Account | Stage  | ARR",
-      "--------+--------+-------",
-      "Acme    | Won    | 125000",
-      "Globex  | Review | 82000",
-      "```",
-    ].join("\n"));
-    expect(text).toContain("**Revenue** (bar, USD)\n```\nQuarter | Product\n");
-    expect(text).toContain("Q2      | 145");
-    expect(text).toContain("B | 3 | 75.0%");
+    expect(text).toContain(
+      [
+        '**Open pipeline**',
+        '```',
+        'Account | Stage  | ARR',
+        '--------+--------+-------',
+        'Acme    | Won    | 125000',
+        'Globex  | Review | 82000',
+        '```',
+      ].join('\n'),
+    );
+    expect(text).toContain('**Revenue** (bar, USD)\n```\nQuarter | Product\n');
+    expect(text).toContain('Q2      | 145');
+    expect(text).toContain('B | 3 | 75.0%');
   });
 
-  it("enforces MAX limits: 128-char labels, 1024-byte payloads, 30 rows, 210 buttons", () => {
-    const longLabel = "x".repeat(200);
+  it('enforces MAX limits: 128-char labels, 1024-byte payloads, 30 rows, 210 buttons', () => {
+    const longLabel = 'x'.repeat(200);
     const clipped = renderMaxPresentationParts({
-      presentation: { blocks: [{ type: "buttons", buttons: [{ label: longLabel, value: "v" }] }] },
+      presentation: { blocks: [{ type: 'buttons', buttons: [{ label: longLabel, value: 'v' }] }] },
     });
     expect(Array.from(flat(clipped.buttons)[0].text)).toHaveLength(128);
-    expect(flat(clipped.buttons)[0].text.endsWith("…")).toBe(true);
+    expect(flat(clipped.buttons)[0].text.endsWith('…')).toBe(true);
 
     const oversized = renderMaxPresentationParts({
-      presentation: { blocks: [{ type: "buttons", buttons: [{ label: "Big", value: "y".repeat(1100) }] }] },
+      presentation: {
+        blocks: [{ type: 'buttons', buttons: [{ label: 'Big', value: 'y'.repeat(1100) }] }],
+      },
     });
     expect(oversized.buttons).toEqual([]);
-    expect(oversized.text).toContain("Big");
+    expect(oversized.text).toContain('Big');
 
     const many = renderMaxPresentationParts({
       presentation: {
-        blocks: [{
-          type: "buttons",
-          buttons: Array.from({ length: 100 }, (_, index) => ({ label: `b${index}`, value: `v${index}` })),
-        }],
+        blocks: [
+          {
+            type: 'buttons',
+            buttons: Array.from({ length: 100 }, (_, index) => ({
+              label: `b${index}`,
+              value: `v${index}`,
+            })),
+          },
+        ],
       },
     });
     expect(many.buttons).toHaveLength(30);
     expect(flat(many.buttons)).toHaveLength(90);
     expect(many.buttons.every((row) => row.length <= 3)).toBe(true);
-    expect(many.text).toContain("b99");
+    expect(many.text).toContain('b99');
   });
 });
 
-describe("core adaptation with MAX capabilities", () => {
-  it("advertises the MAX envelope", () => {
+describe('core adaptation with MAX capabilities', () => {
+  it('advertises the MAX envelope', () => {
     expect(MAX_PRESENTATION_CAPABILITIES).toMatchObject({
       supported: true,
       buttons: true,
@@ -210,167 +247,187 @@ describe("core adaptation with MAX capabilities", () => {
     });
   });
 
-  it("materializes a presentation payload into text + channelData.max.buttons", async () => {
-    const out = await materializeMaxPresentation({ text: "Heads up", presentation: CARD });
+  it('materializes a presentation payload into text + channelData.max.buttons', async () => {
+    const out = await materializeMaxPresentation({ text: 'Heads up', presentation: CARD });
     expect(out.presentation).toBeUndefined();
-    expect(out.text).toContain("Heads up");
-    expect(out.text).toContain("**Deploy approval**");
+    expect(out.text).toContain('Heads up');
+    expect(out.text).toContain('**Deploy approval**');
     const buttons = (out.channelData as { max: { buttons: MaxSendButton[][] } }).max.buttons;
-    expect(flat(buttons).map((button) => button.text)).toEqual(["Approve", "Status", "Notes", "Allow once", "Yes"]);
+    expect(flat(buttons).map((button) => button.text)).toEqual([
+      'Approve',
+      'Status',
+      'Notes',
+      'Allow once',
+      'Yes',
+    ]);
   });
 
-  it("keeps existing channelData.max buttons and options", () => {
+  it('keeps existing channelData.max buttons and options', () => {
     const out = renderMaxPresentation(
       {
-        text: "t",
-        channelData: { max: { notify: false, buttons: [[{ text: "Old", payload: "old" }]] } },
+        text: 't',
+        channelData: { max: { notify: false, buttons: [[{ text: 'Old', payload: 'old' }]] } },
       },
-      { blocks: [{ type: "buttons", buttons: [{ label: "New", value: "new" }] }] },
+      { blocks: [{ type: 'buttons', buttons: [{ label: 'New', value: 'new' }] }] },
     );
     expect(out.channelData).toEqual({
       max: {
         notify: false,
-        buttons: [[{ text: "Old", payload: "old" }], [{ text: "New", type: "callback", payload: "mxcb1:new" }]],
+        buttons: [
+          [{ text: 'Old', payload: 'old' }],
+          [{ text: 'New', type: 'callback', payload: 'mxcb1:new' }],
+        ],
       },
     });
   });
 
-  it("passes payloads without presentation through untouched", async () => {
-    const payload = { text: "plain", channelData: { max: { buttons: [[{ text: "a" }]] } } };
+  it('passes payloads without presentation through untouched', async () => {
+    const payload = { text: 'plain', channelData: { max: { buttons: [[{ text: 'a' }]] } } };
     expect(await materializeMaxPresentation(payload)).toBe(payload);
   });
 });
 
-describe("decodeMaxPresentationCallback", () => {
-  it("round-trips every private envelope and ignores legacy payloads", () => {
-    const payloads = flat(renderMaxPresentationParts({ presentation: CARD }).buttons)
-      .map((button) => button.payload);
+describe('decodeMaxPresentationCallback', () => {
+  it('round-trips every private envelope and ignores legacy payloads', () => {
+    const payloads = flat(renderMaxPresentationParts({ presentation: CARD }).buttons).map(
+      (button) => button.payload,
+    );
     expect(payloads.map(decodeMaxPresentationCallback)).toEqual([
-      { kind: "callback", value: "deploy:approve" },
+      { kind: 'callback', value: 'deploy:approve' },
       null, // command text re-enters as a user message
       null, // link
-      { kind: "approval", approvalId: APPROVAL_ID, approvalKind: "exec", decision: "allow-once" },
-      { kind: "question", questionId: QUESTION_ID, optionValue: "yes" },
+      { kind: 'approval', approvalId: APPROVAL_ID, approvalKind: 'exec', decision: 'allow-once' },
+      { kind: 'question', questionId: QUESTION_ID, optionValue: 'yes' },
     ]);
-    expect(decodeMaxPresentationCallback("live-callback-test")).toBeNull();
-    expect(decodeMaxPresentationCallback("mxa1:x:o:id")).toBeNull();
-    expect(decodeMaxPresentationCallback("mxq1:nocolon")).toBeNull();
+    expect(decodeMaxPresentationCallback('live-callback-test')).toBeNull();
+    expect(decodeMaxPresentationCallback('mxa1:x:o:id')).toBeNull();
+    expect(decodeMaxPresentationCallback('mxq1:nocolon')).toBeNull();
   });
 });
 
-describe("readMaxDeliveryPin", () => {
-  it("normalizes delivery.pin and the pin flag", () => {
+describe('readMaxDeliveryPin', () => {
+  it('normalizes delivery.pin and the pin flag', () => {
     expect(readMaxDeliveryPin({ pin: true })).toEqual({ enabled: true });
-    expect(readMaxDeliveryPin({ pin: { enabled: true, notify: true, required: true } }))
-      .toEqual({ enabled: true, notify: true, required: true });
+    expect(readMaxDeliveryPin({ pin: { enabled: true, notify: true, required: true } })).toEqual({
+      enabled: true,
+      notify: true,
+      required: true,
+    });
     expect(readMaxDeliveryPin({ pin: { enabled: false } })).toBeUndefined();
     expect(readMaxDeliveryPin(undefined, true)).toEqual({ enabled: true });
     expect(readMaxDeliveryPin(undefined)).toBeUndefined();
   });
 });
 
-describe("outbound adapter", () => {
+describe('outbound adapter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("declares presentation and pin delivery and renders through renderPresentation", async () => {
-    const { maxPlugin } = await import("./channel.js");
+  it('declares presentation and pin delivery and renders through renderPresentation', async () => {
+    const { maxPlugin } = await import('./channel.js');
     const outbound = maxPlugin.outbound!;
     expect(outbound.presentationCapabilities).toBe(MAX_PRESENTATION_CAPABILITIES);
     expect(outbound.deliveryCapabilities).toEqual({ pin: true });
     const rendered = await outbound.renderPresentation!({
-      payload: { text: "hi" },
+      payload: { text: 'hi' },
       presentation: CARD,
       ctx: {} as never,
     });
     expect((rendered?.channelData as { max: { buttons: unknown[] } }).max.buttons).toHaveLength(2);
   });
 
-  it("pins a chat target with PUT /chats/{chatId}/pin and checks the handoff first", async () => {
-    const { maxPlugin } = await import("./channel.js");
+  it('pins a chat target with PUT /chats/{chatId}/pin and checks the handoff first', async () => {
+    const { maxPlugin } = await import('./channel.js');
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
     const assertDirectAdapterHandoff = vi.fn();
 
     await maxPlugin.outbound!.pinDeliveredMessage!({
-      cfg: { channels: { max: { botToken: "tok" } } } as never,
-      target: { channel: "max", to: "-7001" },
-      messageId: "mid.pinme",
+      cfg: { channels: { max: { botToken: 'tok' } } } as never,
+      target: { channel: 'max', to: '-7001' },
+      messageId: 'mid.pinme',
       pin: { enabled: true, notify: true },
       assertDirectAdapterHandoff,
     });
 
     const [url, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(String(url)).toContain("/chats/-7001/pin");
-    expect(init.method).toBe("PUT");
-    expect(JSON.parse(init.body)).toEqual({ message_id: "mid.pinme", notify: true });
+    expect(String(url)).toContain('/chats/-7001/pin');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body)).toEqual({ message_id: 'mid.pinme', notify: true });
     expect(assertDirectAdapterHandoff).toHaveBeenCalled();
   });
 
-  it("resolves the dialog chat id of a user target from the sent message", async () => {
-    const { maxPlugin } = await import("./channel.js");
-    global.fetch = vi.fn()
+  it('resolves the dialog chat id of a user target from the sent message', async () => {
+    const { maxPlugin } = await import('./channel.js');
+    global.fetch = vi
+      .fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ body: { mid: "mid.dm" }, recipient: { chat_id: 242316535, chat_type: "dialog", user_id: 4260364 } }),
+        json: async () => ({
+          body: { mid: 'mid.dm' },
+          recipient: { chat_id: 242316535, chat_type: 'dialog', user_id: 4260364 },
+        }),
       })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) });
 
     await maxPlugin.outbound!.pinDeliveredMessage!({
-      cfg: { channels: { max: { botToken: "tok" } } } as never,
-      target: { channel: "max", to: "user:4260364" },
-      messageId: "mid.dm",
+      cfg: { channels: { max: { botToken: 'tok' } } } as never,
+      target: { channel: 'max', to: 'user:4260364' },
+      messageId: 'mid.dm',
       pin: { enabled: true },
     });
 
     const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
-    expect(String(calls[0][0])).toContain("/messages/mid.dm");
-    expect(String(calls[1][0])).toContain("/chats/242316535/pin");
-    expect(JSON.parse(calls[1][1].body)).toEqual({ message_id: "mid.dm", notify: false });
+    expect(String(calls[0][0])).toContain('/messages/mid.dm');
+    expect(String(calls[1][0])).toContain('/chats/242316535/pin');
+    expect(JSON.parse(calls[1][1].body)).toEqual({ message_id: 'mid.dm', notify: false });
   });
 });
 
-describe("message tool", () => {
+describe('message tool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("declares presentation and delivery-pin capabilities", async () => {
-    const { maxMessageActions } = await import("./actions.js");
+  it('declares presentation and delivery-pin capabilities', async () => {
+    const { maxMessageActions } = await import('./actions.js');
     const discovery = maxMessageActions.describeMessageTool!({
-      cfg: { channels: { max: { botToken: "tok" } } } as never,
+      cfg: { channels: { max: { botToken: 'tok' } } } as never,
     } as never);
-    expect(discovery?.capabilities).toEqual(["presentation", "delivery-pin"]);
+    expect(discovery?.capabilities).toEqual(['presentation', 'delivery-pin']);
   });
 
-  it("sends a presentation with its keyboard and pins it on request", async () => {
-    const { maxMessageActions } = await import("./actions.js");
-    global.fetch = vi.fn()
+  it('sends a presentation with its keyboard and pins it on request', async () => {
+    const { maxMessageActions } = await import('./actions.js');
+    global.fetch = vi
+      .fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ message: { body: { mid: "mid.card" }, recipient: { chat_id: -7002 } } }),
+        json: async () => ({
+          message: { body: { mid: 'mid.card' }, recipient: { chat_id: -7002 } },
+        }),
       })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) });
 
     const result = await maxMessageActions.handleAction!({
-      action: "send",
-      params: { target: "-7002", presentation: CARD, delivery: { pin: true } },
-      cfg: { channels: { max: { botToken: "tok" } } },
+      action: 'send',
+      params: { target: '-7002', presentation: CARD, delivery: { pin: true } },
+      cfg: { channels: { max: { botToken: 'tok' } } },
       accountId: undefined,
     } as never);
 
     const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
     const body = JSON.parse(calls[0][1].body);
-    expect(body.text).toContain("**Deploy approval**");
-    expect(body.attachments[0].type).toBe("inline_keyboard");
+    expect(body.text).toContain('**Deploy approval**');
+    expect(body.attachments[0].type).toBe('inline_keyboard');
     expect(body.attachments[0].payload.buttons[0][0]).toEqual({
-      type: "callback",
-      text: "Approve",
-      payload: "mxcb1:deploy:approve",
+      type: 'callback',
+      text: 'Approve',
+      payload: 'mxcb1:deploy:approve',
     });
-    expect(String(calls[1][0])).toContain("/chats/-7002/pin");
-    expect(JSON.stringify(result)).toContain("pinned");
-    expect(JSON.stringify(result)).not.toContain("pinError");
+    expect(String(calls[1][0])).toContain('/chats/-7002/pin');
+    expect(JSON.stringify(result)).toContain('pinned');
+    expect(JSON.stringify(result)).not.toContain('pinError');
   });
 });
 
@@ -383,13 +440,13 @@ function makeRuntime() {
       pairing: { readAllowFromStore: vi.fn(async () => []) },
       routing: {
         resolveAgentRoute: vi.fn(({ peer }: { peer: { kind: string; id: string } }) => ({
-          agentId: "main",
-          accountId: "default",
+          agentId: 'main',
+          accountId: 'default',
           sessionKey: `agent:main:max:${peer.kind}:${peer.id}`,
         })),
       },
       session: {
-        resolveStorePath: vi.fn(() => "/tmp/store"),
+        resolveStorePath: vi.fn(() => '/tmp/store'),
         readSessionUpdatedAt: vi.fn(() => undefined),
         recordSessionMetaFromInbound: vi.fn(async () => undefined),
       },
@@ -397,9 +454,11 @@ function makeRuntime() {
         resolveEnvelopeFormatOptions: vi.fn(() => ({})),
         formatAgentEnvelope: vi.fn(({ body }: { body: string }) => body),
         finalizeInboundContext: (ctx: Record<string, unknown>) => ctx,
-        dispatchReplyWithBufferedBlockDispatcher: vi.fn(async ({ ctx }: { ctx: Record<string, unknown> }) => {
-          dispatched.push(ctx);
-        }),
+        dispatchReplyWithBufferedBlockDispatcher: vi.fn(
+          async ({ ctx }: { ctx: Record<string, unknown> }) => {
+            dispatched.push(ctx);
+          },
+        ),
       },
     },
   };
@@ -408,21 +467,21 @@ function makeRuntime() {
 
 function pressUpdate(payload: string, userId = 4260364): MaxUpdate {
   return {
-    update_type: "message_callback",
+    update_type: 'message_callback',
     timestamp: 1790372541327,
     callback: {
       timestamp: 1790372541327,
-      callback_id: "cb.presentation.1",
-      user: { user_id: userId, first_name: "User", is_bot: false, name: "User" },
+      callback_id: 'cb.presentation.1',
+      user: { user_id: userId, first_name: 'User', is_bot: false, name: 'User' },
       payload,
     },
     message: {
-      recipient: { chat_type: "dialog", chat_id: 242316535, user_id: userId },
+      recipient: { chat_type: 'dialog', chat_id: 242316535, user_id: userId },
       timestamp: 1790372383780,
-      body: { mid: "mid.card", text: "Deploy approval" },
-      sender: { user_id: 238057211, first_name: "Bot", is_bot: true },
+      body: { mid: 'mid.card', text: 'Deploy approval' },
+      sender: { user_id: 238057211, first_name: 'Bot', is_bot: true },
     },
-    user_locale: "ru",
+    user_locale: 'ru',
   } as unknown as MaxUpdate;
 }
 
@@ -432,119 +491,152 @@ function makeOpts(accountConfig: Record<string, unknown>) {
       sendAction: vi.fn(async () => ({ success: true })),
       answerCallback: vi.fn(async () => ({ success: true })),
     },
-    account: { accountId: "default", enabled: true, token: "t", tokenSource: "config" as const, config: accountConfig },
+    account: {
+      accountId: 'default',
+      enabled: true,
+      token: 't',
+      tokenSource: 'config' as const,
+      config: accountConfig,
+    },
     config: { channels: {} },
     abortSignal: new AbortController().signal,
   };
 }
 
 function buttonPayload(label: string): string {
-  const button = flat(renderMaxPresentationParts({ presentation: CARD }).buttons).find((b) => b.text === label);
+  const button = flat(renderMaxPresentationParts({ presentation: CARD }).buttons).find(
+    (b) => b.text === label,
+  );
   return button!.payload!;
 }
 
-describe("presentation button round trip", () => {
+describe('presentation button round trip', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     approvalMock.resolve.mockResolvedValue({ applied: true });
-    questionMock.resolveOption.mockResolvedValue({ status: "answered", questionId: QUESTION_ID, optionValue: "yes" });
+    questionMock.resolveOption.mockResolvedValue({
+      status: 'answered',
+      questionId: QUESTION_ID,
+      optionValue: 'yes',
+    });
   });
 
-  it("delivers an opaque callback to the agent labelled, not as a command", async () => {
-    const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./dispatch.js");
+  it('delivers an opaque callback to the agent labelled, not as a command', async () => {
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { dispatchUpdate } = await import('./dispatch.js');
     const { core, dispatched } = makeRuntime();
     setMaxRuntime(core as never);
 
-    await dispatchUpdate(pressUpdate(buttonPayload("Approve")), makeOpts({ dmPolicy: "allowlist", allowFrom: ["4260364"] }) as never);
+    await dispatchUpdate(
+      pressUpdate(buttonPayload('Approve')),
+      makeOpts({ dmPolicy: 'allowlist', allowFrom: ['4260364'] }) as never,
+    );
 
     expect(dispatched).toHaveLength(1);
-    expect(dispatched[0]).toMatchObject({ RawBody: "callback_data: deploy:approve", To: "max:242316535" });
+    expect(dispatched[0]).toMatchObject({
+      RawBody: 'callback_data: deploy:approve',
+      To: 'max:242316535',
+    });
   });
 
-  it("re-enters a command button as the command text", async () => {
-    const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./dispatch.js");
+  it('re-enters a command button as the command text', async () => {
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { dispatchUpdate } = await import('./dispatch.js');
     const { core, dispatched } = makeRuntime();
     setMaxRuntime(core as never);
 
-    await dispatchUpdate(pressUpdate(buttonPayload("Status")), makeOpts({ dmPolicy: "allowlist", allowFrom: ["4260364"] }) as never);
+    await dispatchUpdate(
+      pressUpdate(buttonPayload('Status')),
+      makeOpts({ dmPolicy: 'allowlist', allowFrom: ['4260364'] }) as never,
+    );
 
-    expect(dispatched[0]).toMatchObject({ RawBody: "/status" });
+    expect(dispatched[0]).toMatchObject({ RawBody: '/status' });
   });
 
-  it("resolves an approval through the canonical approval service", async () => {
-    const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./dispatch.js");
+  it('resolves an approval through the canonical approval service', async () => {
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { dispatchUpdate } = await import('./dispatch.js');
     const { core, dispatched } = makeRuntime();
     setMaxRuntime(core as never);
-    const opts = makeOpts({ dmPolicy: "allowlist", allowFrom: ["max:4260364"] });
+    const opts = makeOpts({ dmPolicy: 'allowlist', allowFrom: ['max:4260364'] });
 
-    await dispatchUpdate(pressUpdate(buttonPayload("Allow once")), opts as never);
+    await dispatchUpdate(pressUpdate(buttonPayload('Allow once')), opts as never);
 
-    expect(approvalMock.resolve).toHaveBeenCalledWith(expect.objectContaining({
-      approvalId: APPROVAL_ID,
-      approvalKind: "exec",
-      decision: "allow-once",
-      channel: "max",
-      accountId: "default",
-      senderId: "4260364",
-    }));
-    expect(opts.api.answerCallback).toHaveBeenCalledWith("cb.presentation.1", { notification: "Decision recorded: allow-once." });
+    expect(approvalMock.resolve).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalId: APPROVAL_ID,
+        approvalKind: 'exec',
+        decision: 'allow-once',
+        channel: 'max',
+        accountId: 'default',
+        senderId: '4260364',
+      }),
+    );
+    expect(opts.api.answerCallback).toHaveBeenCalledWith('cb.presentation.1', {
+      notification: 'Decision recorded: allow-once.',
+    });
     expect(dispatched).toHaveLength(0);
   });
 
-  it("refuses approvals from senders outside allowFrom (wildcard is not enough)", async () => {
-    const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./dispatch.js");
+  it('refuses approvals from senders outside allowFrom (wildcard is not enough)', async () => {
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { dispatchUpdate } = await import('./dispatch.js');
     setMaxRuntime(makeRuntime().core as never);
-    const opts = makeOpts({ dmPolicy: "open", allowFrom: ["*"] });
+    const opts = makeOpts({ dmPolicy: 'open', allowFrom: ['*'] });
 
-    await dispatchUpdate(pressUpdate(buttonPayload("Allow once"), 999), opts as never);
+    await dispatchUpdate(pressUpdate(buttonPayload('Allow once'), 999), opts as never);
 
     expect(approvalMock.resolve).not.toHaveBeenCalled();
-    expect(opts.api.answerCallback).toHaveBeenCalledWith("cb.presentation.1", { notification: "You are not allowed to answer this." });
+    expect(opts.api.answerCallback).toHaveBeenCalledWith('cb.presentation.1', {
+      notification: 'You are not allowed to answer this.',
+    });
   });
 
-  it("answers an ask_user question through the question gateway", async () => {
-    const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./dispatch.js");
+  it('answers an ask_user question through the question gateway', async () => {
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { dispatchUpdate } = await import('./dispatch.js');
     setMaxRuntime(makeRuntime().core as never);
-    const opts = makeOpts({ allowFrom: ["4260364"] });
+    const opts = makeOpts({ allowFrom: ['4260364'] });
 
-    await dispatchUpdate(pressUpdate(buttonPayload("Yes")), opts as never);
+    await dispatchUpdate(pressUpdate(buttonPayload('Yes')), opts as never);
 
-    expect(questionMock.resolveOption).toHaveBeenCalledWith(expect.objectContaining({
-      questionId: QUESTION_ID,
-      optionValue: "yes",
-      senderId: "4260364",
-    }));
+    expect(questionMock.resolveOption).toHaveBeenCalledWith(
+      expect.objectContaining({
+        questionId: QUESTION_ID,
+        optionValue: 'yes',
+        senderId: '4260364',
+      }),
+    );
     const authorize = questionMock.resolveOption.mock.calls[0][0].authorize as () => boolean;
     expect(authorize()).toBe(true);
-    expect(opts.api.answerCallback).toHaveBeenCalledWith("cb.presentation.1", { notification: "Answer recorded." });
+    expect(opts.api.answerCallback).toHaveBeenCalledWith('cb.presentation.1', {
+      notification: 'Answer recorded.',
+    });
   });
 
-  it("reports a failed resolution instead of throwing", async () => {
-    const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./dispatch.js");
+  it('reports a failed resolution instead of throwing', async () => {
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { dispatchUpdate } = await import('./dispatch.js');
     setMaxRuntime(makeRuntime().core as never);
-    approvalMock.resolve.mockRejectedValue(new Error("gateway unreachable"));
-    const opts = makeOpts({ allowFrom: ["4260364"] });
+    approvalMock.resolve.mockRejectedValue(new Error('gateway unreachable'));
+    const opts = makeOpts({ allowFrom: ['4260364'] });
 
-    await dispatchUpdate(pressUpdate(buttonPayload("Allow once")), opts as never);
+    await dispatchUpdate(pressUpdate(buttonPayload('Allow once')), opts as never);
 
-    expect(opts.api.answerCallback).toHaveBeenCalledWith("cb.presentation.1", { notification: "Could not apply this action." });
+    expect(opts.api.answerCallback).toHaveBeenCalledWith('cb.presentation.1', {
+      notification: 'Could not apply this action.',
+    });
   });
 });
 
-describe("agent reply funnel", () => {
-  it("renders a presentation reply as a keyboard message and pins it", async () => {
-    const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./dispatch.js");
+describe('agent reply funnel', () => {
+  it('renders a presentation reply as a keyboard message and pins it', async () => {
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { dispatchUpdate } = await import('./dispatch.js');
     const { core } = makeRuntime();
     Object.assign(core.channel, {
       text: {
-        resolveChunkMode: vi.fn(() => "length"),
+        resolveChunkMode: vi.fn(() => 'length'),
         chunkMarkdownTextWithMode: vi.fn((text: string) => [text]),
       },
     });
@@ -552,40 +644,52 @@ describe("agent reply funnel", () => {
       const { dispatcherOptions } = params as {
         dispatcherOptions: { deliver: (payload: unknown, info: unknown) => Promise<void> };
       };
-      await dispatcherOptions.deliver({ text: "Готово", presentation: CARD, delivery: { pin: true } }, { kind: "final" });
+      await dispatcherOptions.deliver(
+        { text: 'Готово', presentation: CARD, delivery: { pin: true } },
+        { kind: 'final' },
+      );
     }) as never;
     setMaxRuntime(core as never);
-    global.fetch = vi.fn()
+    global.fetch = vi
+      .fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ message: { body: { mid: "mid.reply" }, recipient: { chat_id: 242316535 } } }),
+        json: async () => ({
+          message: { body: { mid: 'mid.reply' }, recipient: { chat_id: 242316535 } },
+        }),
       })
       .mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
 
     await dispatchUpdate(
       {
-        update_type: "message_created",
+        update_type: 'message_created',
         timestamp: 1,
         message: {
-          sender: { user_id: 4260364, first_name: "User" },
-          recipient: { chat_type: "dialog", chat_id: 242316535 },
+          sender: { user_id: 4260364, first_name: 'User' },
+          recipient: { chat_type: 'dialog', chat_id: 242316535 },
           timestamp: 1,
-          body: { mid: "mid.in", text: "deploy?" },
+          body: { mid: 'mid.in', text: 'deploy?' },
         },
       } as unknown as MaxUpdate,
-      { ...makeOpts({ dmPolicy: "allowlist", allowFrom: ["4260364"], markSeen: false }), token: "t" } as never,
+      {
+        ...makeOpts({ dmPolicy: 'allowlist', allowFrom: ['4260364'], markSeen: false }),
+        token: 't',
+      } as never,
     );
 
     const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
-    const send = calls.find(([url, init]) => String(url).includes("/messages") && init.method === "POST");
+    const send = calls.find(
+      ([url, init]) => String(url).includes('/messages') && init.method === 'POST',
+    );
     expect(send).toBeDefined();
     const body = JSON.parse(send![1].body);
-    expect(body.text).toContain("Готово");
-    expect(body.text).toContain("**Deploy approval**");
-    expect(body.attachments[0].payload.buttons.flat().map((b: { text: string }) => b.text))
-      .toEqual(["Approve", "Status", "Notes", "Allow once", "Yes"]);
-    const pin = calls.find(([url]) => String(url).includes("/chats/242316535/pin"));
+    expect(body.text).toContain('Готово');
+    expect(body.text).toContain('**Deploy approval**');
+    expect(body.attachments[0].payload.buttons.flat().map((b: { text: string }) => b.text)).toEqual(
+      ['Approve', 'Status', 'Notes', 'Allow once', 'Yes'],
+    );
+    const pin = calls.find(([url]) => String(url).includes('/chats/242316535/pin'));
     expect(pin).toBeDefined();
-    expect(JSON.parse(pin![1].body)).toEqual({ message_id: "mid.reply", notify: false });
+    expect(JSON.parse(pin![1].body)).toEqual({ message_id: 'mid.reply', notify: false });
   });
 });

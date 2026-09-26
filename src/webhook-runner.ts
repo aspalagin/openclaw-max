@@ -4,23 +4,27 @@
  * ack-first per-chat serialized update queue.
  */
 
-import { randomBytes } from "node:crypto";
+import { randomBytes } from 'node:crypto';
 
-import type { ChannelLogSink } from "openclaw/plugin-sdk/channel-contract";
-import { channelReadyPatch } from "openclaw/plugin-sdk/gateway-runtime";
+import type { ChannelLogSink } from 'openclaw/plugin-sdk/channel-contract';
+import { channelReadyPatch } from 'openclaw/plugin-sdk/gateway-runtime';
 
-import { readSecretFile, type ResolvedMaxAccount } from "./accounts.js";
-import type { MaxApi, MaxSubscription, MaxUpdate } from "./api.js";
-import { dispatchUpdate } from "./dispatch.js";
-import { MAX_SUBSCRIBED_UPDATE_TYPES, type MaxMonitorOptions, type MaxStatusPatch } from "./monitor-types.js";
-import type { MaxStateStore } from "./state.js";
+import { readSecretFile, type ResolvedMaxAccount } from './accounts.js';
+import type { MaxApi, MaxSubscription, MaxUpdate } from './api.js';
+import { dispatchUpdate } from './dispatch.js';
+import {
+  MAX_SUBSCRIBED_UPDATE_TYPES,
+  type MaxMonitorOptions,
+  type MaxStatusPatch,
+} from './monitor-types.js';
+import type { MaxStateStore } from './state.js';
 import {
   type MaxWebhookTarget,
   registerMaxWebhookRoute,
   registerMaxWebhookTarget,
   resolveMaxWebhookPath,
   subscribeMaxWebhook,
-} from "./webhook.js";
+} from './webhook.js';
 
 /**
  * Build a webhook onUpdate handler that acks immediately (returns a resolved
@@ -39,7 +43,7 @@ export function createSerializedWebhookHandler(params: {
   const chatQueues = new Map<string, Promise<void>>();
 
   return (update: MaxUpdate) => {
-    const key = String(update.message?.recipient?.chat_id ?? update.chat_id ?? "global");
+    const key = String(update.message?.recipient?.chat_id ?? update.chat_id ?? 'global');
     const next = (chatQueues.get(key) ?? Promise.resolve()).then(async () => {
       if (abortSignal.aborted) return;
       try {
@@ -78,13 +82,16 @@ export async function resolveMaxWebhookSecret(
   };
 
   const configured = account.config.webhookSecret?.trim();
-  if (configured) return validate(configured, "webhookSecret");
+  if (configured) return validate(configured, 'webhookSecret');
 
   const secretFile = account.config.webhookSecretFile?.trim();
   if (secretFile) {
     const fromFile = readSecretFile(secretFile);
-    if (!fromFile) throw new Error(`MAX webhookSecretFile ${secretFile} is missing, empty or not a regular file`);
-    return validate(fromFile, "webhookSecretFile");
+    if (!fromFile)
+      throw new Error(
+        `MAX webhookSecretFile ${secretFile} is missing, empty or not a regular file`,
+      );
+    return validate(fromFile, 'webhookSecretFile');
   }
 
   const stored = state?.webhookSecret;
@@ -120,7 +127,9 @@ export async function syncMaxWebhookSubscription(params: {
   }
   for (const subscription of existing) {
     if (subscription.url === webhookUrl) continue;
-    log?.warn(`[${accountId}] MAX webhook: removing subscription to another URL ${subscription.url}`);
+    log?.warn(
+      `[${accountId}] MAX webhook: removing subscription to another URL ${subscription.url}`,
+    );
     await api.unsubscribe(subscription.url);
   }
   await subscribeMaxWebhook({
@@ -166,9 +175,16 @@ export function startMaxSubscriptionWatch(params: {
         return;
       }
       if (abortSignal.aborted || subscriptions.some((s) => s.url === webhookUrl)) return;
-      log?.warn(`[${accountId}] MAX webhook subscription to ${webhookUrl} is gone (MAX unsubscribes after 8 h of failed deliveries); re-subscribing`);
+      log?.warn(
+        `[${accountId}] MAX webhook subscription to ${webhookUrl} is gone (MAX unsubscribes after 8 h of failed deliveries); re-subscribing`,
+      );
       try {
-        await subscribeMaxWebhook({ api, webhookUrl, secret, updateTypes: MAX_SUBSCRIBED_UPDATE_TYPES });
+        await subscribeMaxWebhook({
+          api,
+          webhookUrl,
+          secret,
+          updateTypes: MAX_SUBSCRIBED_UPDATE_TYPES,
+        });
         log?.info(`[${accountId}] MAX webhook re-subscribed: ${webhookUrl}`);
       } catch (err) {
         log?.error(`[${accountId}] MAX webhook re-subscribe failed: ${String(err)}`);
@@ -178,13 +194,16 @@ export function startMaxSubscriptionWatch(params: {
     }
   };
 
-  const timer = setInterval(() => void check(), params.intervalMs ?? MAX_SUBSCRIPTION_CHECK_INTERVAL_MS);
+  const timer = setInterval(
+    () => void check(),
+    params.intervalMs ?? MAX_SUBSCRIPTION_CHECK_INTERVAL_MS,
+  );
   timer.unref?.();
   const stop = (): void => {
     clearInterval(timer);
-    abortSignal.removeEventListener("abort", stop);
+    abortSignal.removeEventListener('abort', stop);
   };
-  abortSignal.addEventListener("abort", stop, { once: true });
+  abortSignal.addEventListener('abort', stop, { once: true });
   return stop;
 }
 
@@ -195,8 +214,10 @@ export async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
   if (!webhookUrl) {
     throw new Error(`MAX transport "webhook" requires webhookUrl (account ${account.accountId})`);
   }
-  if (!webhookUrl.startsWith("https://")) {
-    log?.warn(`[${account.accountId}] MAX accepts only HTTPS webhook URLs on port 443; got ${webhookUrl}`);
+  if (!webhookUrl.startsWith('https://')) {
+    log?.warn(
+      `[${account.accountId}] MAX accepts only HTTPS webhook URLs on port 443; got ${webhookUrl}`,
+    );
   }
 
   const webhookPath = resolveMaxWebhookPath(account.config.webhookPath, webhookUrl);
@@ -207,7 +228,7 @@ export async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
   // Like Telegram webhook mode: no transport-activity timestamp, so the health
   // policy never flags a quiet (but healthy) webhook as a stale socket.
   statusSink?.({
-    mode: "webhook",
+    mode: 'webhook',
     connected: false,
     lastConnectedAt: null,
     lastEventAt: null,
@@ -219,11 +240,18 @@ export async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
   const enqueue = createSerializedWebhookHandler({
     dispatch: (update) => dispatchUpdate(update, opts),
     abortSignal,
-    onError: (err) => log?.error(`[${account.accountId}] Webhook update dispatch failed: ${String(err)}`),
+    onError: (err) =>
+      log?.error(`[${account.accountId}] Webhook update dispatch failed: ${String(err)}`),
   });
   const onUpdate = (update: MaxUpdate): Promise<void> => {
     const at = Date.now();
-    statusSink?.(channelReadyPatch({ lastConnectedAt: at, lastEventAt: at, mode: "webhook" }) as MaxStatusPatch);
+    statusSink?.(
+      channelReadyPatch({
+        lastConnectedAt: at,
+        lastEventAt: at,
+        mode: 'webhook',
+      }) as MaxStatusPatch,
+    );
     return enqueue(update);
   };
 
@@ -259,11 +287,11 @@ export async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
     log?.error(`[${account.accountId}] MAX webhook start failed: ${String(err)}`);
     unregisterRoute();
     unregisterTarget();
-    statusSink?.({ mode: "webhook", connected: false, lastError: String(err) } as MaxStatusPatch);
+    statusSink?.({ mode: 'webhook', connected: false, lastError: String(err) } as MaxStatusPatch);
     throw err;
   }
 
-  statusSink?.(channelReadyPatch({ mode: "webhook" }) as MaxStatusPatch);
+  statusSink?.(channelReadyPatch({ mode: 'webhook' }) as MaxStatusPatch);
 
   const stopSubscriptionWatch = startMaxSubscriptionWatch({
     api,
@@ -283,16 +311,18 @@ export async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
   // removes it) or call DELETE /subscriptions?url=… by hand.
   unregisterRoute();
   unregisterTarget();
-  statusSink?.({ mode: "webhook", connected: false } as MaxStatusPatch);
+  statusSink?.({ mode: 'webhook', connected: false } as MaxStatusPatch);
   log?.info(`[${account.accountId}] MAX webhook mode stopped (subscription kept)`);
 }
 
 function waitForAbort(signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+  return new Promise((resolve) =>
+    signal.addEventListener('abort', () => resolve(), { once: true }),
+  );
 }
 
 /** MAX webhook secret: 5–256 chars of [A-Za-z0-9-]. */
 function generateWebhookSecret(): string {
-  return randomBytes(24).toString("base64url").replace(/_/g, "-");
+  return randomBytes(24).toString('base64url').replace(/_/g, '-');
 }

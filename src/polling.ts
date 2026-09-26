@@ -3,11 +3,18 @@
  * start-up cleanup of webhook subscriptions that would silence polling.
  */
 
-import { channelReadyPatch, createTransportActivityStatusPatch } from "openclaw/plugin-sdk/gateway-runtime";
+import {
+  channelReadyPatch,
+  createTransportActivityStatusPatch,
+} from 'openclaw/plugin-sdk/gateway-runtime';
 
-import type { MaxSubscription } from "./api.js";
-import { dispatchUpdate } from "./dispatch.js";
-import { MAX_SUBSCRIBED_UPDATE_TYPES, type MaxMonitorOptions, type MaxStatusPatch } from "./monitor-types.js";
+import type { MaxSubscription } from './api.js';
+import { dispatchUpdate } from './dispatch.js';
+import {
+  MAX_SUBSCRIBED_UPDATE_TYPES,
+  type MaxMonitorOptions,
+  type MaxStatusPatch,
+} from './monitor-types.js';
 
 /**
  * Polling mode: MAX stops serving GET /updates while any webhook subscription
@@ -16,7 +23,7 @@ import { MAX_SUBSCRIBED_UPDATE_TYPES, type MaxMonitorOptions, type MaxStatusPatc
  * @internal exported for testing.
  */
 export async function clearMaxSubscriptionsForPolling(
-  opts: Pick<MaxMonitorOptions, "api" | "account" | "log">,
+  opts: Pick<MaxMonitorOptions, 'api' | 'account' | 'log'>,
 ): Promise<void> {
   const { api, account, log } = opts;
   let subscriptions: MaxSubscription[];
@@ -33,7 +40,9 @@ export async function clearMaxSubscriptionsForPolling(
     try {
       await api.unsubscribe(subscription.url);
     } catch (err) {
-      log?.error(`[${account.accountId}] MAX unsubscribe ${subscription.url} failed: ${String(err)}`);
+      log?.error(
+        `[${account.accountId}] MAX unsubscribe ${subscription.url} failed: ${String(err)}`,
+      );
     }
   }
 }
@@ -42,7 +51,9 @@ export async function startMaxPollingLoop(opts: MaxMonitorOptions): Promise<void
   const { api, account, abortSignal, log, statusSink } = opts;
   let marker: number | null = opts.state?.marker ?? null;
 
-  log?.info(`[${account.accountId}] MAX long-polling started${marker != null ? ` (resuming from marker ${marker})` : ""}`);
+  log?.info(
+    `[${account.accountId}] MAX long-polling started${marker != null ? ` (resuming from marker ${marker})` : ''}`,
+  );
 
   while (!abortSignal.aborted) {
     try {
@@ -59,10 +70,12 @@ export async function startMaxPollingLoop(opts: MaxMonitorOptions): Promise<void
       // A completed poll is the transport proof the gateway waits for: it moves
       // the account out of lifecycle "starting", clears a stale lastError, and
       // refreshes the timestamp the health policy uses to spot a dead socket.
-      statusSink?.(channelReadyPatch({
-        ...createTransportActivityStatusPatch(),
-        mode: "polling",
-      }) as MaxStatusPatch);
+      statusSink?.(
+        channelReadyPatch({
+          ...createTransportActivityStatusPatch(),
+          mode: 'polling',
+        }) as MaxStatusPatch,
+      );
 
       // Advance the in-memory marker so the next poll in this process moves on…
       if (resp.marker != null) {
@@ -78,7 +91,9 @@ export async function startMaxPollingLoop(opts: MaxMonitorOptions): Promise<void
         try {
           await dispatchUpdate(update, opts);
         } catch (err) {
-          log?.error(`[${account.accountId}] Error dispatching update ${update.update_type}: ${String(err)}`);
+          log?.error(
+            `[${account.accountId}] Error dispatching update ${update.update_type}: ${String(err)}`,
+          );
         }
       }
 

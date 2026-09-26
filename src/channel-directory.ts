@@ -3,16 +3,16 @@
  * groups from the passive chat registry, numeric target normalization.
  */
 
-import type { ChannelPlugin } from "openclaw/plugin-sdk/channel-core";
+import type { ChannelPlugin } from 'openclaw/plugin-sdk/channel-core';
 
-import { type ResolvedMaxAccount, resolveMaxAccount } from "./accounts.js";
-import { MaxApi } from "./api.js";
-import { loadMaxAccountState } from "./state.js";
+import { type ResolvedMaxAccount, resolveMaxAccount } from './accounts.js';
+import { MaxApi } from './api.js';
+import { loadMaxAccountState } from './state.js';
 
 type MaxChannelPlugin = ChannelPlugin<ResolvedMaxAccount>;
 
 /** Targets are numeric chat/user ids with an optional max: prefix. */
-export const maxMessagingAdapter: NonNullable<MaxChannelPlugin["messaging"]> = {
+export const maxMessagingAdapter: NonNullable<MaxChannelPlugin['messaging']> = {
   normalizeTarget: (raw) => {
     const trimmed = raw.trim();
     const normalized = trimmed.startsWith('max:') ? trimmed.slice(4) : trimmed;
@@ -27,7 +27,7 @@ export const maxMessagingAdapter: NonNullable<MaxChannelPlugin["messaging"]> = {
 };
 
 /** MAX has no member/chat listing for bots: peers come from allowFrom, groups from the chat registry. */
-export const maxDirectoryAdapter: NonNullable<MaxChannelPlugin["directory"]> = {
+export const maxDirectoryAdapter: NonNullable<MaxChannelPlugin['directory']> = {
   self: async ({ cfg, accountId }) => {
     const account = resolveMaxAccount({ cfg, accountId });
     if (!account.token) return null;

@@ -3,19 +3,19 @@
  * monitor) and logout, status snapshots, probes and group audits (health).
  */
 
-import type { ChannelPlugin } from "openclaw/plugin-sdk/channel-core";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
-import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk/core";
+import type { ChannelPlugin } from 'openclaw/plugin-sdk/channel-core';
+import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
+import { DEFAULT_ACCOUNT_ID } from 'openclaw/plugin-sdk/core';
 
-import type { ResolvedMaxAccount } from "./accounts.js";
-import { MaxApi } from "./api.js";
-import { startMaxPolling } from "./monitor.js";
-import { writeMaxConfig } from "./runtime.js";
+import type { ResolvedMaxAccount } from './accounts.js';
+import { MaxApi } from './api.js';
+import { startMaxPolling } from './monitor.js';
+import { writeMaxConfig } from './runtime.js';
 
 type MaxChannelPlugin = ChannelPlugin<ResolvedMaxAccount>;
 
 /** Runtime snapshots, GET /me probe and a membership audit of configured groups. */
-export const maxStatusAdapter: NonNullable<MaxChannelPlugin["status"]> = {
+export const maxStatusAdapter: NonNullable<MaxChannelPlugin['status']> = {
   defaultRuntime: {
     accountId: DEFAULT_ACCOUNT_ID,
     running: false,
@@ -174,7 +174,7 @@ export const maxStatusAdapter: NonNullable<MaxChannelPlugin["status"]> = {
 };
 
 /** Starts one account: probe the bot, register commands, run the monitor until abort. */
-export const maxGatewayAdapter: NonNullable<MaxChannelPlugin["gateway"]> = {
+export const maxGatewayAdapter: NonNullable<MaxChannelPlugin['gateway']> = {
   startAccount: async (ctx) => {
     const account = ctx.account;
     const token = account.token.trim();
@@ -200,8 +200,7 @@ export const maxGatewayAdapter: NonNullable<MaxChannelPlugin["gateway"]> = {
 
     // Register bot commands if configured
     const commands = ctx.cfg.channels?.max?.commands as
-      | Array<{ name: string; description?: string }>
-      | undefined;
+      Array<{ name: string; description?: string }> | undefined;
     if (commands?.length) {
       try {
         await api.setMyCommands(commands);
@@ -229,9 +228,7 @@ export const maxGatewayAdapter: NonNullable<MaxChannelPlugin["gateway"]> = {
   logoutAccount: async ({ accountId, cfg }) => {
     const nextCfg = { ...cfg } as OpenClawConfig;
     const channels = { ...(nextCfg.channels as Record<string, unknown>) };
-    const maxSection = channels.max
-      ? { ...(channels.max as Record<string, unknown>) }
-      : undefined;
+    const maxSection = channels.max ? { ...(channels.max as Record<string, unknown>) } : undefined;
     let cleared = false;
 
     if (maxSection) {

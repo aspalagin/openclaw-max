@@ -6,15 +6,15 @@
  * loads use setup-entry.ts instead.
  */
 
-import { defineChannelPluginEntry } from "openclaw/plugin-sdk/channel-core";
+import { defineChannelPluginEntry } from 'openclaw/plugin-sdk/channel-core';
 
-import { maxPlugin } from "./src/channel.js";
-import { setMaxRuntime } from "./src/runtime.js";
+import { maxPlugin } from './src/channel.js';
+import { setMaxRuntime } from './src/runtime.js';
 
 export default defineChannelPluginEntry({
-  id: "openclaw-max",
-  name: "MAX",
-  description: "MAX messenger channel plugin (max.ru Bot API)",
+  id: 'openclaw-max',
+  name: 'MAX',
+  description: 'MAX messenger channel plugin (max.ru Bot API)',
   plugin: maxPlugin,
   setRuntime: setMaxRuntime,
 });

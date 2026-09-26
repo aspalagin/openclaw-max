@@ -2,16 +2,16 @@
  * Tests for MAX Bot API client
  */
 
-import { Buffer } from "node:buffer";
+import { Buffer } from 'node:buffer';
 
-import { afterEach,beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MaxApi, MaxApiError, MaxRequestTimeoutError } from "./api.js";
+import { MaxApi, MaxApiError, MaxRequestTimeoutError } from './api.js';
 
-const MOCK_TOKEN = "test-bot-token";
-const MOCK_BASE_URL = "https://test-api.max.ru";
+const MOCK_TOKEN = 'test-bot-token';
+const MOCK_BASE_URL = 'https://test-api.max.ru';
 
-describe("MaxApi", () => {
+describe('MaxApi', () => {
   let api: MaxApi;
 
   beforeEach(() => {
@@ -23,28 +23,28 @@ describe("MaxApi", () => {
     vi.restoreAllMocks();
   });
 
-  describe("constructor", () => {
-    it("should create instance with provided options", () => {
+  describe('constructor', () => {
+    it('should create instance with provided options', () => {
       const customApi = new MaxApi({
-        token: "custom-token",
-        baseUrl: "https://custom.api",
+        token: 'custom-token',
+        baseUrl: 'https://custom.api',
         timeoutMs: 5000,
       });
       expect(customApi).toBeInstanceOf(MaxApi);
     });
 
-    it("should use default baseUrl if not provided", () => {
+    it('should use default baseUrl if not provided', () => {
       const defaultApi = new MaxApi({ token: MOCK_TOKEN });
       expect(defaultApi).toBeInstanceOf(MaxApi);
     });
   });
 
-  describe("getMe", () => {
-    it("should fetch bot info", async () => {
+  describe('getMe', () => {
+    it('should fetch bot info', async () => {
       const mockUser = {
         user_id: 12345,
-        first_name: "TestBot",
-        username: "testbot",
+        first_name: 'TestBot',
+        username: 'testbot',
         is_bot: true,
       };
 
@@ -56,9 +56,9 @@ describe("MaxApi", () => {
       const result = await api.getMe();
       expect(result).toEqual(mockUser);
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("/me"),
+        expect.stringContaining('/me'),
         expect.objectContaining({
-          method: "GET",
+          method: 'GET',
           headers: expect.objectContaining({
             Authorization: MOCK_TOKEN,
           }),
@@ -66,22 +66,22 @@ describe("MaxApi", () => {
       );
     });
 
-    it("should handle API errors", async () => {
+    it('should handle API errors', async () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: false,
         status: 401,
-        json: async () => ({ error: "Unauthorized" }),
+        json: async () => ({ error: 'Unauthorized' }),
       });
 
       await expect(api.getMe()).rejects.toThrow(MaxApiError);
     });
   });
 
-  describe("sendMessage", () => {
-    it("should send text message", async () => {
+  describe('sendMessage', () => {
+    it('should send text message', async () => {
       const mockResult = {
         message: {
-          body: { mid: "msg-123", text: "Hello" },
+          body: { mid: 'msg-123', text: 'Hello' },
           timestamp: Date.now(),
           recipient: { chat_id: 123 },
         },
@@ -92,28 +92,25 @@ describe("MaxApi", () => {
         json: async () => mockResult,
       });
 
-      const result = await api.sendMessage(
-        { text: "Hello" },
-        { chat_id: 123 },
-      );
+      const result = await api.sendMessage({ text: 'Hello' }, { chat_id: 123 });
 
       expect(result).toEqual(mockResult);
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("/messages"),
+        expect.stringContaining('/messages'),
         expect.objectContaining({
-          method: "POST",
+          method: 'POST',
           headers: expect.objectContaining({
             Authorization: MOCK_TOKEN,
-            "Content-Type": "application/json",
+            'Content-Type': 'application/json',
           }),
         }),
       );
     });
 
-    it("should send message with markdown format", async () => {
+    it('should send message with markdown format', async () => {
       const mockResult = {
         message: {
-          body: { mid: "msg-124", text: "**Bold**" },
+          body: { mid: 'msg-124', text: '**Bold**' },
           timestamp: Date.now(),
           recipient: { chat_id: 456 },
         },
@@ -124,58 +121,55 @@ describe("MaxApi", () => {
         json: async () => mockResult,
       });
 
-      await api.sendMessage(
-        { text: "**Bold**", format: "markdown" },
-        { chat_id: 456 },
-      );
+      await api.sendMessage({ text: '**Bold**', format: 'markdown' }, { chat_id: 456 });
 
       expect(global.fetch).toHaveBeenCalled();
     });
   });
 
-  describe("editMessage", () => {
-    it("should edit existing message", async () => {
+  describe('editMessage', () => {
+    it('should edit existing message', async () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => ({ success: true }),
       });
 
-      await api.editMessage("msg-123", { text: "Updated text" });
+      await api.editMessage('msg-123', { text: 'Updated text' });
 
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("/messages?message_id=msg-123"),
+        expect.stringContaining('/messages?message_id=msg-123'),
         expect.objectContaining({
-          method: "PUT",
+          method: 'PUT',
         }),
       );
     });
   });
 
-  describe("deleteMessage", () => {
-    it("should delete message", async () => {
+  describe('deleteMessage', () => {
+    it('should delete message', async () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => ({ success: true }),
       });
 
-      await api.deleteMessage("msg-456");
+      await api.deleteMessage('msg-456');
 
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("/messages?message_id=msg-456"),
+        expect.stringContaining('/messages?message_id=msg-456'),
         expect.objectContaining({
-          method: "DELETE",
+          method: 'DELETE',
         }),
       );
     });
   });
 
-  describe("getChat", () => {
-    it("should fetch single chat info", async () => {
+  describe('getChat', () => {
+    it('should fetch single chat info', async () => {
       const mockChat = {
         chat_id: 123,
-        type: "chat" as const,
-        status: "active",
-        title: "Test Group",
+        type: 'chat' as const,
+        status: 'active',
+        title: 'Test Group',
       };
 
       global.fetch = vi.fn().mockResolvedValueOnce({
@@ -188,15 +182,15 @@ describe("MaxApi", () => {
     });
   });
 
-  describe("getUpdates", () => {
-    it("should poll for updates", async () => {
+  describe('getUpdates', () => {
+    it('should poll for updates', async () => {
       const mockUpdates = {
         updates: [
           {
-            update_type: "message_created" as const,
+            update_type: 'message_created' as const,
             timestamp: Date.now(),
             message: {
-              body: { mid: "msg-789", text: "Hello" },
+              body: { mid: 'msg-789', text: 'Hello' },
               timestamp: Date.now(),
               recipient: { chat_id: 123 },
             },
@@ -216,57 +210,70 @@ describe("MaxApi", () => {
     });
   });
 
-  describe("getMessages / getMessageById", () => {
-    it("should page with before/after instead of the deprecated from/to", async () => {
-      global.fetch = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ messages: [] }) });
+  describe('getMessages / getMessageById', () => {
+    it('should page with before/after instead of the deprecated from/to', async () => {
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ messages: [] }) });
 
       await api.getMessages(-100, { before: 1790000000000, after: 0, count: 10 });
 
       const [url] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
       const query = new URL(url).searchParams;
-      expect(query.get("chat_id")).toBe("-100");
-      expect(query.get("before")).toBe("1790000000000");
-      expect(query.get("after")).toBe("0");
-      expect(query.get("count")).toBe("10");
-      expect(query.has("from")).toBe(false);
-      expect(query.has("to")).toBe(false);
+      expect(query.get('chat_id')).toBe('-100');
+      expect(query.get('before')).toBe('1790000000000');
+      expect(query.get('after')).toBe('0');
+      expect(query.get('count')).toBe('10');
+      expect(query.has('from')).toBe(false);
+      expect(query.has('to')).toBe(false);
     });
 
-    it("should fetch a single message via GET /messages/{messageId}", async () => {
-      const message = { body: { mid: "mid.abc_1" }, timestamp: 1, recipient: { chat_id: 5 } };
+    it('should fetch a single message via GET /messages/{messageId}', async () => {
+      const message = { body: { mid: 'mid.abc_1' }, timestamp: 1, recipient: { chat_id: 5 } };
       global.fetch = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => message });
 
-      const result = await api.getMessageById("mid.abc_1");
+      const result = await api.getMessageById('mid.abc_1');
 
-      const [url, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { method: string }];
+      const [url, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
+        string,
+        { method: string },
+      ];
       expect(url).toBe(`${MOCK_BASE_URL}/messages/mid.abc_1`);
-      expect(init.method).toBe("GET");
-      expect(result.body.mid).toBe("mid.abc_1");
+      expect(init.method).toBe('GET');
+      expect(result.body.mid).toBe('mid.abc_1');
     });
   });
 
-  describe("setMyCommands", () => {
-    it("should register commands via PATCH /me/commands (PATCH /me is 404)", async () => {
+  describe('setMyCommands', () => {
+    it('should register commands via PATCH /me/commands (PATCH /me is 404)', async () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ commands: [{ name: "start", description: "Start bot" }, { name: "help", description: "Show help" }] }),
+        json: async () => ({
+          commands: [
+            { name: 'start', description: 'Start bot' },
+            { name: 'help', description: 'Show help' },
+          ],
+        }),
       });
 
       const commands = [
-        { name: "start", description: "Start bot" },
-        { name: "help", description: "Show help" },
+        { name: 'start', description: 'Start bot' },
+        { name: 'help', description: 'Show help' },
       ];
 
       const result = await api.setMyCommands(commands);
 
-      const [url, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { method: string; body: string }];
+      const [url, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
+        string,
+        { method: string; body: string },
+      ];
       expect(url).toBe(`${MOCK_BASE_URL}/me/commands`);
       expect(result.commands).toEqual(commands);
-      expect(init.method).toBe("PATCH");
+      expect(init.method).toBe('PATCH');
       expect(JSON.parse(init.body)).toEqual({ commands });
     });
 
-    it("should normalize commands: strip slash, clamp lengths, cap at 32", async () => {
+    it('should normalize commands: strip slash, clamp lengths, cap at 32', async () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => ({ commands: [] }),
@@ -274,29 +281,32 @@ describe("MaxApi", () => {
 
       const many = Array.from({ length: 40 }, (_, i) => ({
         name: `/cmd${i}`,
-        description: "x".repeat(200),
+        description: 'x'.repeat(200),
       }));
       await api.setMyCommands(many);
 
-      const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { body: string }];
+      const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
+        string,
+        { body: string },
+      ];
       const sent = JSON.parse(init.body).commands as Array<{ name: string; description?: string }>;
       expect(sent).toHaveLength(32);
-      expect(sent[0].name).toBe("cmd0");
+      expect(sent[0].name).toBe('cmd0');
       expect(sent[0].description).toHaveLength(128);
     });
   });
 
-  describe("retries", () => {
-    it("should retry once on 429 and succeed", async () => {
+  describe('retries', () => {
+    it('should retry once on 429 and succeed', async () => {
       const retryApi = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, retryAttempts: 2 });
-      const mockUser = { user_id: 1, first_name: "Bot", is_bot: true };
+      const mockUser = { user_id: 1, first_name: 'Bot', is_bot: true };
       global.fetch = vi
         .fn()
         .mockResolvedValueOnce({
           ok: false,
           status: 429,
           headers: { get: () => null },
-          json: async () => ({ code: "too.many.requests" }),
+          json: async () => ({ code: 'too.many.requests' }),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -308,54 +318,74 @@ describe("MaxApi", () => {
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
-    it("should not retry 4xx client errors", async () => {
+    it('should not retry 4xx client errors', async () => {
       const retryApi = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, retryAttempts: 3 });
       global.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 400,
-        json: async () => ({ code: "invalid.request" }),
+        json: async () => ({ code: 'invalid.request' }),
       });
 
       await expect(retryApi.getMe()).rejects.toThrow(MaxApiError);
       expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
-    it("should NOT retry a 502 on a non-idempotent POST (duplicate-send risk)", async () => {
+    it('should NOT retry a 502 on a non-idempotent POST (duplicate-send risk)', async () => {
       const retryApi = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, retryAttempts: 3 });
       global.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 502,
         headers: { get: () => null },
-        json: async () => ({ code: "bad.gateway" }),
+        json: async () => ({ code: 'bad.gateway' }),
       });
 
-      await expect(retryApi.sendMessage({ text: "hi" }, { chat_id: 1 })).rejects.toThrow(MaxApiError);
+      await expect(retryApi.sendMessage({ text: 'hi' }, { chat_id: 1 })).rejects.toThrow(
+        MaxApiError,
+      );
       expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
-    it("should retry a 502 on an idempotent GET", async () => {
+    it('should retry a 502 on an idempotent GET', async () => {
       const retryApi = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, retryAttempts: 2 });
       global.fetch = vi
         .fn()
-        .mockResolvedValueOnce({ ok: false, status: 502, headers: { get: () => null }, json: async () => ({}) })
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ user_id: 1, first_name: "Bot", is_bot: true }) });
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 502,
+          headers: { get: () => null },
+          json: async () => ({}),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ user_id: 1, first_name: 'Bot', is_bot: true }),
+        });
 
       await retryApi.getMe();
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
-    it("should retry 429 even on a non-idempotent POST (request was rejected)", async () => {
+    it('should retry 429 even on a non-idempotent POST (request was rejected)', async () => {
       const retryApi = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, retryAttempts: 2 });
       global.fetch = vi
         .fn()
-        .mockResolvedValueOnce({ ok: false, status: 429, headers: { get: () => null }, json: async () => ({}) })
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ message: { body: { mid: "m" }, timestamp: 1, recipient: { chat_id: 1 } } }) });
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 429,
+          headers: { get: () => null },
+          json: async () => ({}),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            message: { body: { mid: 'm' }, timestamp: 1, recipient: { chat_id: 1 } },
+          }),
+        });
 
-      await retryApi.sendMessage({ text: "hi" }, { chat_id: 1 });
+      await retryApi.sendMessage({ text: 'hi' }, { chat_id: 1 });
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
-    it("getUpdates never retries (polling loop owns retries)", async () => {
+    it('getUpdates never retries (polling loop owns retries)', async () => {
       const retryApi = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, retryAttempts: 3 });
       global.fetch = vi.fn().mockResolvedValue({
         ok: false,
@@ -368,105 +398,107 @@ describe("MaxApi", () => {
       expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
-    it("should expose the MAX error code on MaxApiError", async () => {
+    it('should expose the MAX error code on MaxApiError', async () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: false,
         status: 400,
-        json: async () => ({ code: "attachment.not.ready", message: "processing" }),
+        json: async () => ({ code: 'attachment.not.ready', message: 'processing' }),
       });
 
       const err = await api.getMe().catch((e) => e as MaxApiError);
       expect(err).toBeInstanceOf(MaxApiError);
-      expect((err as MaxApiError).code).toBe("attachment.not.ready");
+      expect((err as MaxApiError).code).toBe('attachment.not.ready');
     });
   });
 
-  describe("base URL", () => {
-    it("should default to platform-api2.max.ru (platform-api dies 2026-07-19)", async () => {
+  describe('base URL', () => {
+    it('should default to platform-api2.max.ru (platform-api dies 2026-07-19)', async () => {
       const defaultApi = new MaxApi({ token: MOCK_TOKEN });
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ user_id: 1, first_name: "Bot", is_bot: true }),
+        json: async () => ({ user_id: 1, first_name: 'Bot', is_bot: true }),
       });
 
       await defaultApi.getMe();
       const [url] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
-      expect(url.startsWith("https://platform-api2.max.ru/")).toBe(true);
+      expect(url.startsWith('https://platform-api2.max.ru/')).toBe(true);
     });
   });
 
-  describe("uploadMedia", () => {
-    it("should upload curl-style multipart with explicit content length", async () => {
+  describe('uploadMedia', () => {
+    it('should upload curl-style multipart with explicit content length', async () => {
       global.fetch = vi
         .fn()
         .mockResolvedValueOnce({
           ok: true,
-          json: async () => ({ url: "https://upload.max.ru/u", token: "upload-token" }),
+          json: async () => ({ url: 'https://upload.max.ru/u', token: 'upload-token' }),
         })
         .mockResolvedValueOnce({
           ok: true,
           json: async () => ({}),
         });
 
-      const result = await api.uploadMedia("video", Buffer.from("fake-video"), "video/mp4");
+      const result = await api.uploadMedia('video', Buffer.from('fake-video'), 'video/mp4');
 
-      expect(result.token).toBe("upload-token");
+      expect(result.token).toBe('upload-token');
       expect(global.fetch).toHaveBeenCalledTimes(2);
 
       const [, uploadInit] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[1] as [
         string,
         { headers: Record<string, string>; body: Buffer; method: string },
       ];
-      expect(uploadInit.method).toBe("POST");
-      expect(uploadInit.headers["Content-Type"]).toMatch(/^multipart\/form-data; boundary=----openclaw-max-/);
-      expect(uploadInit.headers["Content-Length"]).toBe(String(uploadInit.body.byteLength));
+      expect(uploadInit.method).toBe('POST');
+      expect(uploadInit.headers['Content-Type']).toMatch(
+        /^multipart\/form-data; boundary=----openclaw-max-/,
+      );
+      expect(uploadInit.headers['Content-Length']).toBe(String(uploadInit.body.byteLength));
       expect(Buffer.isBuffer(uploadInit.body)).toBe(true);
-      expect(uploadInit.body.toString("utf8")).toContain('Content-Disposition: form-data; name="data"; filename="file"');
-      expect(uploadInit.body.toString("utf8")).toContain("Content-Type: video/mp4");
+      expect(uploadInit.body.toString('utf8')).toContain(
+        'Content-Disposition: form-data; name="data"; filename="file"',
+      );
+      expect(uploadInit.body.toString('utf8')).toContain('Content-Type: video/mp4');
     });
   });
 
-  describe("webhook subscriptions", () => {
-    it("should subscribe to webhook", async () => {
+  describe('webhook subscriptions', () => {
+    it('should subscribe to webhook', async () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => ({ success: true }),
       });
 
       await api.subscribe({
-        url: "https://example.com/webhook",
-        secret: "my-secret",
+        url: 'https://example.com/webhook',
+        secret: 'my-secret',
       });
 
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("/subscriptions"),
+        expect.stringContaining('/subscriptions'),
         expect.objectContaining({
-          method: "POST",
+          method: 'POST',
         }),
       );
     });
 
-    it("should unsubscribe from webhook", async () => {
+    it('should unsubscribe from webhook', async () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => ({ success: true }),
       });
 
-      await api.unsubscribe("https://example.com/webhook");
+      await api.unsubscribe('https://example.com/webhook');
 
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("/subscriptions"),
+        expect.stringContaining('/subscriptions'),
         expect.objectContaining({
-          method: "DELETE",
+          method: 'DELETE',
         }),
       );
     });
 
-    it("should get subscriptions list", async () => {
+    it('should get subscriptions list', async () => {
       const mockSubs = {
-        subscriptions: [
-          { url: "https://example.com/webhook", time: Date.now() },
-        ],
+        subscriptions: [{ url: 'https://example.com/webhook', time: Date.now() }],
       };
 
       global.fetch = vi.fn().mockResolvedValueOnce({
@@ -479,32 +511,35 @@ describe("MaxApi", () => {
     });
   });
 
-  describe("timeout handling", () => {
-    it("should abort request on timeout", async () => {
+  describe('timeout handling', () => {
+    it('should abort request on timeout', async () => {
       const slowApi = new MaxApi({ token: MOCK_TOKEN, timeoutMs: 100 });
 
-      global.fetch = vi.fn().mockImplementationOnce(
-        () => new Promise((resolve) => setTimeout(resolve, 500)),
-      );
+      global.fetch = vi
+        .fn()
+        .mockImplementationOnce(() => new Promise((resolve) => setTimeout(resolve, 500)));
 
       await expect(slowApi.getMe()).rejects.toThrow();
     });
 
-    it("converts our own deadline into a typed MaxRequestTimeoutError", async () => {
+    it('converts our own deadline into a typed MaxRequestTimeoutError', async () => {
       const slowApi = new MaxApi({ token: MOCK_TOKEN, timeoutMs: 20 });
 
-      global.fetch = vi.fn((_url, init) =>
-        new Promise((_resolve, reject) => {
-          (init as { signal: AbortSignal }).signal.addEventListener("abort", () => {
-            reject(Object.assign(new Error("This operation was aborted"), { name: "AbortError" }));
-          });
-        }),
+      global.fetch = vi.fn(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            (init as { signal: AbortSignal }).signal.addEventListener('abort', () => {
+              reject(
+                Object.assign(new Error('This operation was aborted'), { name: 'AbortError' }),
+              );
+            });
+          }),
       ) as unknown as typeof fetch;
 
       await expect(slowApi.getMe()).rejects.toBeInstanceOf(MaxRequestTimeoutError);
     });
 
-    it("does not auto-retry a POST /messages that hit the client deadline (duplicate-safe)", async () => {
+    it('does not auto-retry a POST /messages that hit the client deadline (duplicate-safe)', async () => {
       const retryApi = new MaxApi({
         token: MOCK_TOKEN,
         baseUrl: MOCK_BASE_URL,
@@ -512,16 +547,19 @@ describe("MaxApi", () => {
         timeoutMs: 20,
       });
 
-      const fetchMock = vi.fn((_url, init) =>
-        new Promise((_resolve, reject) => {
-          (init as { signal: AbortSignal }).signal.addEventListener("abort", () => {
-            reject(Object.assign(new Error("This operation was aborted"), { name: "AbortError" }));
-          });
-        }),
+      const fetchMock = vi.fn(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            (init as { signal: AbortSignal }).signal.addEventListener('abort', () => {
+              reject(
+                Object.assign(new Error('This operation was aborted'), { name: 'AbortError' }),
+              );
+            });
+          }),
       );
       global.fetch = fetchMock as unknown as typeof fetch;
 
-      await expect(retryApi.sendMessage({ text: "hi" }, { chat_id: 1 })).rejects.toBeInstanceOf(
+      await expect(retryApi.sendMessage({ text: 'hi' }, { chat_id: 1 })).rejects.toBeInstanceOf(
         MaxRequestTimeoutError,
       );
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -529,18 +567,19 @@ describe("MaxApi", () => {
   });
 });
 
-describe("per-chat send limiter (2 messages/s)", () => {
+describe('per-chat send limiter (2 messages/s)', () => {
   afterEach(() => vi.useRealTimers());
 
-  it("lets two sends into a chat through at once and delays the third by the window", async () => {
+  it('lets two sends into a chat through at once and delays the third by the window', async () => {
     vi.useFakeTimers();
-    const { MaxChatSendLimiter, MAX_SENDS_PER_CHAT_PER_SECOND } = await import("./api.js");
+    const { MaxChatSendLimiter, MAX_SENDS_PER_CHAT_PER_SECOND } = await import('./api.js');
     expect(MAX_SENDS_PER_CHAT_PER_SECOND).toBe(2);
     const limiter = new MaxChatSendLimiter();
     const done: number[] = [];
     const start = Date.now();
-    for (let i = 0; i < 5; i += 1) void limiter.acquire("chat-a").then(() => done.push(Date.now() - start));
-    void limiter.acquire("chat-b").then(() => done.push(-1));
+    for (let i = 0; i < 5; i += 1)
+      void limiter.acquire('chat-a').then(() => done.push(Date.now() - start));
+    void limiter.acquire('chat-b').then(() => done.push(-1));
 
     const chatA = () => done.filter((t) => t >= 0);
     await vi.advanceTimersByTimeAsync(0);
@@ -554,9 +593,9 @@ describe("per-chat send limiter (2 messages/s)", () => {
     expect(chatA()).toEqual([0, 0, 1000, 1000, 2000]);
   });
 
-  it("throttles POST /messages per chat and bot, not other requests", async () => {
+  it('throttles POST /messages per chat and bot, not other requests', async () => {
     vi.useFakeTimers();
-    const { MaxChatSendLimiter } = await import("./api.js");
+    const { MaxChatSendLimiter } = await import('./api.js');
     const sendLimiter = new MaxChatSendLimiter();
     const calls: string[] = [];
     global.fetch = vi.fn(async (url: string, init?: { method?: string }) => {
@@ -564,27 +603,27 @@ describe("per-chat send limiter (2 messages/s)", () => {
       return { ok: true, status: 200, json: async () => ({ success: true }) };
     }) as never;
     const api = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, sendLimiter });
-    const otherBot = new MaxApi({ token: "other-token", baseUrl: MOCK_BASE_URL, sendLimiter });
+    const otherBot = new MaxApi({ token: 'other-token', baseUrl: MOCK_BASE_URL, sendLimiter });
 
     const sends = [1, 2, 3].map((n) => api.sendMessage({ text: String(n) }, { chat_id: 10 }));
-    void otherBot.sendMessage({ text: "x" }, { chat_id: 10 });
-    void api.sendMessage({ text: "u" }, { user_id: 5 });
+    void otherBot.sendMessage({ text: 'x' }, { chat_id: 10 });
+    void api.sendMessage({ text: 'u' }, { user_id: 5 });
     void api.getMe();
     await vi.advanceTimersByTimeAsync(0);
-    expect(calls.filter((c) => c === "POST /messages?chat_id=10")).toHaveLength(3); // 2 + other bot
-    expect(calls).toContain("POST /messages?user_id=5");
-    expect(calls).toContain("GET /me");
+    expect(calls.filter((c) => c === 'POST /messages?chat_id=10')).toHaveLength(3); // 2 + other bot
+    expect(calls).toContain('POST /messages?user_id=5');
+    expect(calls).toContain('GET /me');
 
     await vi.advanceTimersByTimeAsync(1000);
     await Promise.all(sends);
-    expect(calls.filter((c) => c === "POST /messages?chat_id=10")).toHaveLength(4);
+    expect(calls.filter((c) => c === 'POST /messages?chat_id=10')).toHaveLength(4);
   });
 
-  it("can be disabled with sendLimiter: null", async () => {
+  it('can be disabled with sendLimiter: null', async () => {
     vi.useFakeTimers();
     global.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })) as never;
     const api = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, sendLimiter: null });
-    await Promise.all([1, 2, 3, 4].map(() => api.sendMessage({ text: "t" }, { chat_id: 1 })));
+    await Promise.all([1, 2, 3, 4].map(() => api.sendMessage({ text: 't' }, { chat_id: 1 })));
     expect(global.fetch).toHaveBeenCalledTimes(4);
   });
 });

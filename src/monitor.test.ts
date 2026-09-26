@@ -2,15 +2,15 @@
  * Tests for MAX monitor (interface verification)
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from 'vitest';
 
-import type { MaxMessage, MaxUpdate } from "./api.js";
-import { MAX_SUBSCRIBED_UPDATE_TYPES, startMaxPolling } from "./monitor.js";
-import { createSerializedWebhookHandler } from "./webhook-runner.js";
+import type { MaxMessage, MaxUpdate } from './api.js';
+import { MAX_SUBSCRIBED_UPDATE_TYPES, startMaxPolling } from './monitor.js';
+import { createSerializedWebhookHandler } from './webhook-runner.js';
 
 function makeMsgUpdate(chatId: number, mid: string): MaxUpdate {
   return {
-    update_type: "message_created",
+    update_type: 'message_created',
     timestamp: 1,
     message: { body: { mid }, timestamp: 1, recipient: { chat_id: chatId } },
   } as MaxUpdate;
@@ -18,17 +18,19 @@ function makeMsgUpdate(chatId: number, mid: string): MaxUpdate {
 
 const deferred = () => {
   let resolve!: () => void;
-  const promise = new Promise<void>((r) => { resolve = r; });
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
   return { promise, resolve };
 };
 
-describe("MAX Monitor", () => {
-  describe("startMaxPolling", () => {
-    it("should be a function", () => {
-      expect(typeof startMaxPolling).toBe("function");
+describe('MAX Monitor', () => {
+  describe('startMaxPolling', () => {
+    it('should be a function', () => {
+      expect(typeof startMaxPolling).toBe('function');
     });
 
-    it("should accept correct parameters", () => {
+    it('should accept correct parameters', () => {
       // Interface test - verify function signature
       expect(startMaxPolling.length).toBe(1); // Single options object
     });
@@ -41,8 +43,8 @@ describe("MAX Monitor", () => {
   // These are better suited for E2E tests rather than unit tests.
 });
 
-describe("createSerializedWebhookHandler", () => {
-  it("acks immediately (resolves before dispatch completes)", async () => {
+describe('createSerializedWebhookHandler', () => {
+  it('acks immediately (resolves before dispatch completes)', async () => {
     const gate = deferred();
     const dispatch = vi.fn().mockImplementation(() => gate.promise);
     const handler = createSerializedWebhookHandler({
@@ -52,18 +54,20 @@ describe("createSerializedWebhookHandler", () => {
     });
 
     let acked = false;
-    await handler(makeMsgUpdate(1, "m1")).then(() => { acked = true; });
+    await handler(makeMsgUpdate(1, 'm1')).then(() => {
+      acked = true;
+    });
     expect(acked).toBe(true); // ack returned before dispatch resolved
     expect(dispatch).toHaveBeenCalledTimes(1);
     gate.resolve();
   });
 
-  it("serializes updates within one chat (no overlap)", async () => {
+  it('serializes updates within one chat (no overlap)', async () => {
     const order: string[] = [];
     const g1 = deferred();
     const dispatch = vi.fn().mockImplementation(async (u: MaxUpdate) => {
       order.push(`start:${u.message?.body?.mid}`);
-      if (u.message?.body?.mid === "a") await g1.promise;
+      if (u.message?.body?.mid === 'a') await g1.promise;
       order.push(`end:${u.message?.body?.mid}`);
     });
     const handler = createSerializedWebhookHandler({
@@ -72,17 +76,17 @@ describe("createSerializedWebhookHandler", () => {
       onError: () => {},
     });
 
-    await handler(makeMsgUpdate(1, "a"));
-    await handler(makeMsgUpdate(1, "b"));
+    await handler(makeMsgUpdate(1, 'a'));
+    await handler(makeMsgUpdate(1, 'b'));
     await Promise.resolve();
     // b must not start until a ends
-    expect(order).toEqual(["start:a"]);
+    expect(order).toEqual(['start:a']);
     g1.resolve();
     await new Promise((r) => setTimeout(r, 10));
-    expect(order).toEqual(["start:a", "end:a", "start:b", "end:b"]);
+    expect(order).toEqual(['start:a', 'end:a', 'start:b', 'end:b']);
   });
 
-  it("does not block a second chat behind a slow first chat (no cross-chat HOL)", async () => {
+  it('does not block a second chat behind a slow first chat (no cross-chat HOL)', async () => {
     const started: string[] = [];
     const gA = deferred();
     const dispatch = vi.fn().mockImplementation(async (u: MaxUpdate) => {
@@ -95,15 +99,15 @@ describe("createSerializedWebhookHandler", () => {
       onError: () => {},
     });
 
-    await handler(makeMsgUpdate(1, "slow"));
-    await handler(makeMsgUpdate(2, "fast"));
+    await handler(makeMsgUpdate(1, 'slow'));
+    await handler(makeMsgUpdate(2, 'fast'));
     await new Promise((r) => setTimeout(r, 10));
     // chat 2 ran even though chat 1 is still blocked
-    expect(started).toContain("2");
+    expect(started).toContain('2');
     gA.resolve();
   });
 
-  it("stops dispatching queued updates after abort", async () => {
+  it('stops dispatching queued updates after abort', async () => {
     const controller = new AbortController();
     const dispatch = vi.fn().mockResolvedValue(undefined);
     const handler = createSerializedWebhookHandler({
@@ -113,16 +117,16 @@ describe("createSerializedWebhookHandler", () => {
     });
 
     controller.abort();
-    await handler(makeMsgUpdate(1, "x"));
+    await handler(makeMsgUpdate(1, 'x'));
     await new Promise((r) => setTimeout(r, 10));
     expect(dispatch).not.toHaveBeenCalled();
   });
 
-  it("keeps the chain alive after a dispatch error", async () => {
+  it('keeps the chain alive after a dispatch error', async () => {
     const onError = vi.fn();
     const dispatch = vi
       .fn()
-      .mockRejectedValueOnce(new Error("boom"))
+      .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce(undefined);
     const handler = createSerializedWebhookHandler({
       dispatch,
@@ -130,55 +134,69 @@ describe("createSerializedWebhookHandler", () => {
       onError,
     });
 
-    await handler(makeMsgUpdate(1, "bad"));
-    await handler(makeMsgUpdate(1, "good"));
+    await handler(makeMsgUpdate(1, 'bad'));
+    await handler(makeMsgUpdate(1, 'good'));
     await new Promise((r) => setTimeout(r, 10));
     expect(onError).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenCalledTimes(2);
   });
 });
 
-describe("MAX_SUBSCRIBED_UPDATE_TYPES", () => {
-  it("should not request update types that do not exist in the API", () => {
+describe('MAX_SUBSCRIBED_UPDATE_TYPES', () => {
+  it('should not request update types that do not exist in the API', () => {
     // Reactions never existed in MAX Bot API; a stricter server-side enum
     // validation would 400 the whole polling loop.
-    expect(MAX_SUBSCRIBED_UPDATE_TYPES).not.toContain("message_reaction_created");
-    expect(MAX_SUBSCRIBED_UPDATE_TYPES).not.toContain("message_reaction_updated");
+    expect(MAX_SUBSCRIBED_UPDATE_TYPES).not.toContain('message_reaction_created');
+    expect(MAX_SUBSCRIBED_UPDATE_TYPES).not.toContain('message_reaction_updated');
     // Not an Update type in the published schema (max-messenger/api-schema).
-    expect(MAX_SUBSCRIBED_UPDATE_TYPES).not.toContain("message_chat_created");
+    expect(MAX_SUBSCRIBED_UPDATE_TYPES).not.toContain('message_chat_created');
   });
 
   it("should only request update types from the schema's Update discriminator", () => {
     // Update.discriminator.mapping in max-messenger/api-schema schema.yaml (2026-09)
     const schemaUpdateTypes = new Set([
-      "message_created", "message_callback", "message_edited", "message_removed",
-      "comment_created", "comment_edited", "comment_removed",
-      "bot_added", "bot_removed", "user_added", "user_removed",
-      "bot_started", "bot_stopped", "dialog_cleared", "dialog_removed",
-      "dialog_muted", "dialog_unmuted", "chat_title_changed", "bot_admin_permissions_changed",
+      'message_created',
+      'message_callback',
+      'message_edited',
+      'message_removed',
+      'comment_created',
+      'comment_edited',
+      'comment_removed',
+      'bot_added',
+      'bot_removed',
+      'user_added',
+      'user_removed',
+      'bot_started',
+      'bot_stopped',
+      'dialog_cleared',
+      'dialog_removed',
+      'dialog_muted',
+      'dialog_unmuted',
+      'chat_title_changed',
+      'bot_admin_permissions_changed',
     ]);
     for (const type of MAX_SUBSCRIBED_UPDATE_TYPES) {
       expect(schemaUpdateTypes.has(type), type).toBe(true);
     }
   });
 
-  it("should include the lifecycle events added to the API in 2026", () => {
-    expect(MAX_SUBSCRIBED_UPDATE_TYPES).toContain("bot_stopped");
-    expect(MAX_SUBSCRIBED_UPDATE_TYPES).toContain("dialog_cleared");
-    expect(MAX_SUBSCRIBED_UPDATE_TYPES).toContain("dialog_removed");
-    expect(MAX_SUBSCRIBED_UPDATE_TYPES).toContain("chat_title_changed");
+  it('should include the lifecycle events added to the API in 2026', () => {
+    expect(MAX_SUBSCRIBED_UPDATE_TYPES).toContain('bot_stopped');
+    expect(MAX_SUBSCRIBED_UPDATE_TYPES).toContain('dialog_cleared');
+    expect(MAX_SUBSCRIBED_UPDATE_TYPES).toContain('dialog_removed');
+    expect(MAX_SUBSCRIBED_UPDATE_TYPES).toContain('chat_title_changed');
   });
 });
 
-describe("processIncomingMessage inbound media", () => {
-  it("passes downloaded attachments to the agent as ordered media facts", async () => {
-    const { finalizeInboundContext } = await import("openclaw/plugin-sdk/reply-dispatch-runtime");
-    const { setMaxRuntime } = await import("./runtime.js");
-    const { processIncomingMessage } = await import("./inbound.js");
+describe('processIncomingMessage inbound media', () => {
+  it('passes downloaded attachments to the agent as ordered media facts', async () => {
+    const { finalizeInboundContext } = await import('openclaw/plugin-sdk/reply-dispatch-runtime');
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { processIncomingMessage } = await import('./inbound.js');
 
     const saved = [
-      { path: "/state/media/inbound/photo-1.jpg", contentType: "image/jpeg" },
-      { path: "/state/media/inbound/doc-2.bin", contentType: undefined },
+      { path: '/state/media/inbound/photo-1.jpg', contentType: 'image/jpeg' },
+      { path: '/state/media/inbound/doc-2.bin', contentType: undefined },
     ];
     let saveIndex = 0;
     let dispatchedCtx: Record<string, unknown> | undefined;
@@ -188,16 +206,20 @@ describe("processIncomingMessage inbound media", () => {
         media: {
           fetchRemoteMedia: vi.fn(async ({ url }: { url: string }) => ({
             buffer: Buffer.from(url),
-            contentType: "application/octet-stream",
-            fileName: url.endsWith("doc") ? "report.pdf" : undefined,
+            contentType: 'application/octet-stream',
+            fileName: url.endsWith('doc') ? 'report.pdf' : undefined,
           })),
           saveMediaBuffer: vi.fn(async () => saved[saveIndex++]),
         },
         routing: {
-          resolveAgentRoute: vi.fn(() => ({ agentId: "main", accountId: "default", sessionKey: "agent:main:max:direct:7" })),
+          resolveAgentRoute: vi.fn(() => ({
+            agentId: 'main',
+            accountId: 'default',
+            sessionKey: 'agent:main:max:direct:7',
+          })),
         },
         session: {
-          resolveStorePath: vi.fn(() => "/tmp/store"),
+          resolveStorePath: vi.fn(() => '/tmp/store'),
           readSessionUpdatedAt: vi.fn(() => undefined),
           recordSessionMetaFromInbound: vi.fn(async () => undefined),
         },
@@ -208,9 +230,11 @@ describe("processIncomingMessage inbound media", () => {
             finalizeInput = { ...ctx };
             return finalizeInboundContext(ctx);
           },
-          dispatchReplyWithBufferedBlockDispatcher: vi.fn(async ({ ctx }: { ctx: Record<string, unknown> }) => {
-            dispatchedCtx = ctx;
-          }),
+          dispatchReplyWithBufferedBlockDispatcher: vi.fn(
+            async ({ ctx }: { ctx: Record<string, unknown> }) => {
+              dispatchedCtx = ctx;
+            },
+          ),
         },
       },
     };
@@ -219,15 +243,15 @@ describe("processIncomingMessage inbound media", () => {
 
     await processIncomingMessage(
       {
-        sender: { user_id: 7, first_name: "Ann", is_bot: false },
-        recipient: { chat_id: 70, chat_type: "dialog" },
+        sender: { user_id: 7, first_name: 'Ann', is_bot: false },
+        recipient: { chat_id: 70, chat_type: 'dialog' },
         timestamp: 1,
         body: {
-          mid: "mid.media",
-          text: "look",
+          mid: 'mid.media',
+          text: 'look',
           attachments: [
-            { type: "image", payload: { url: "https://cdn.max.test/photo" } },
-            { type: "file", payload: { url: "https://cdn.max.test/doc" }, filename: "report.pdf" },
+            { type: 'image', payload: { url: 'https://cdn.max.test/photo' } },
+            { type: 'file', payload: { url: 'https://cdn.max.test/doc' }, filename: 'report.pdf' },
           ],
         },
       } as unknown as MaxMessage,
@@ -236,11 +260,11 @@ describe("processIncomingMessage inbound media", () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         api: { sendAction: vi.fn(async () => ({ success: true })) } as any,
         account: {
-          accountId: "default",
+          accountId: 'default',
           enabled: true,
-          token: "t",
-          tokenSource: "config",
-          config: { dmPolicy: "open" },
+          token: 't',
+          tokenSource: 'config',
+          config: { dmPolicy: 'open' },
         },
         config: { channels: {} },
         abortSignal: new AbortController().signal,
@@ -249,31 +273,54 @@ describe("processIncomingMessage inbound media", () => {
 
     expect(dispatchedCtx).toBeDefined();
     expect(dispatchedCtx?.media).toEqual([
-      expect.objectContaining({ path: saved[0].path, contentType: "image/jpeg", messageId: "mid.media" }),
-      expect.objectContaining({ path: saved[1].path, fileName: "report.pdf", messageId: "mid.media" }),
+      expect.objectContaining({
+        path: saved[0].path,
+        contentType: 'image/jpeg',
+        messageId: 'mid.media',
+      }),
+      expect.objectContaining({
+        path: saved[1].path,
+        fileName: 'report.pdf',
+        messageId: 'mid.media',
+      }),
     ]);
     // Signed CDN URLs never reach the agent context.
-    expect(JSON.stringify(dispatchedCtx?.media)).not.toContain("cdn.max.test");
+    expect(JSON.stringify(dispatchedCtx?.media)).not.toContain('cdn.max.test');
     // The plugin hands over only `media`; any legacy Media* projection is the SDK's.
-    for (const key of ["MediaPath", "MediaPaths", "MediaUrl", "MediaUrls", "MediaType", "MediaTypes"]) {
+    for (const key of [
+      'MediaPath',
+      'MediaPaths',
+      'MediaUrl',
+      'MediaUrls',
+      'MediaType',
+      'MediaTypes',
+    ]) {
       expect(finalizeInput).not.toHaveProperty(key);
     }
     // The agent still sees the local file path of the first attachment.
-    expect(dispatchedCtx?.MediaPath ?? (dispatchedCtx?.media as { path?: string }[])[0]?.path).toBe(saved[0].path);
+    expect(dispatchedCtx?.MediaPath ?? (dispatchedCtx?.media as { path?: string }[])[0]?.path).toBe(
+      saved[0].path,
+    );
   });
 
   async function runVoiceMessage(audio: Record<string, unknown>) {
-    const { setMaxRuntime } = await import("./runtime.js");
-    const { processIncomingMessage } = await import("./inbound.js");
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { processIncomingMessage } = await import('./inbound.js');
     const { core, dispatched } = makeCallbackRuntime();
-    const fetchRemoteMedia = vi.fn(async () => ({ buffer: Buffer.from("ogg"), contentType: "audio/ogg" }));
+    const fetchRemoteMedia = vi.fn(async () => ({
+      buffer: Buffer.from('ogg'),
+      contentType: 'audio/ogg',
+    }));
     const runtime = {
       ...core,
       channel: {
         ...core.channel,
         media: {
           fetchRemoteMedia,
-          saveMediaBuffer: vi.fn(async () => ({ path: "/state/media/inbound/voice.ogg", contentType: "audio/ogg" })),
+          saveMediaBuffer: vi.fn(async () => ({
+            path: '/state/media/inbound/voice.ogg',
+            contentType: 'audio/ogg',
+          })),
         },
       },
     };
@@ -281,118 +328,147 @@ describe("processIncomingMessage inbound media", () => {
     setMaxRuntime(runtime as any);
     await processIncomingMessage(
       {
-        sender: { user_id: 7, first_name: "Ann", is_bot: false },
-        recipient: { chat_id: 70, chat_type: "dialog" },
+        sender: { user_id: 7, first_name: 'Ann', is_bot: false },
+        recipient: { chat_id: 70, chat_type: 'dialog' },
         timestamp: 1,
-        body: { mid: "mid.voice", text: "", attachments: [audio] },
+        body: { mid: 'mid.voice', text: '', attachments: [audio] },
       } as unknown as MaxMessage,
       null,
-      makeCallbackOpts({ dmPolicy: "open" }),
+      makeCallbackOpts({ dmPolicy: 'open' }),
     );
     return { ctx: dispatched[0], fetchRemoteMedia };
   }
 
-  it("hands a MAX voice transcription to the agent and marks the audio transcribed", async () => {
+  it('hands a MAX voice transcription to the agent and marks the audio transcribed', async () => {
     // AudioAttachment: transcription is a sibling of payload (schema.yaml).
     const { ctx, fetchRemoteMedia } = await runVoiceMessage({
-      type: "audio",
-      payload: { url: "https://cdn.max.test/voice", token: "tok" },
-      transcription: "  Привет, это голосовое  ",
+      type: 'audio',
+      payload: { url: 'https://cdn.max.test/voice', token: 'tok' },
+      transcription: '  Привет, это голосовое  ',
     });
 
     expect(fetchRemoteMedia).toHaveBeenCalledOnce();
-    expect(ctx?.BodyForAgent).toBe("[Voice transcript: Привет, это голосовое]");
+    expect(ctx?.BodyForAgent).toBe('[Voice transcript: Привет, это голосовое]');
     expect(ctx?.media).toEqual([
-      expect.objectContaining({ path: "/state/media/inbound/voice.ogg", transcribed: true }),
+      expect.objectContaining({ path: '/state/media/inbound/voice.ogg', transcribed: true }),
     ]);
   });
 
-  it("leaves an untranscribed voice message to core STT", async () => {
-    for (const transcription of [undefined, null, "   "]) {
+  it('leaves an untranscribed voice message to core STT', async () => {
+    for (const transcription of [undefined, null, '   ']) {
       const { ctx, fetchRemoteMedia } = await runVoiceMessage({
-        type: "audio",
-        payload: { url: "https://cdn.max.test/voice" },
+        type: 'audio',
+        payload: { url: 'https://cdn.max.test/voice' },
         transcription,
       });
 
       expect(fetchRemoteMedia).toHaveBeenCalledOnce();
-      expect(String(ctx?.BodyForAgent ?? "")).not.toContain("Voice transcript");
+      expect(String(ctx?.BodyForAgent ?? '')).not.toContain('Voice transcript');
       expect((ctx?.media as { transcribed?: boolean }[])[0]?.transcribed).not.toBe(true);
     }
   });
 });
 
-describe("processIncomingMessage attachment downloads after the gates", () => {
+describe('processIncomingMessage attachment downloads after the gates', () => {
   async function runGroupImage(accountConfig: Record<string, unknown>, text: string) {
-    const { setMaxRuntime } = await import("./runtime.js");
-    const { processIncomingMessage } = await import("./inbound.js");
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { processIncomingMessage } = await import('./inbound.js');
     const { core, dispatched } = makeCallbackRuntime();
-    const fetchRemoteMedia = vi.fn(async () => ({ buffer: Buffer.from("jpg"), contentType: "image/jpeg" }));
-    const saveMediaBuffer = vi.fn(async () => ({ path: "/state/media/inbound/photo.jpg", contentType: "image/jpeg" }));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    setMaxRuntime({ ...core, channel: { ...core.channel, media: { fetchRemoteMedia, saveMediaBuffer } } } as any);
-    const getVideoInfo = vi.fn(async () => ({ urls: { mp4_720: "https://cdn.max.test/video.mp4" } }));
+    const fetchRemoteMedia = vi.fn(async () => ({
+      buffer: Buffer.from('jpg'),
+      contentType: 'image/jpeg',
+    }));
+    const saveMediaBuffer = vi.fn(async () => ({
+      path: '/state/media/inbound/photo.jpg',
+      contentType: 'image/jpeg',
+    }));
+    setMaxRuntime({
+      ...core,
+      channel: { ...core.channel, media: { fetchRemoteMedia, saveMediaBuffer } },
+    } as unknown as Parameters<typeof setMaxRuntime>[0]);
+    const getVideoInfo = vi.fn(async () => ({
+      urls: { mp4_720: 'https://cdn.max.test/video.mp4' },
+    }));
     const opts = makeCallbackOpts(accountConfig);
     await processIncomingMessage(
       {
-        sender: { user_id: 7, first_name: "Ann", is_bot: false },
-        recipient: { chat_id: -500, chat_type: "chat" },
+        sender: { user_id: 7, first_name: 'Ann', is_bot: false },
+        recipient: { chat_id: -500, chat_type: 'chat' },
         timestamp: 1,
         body: {
-          mid: "mid.group.photo",
+          mid: 'mid.group.photo',
           text,
           attachments: [
-            { type: "image", payload: { url: "https://cdn.max.test/photo" } },
-            { type: "video", payload: { token: "vtok" } },
+            { type: 'image', payload: { url: 'https://cdn.max.test/photo' } },
+            { type: 'video', payload: { token: 'vtok' } },
           ],
         },
       } as unknown as MaxMessage,
       null,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { ...opts, api: { ...opts.api, getVideoInfo } as any, botUserId: 1, botUsername: "banzai_bot" },
+      {
+        ...opts,
+        api: { ...opts.api, getVideoInfo },
+        botUserId: 1,
+        botUsername: 'banzai_bot',
+      },
     );
     return { dispatched, fetchRemoteMedia, saveMediaBuffer, getVideoInfo };
   }
 
-  it("does not download media of a group that is not in the allowlist", async () => {
-    const run = await runGroupImage({ groupPolicy: "allowlist", groups: { "-777": {} } }, "@banzai_bot смотри");
+  it('does not download media of a group that is not in the allowlist', async () => {
+    const run = await runGroupImage(
+      { groupPolicy: 'allowlist', groups: { '-777': {} } },
+      '@banzai_bot смотри',
+    );
     expect(run.dispatched).toHaveLength(0);
     expect(run.fetchRemoteMedia).not.toHaveBeenCalled();
     expect(run.saveMediaBuffer).not.toHaveBeenCalled();
     expect(run.getVideoInfo).not.toHaveBeenCalled();
   });
 
-  it("does not download media of a group message that does not mention the bot", async () => {
-    const run = await runGroupImage({ groupPolicy: "allowlist", groups: { "-500": {} } }, "просто фото");
+  it('does not download media of a group message that does not mention the bot', async () => {
+    const run = await runGroupImage(
+      { groupPolicy: 'allowlist', groups: { '-500': {} } },
+      'просто фото',
+    );
     expect(run.dispatched).toHaveLength(0);
     expect(run.fetchRemoteMedia).not.toHaveBeenCalled();
     expect(run.getVideoInfo).not.toHaveBeenCalled();
   });
 
-  it("downloads media once the group message passes the allowlist and mention gates", async () => {
-    const run = await runGroupImage({ groupPolicy: "allowlist", groups: { "-500": {} } }, "@banzai_bot смотри");
+  it('downloads media once the group message passes the allowlist and mention gates', async () => {
+    const run = await runGroupImage(
+      { groupPolicy: 'allowlist', groups: { '-500': {} } },
+      '@banzai_bot смотри',
+    );
     expect(run.dispatched).toHaveLength(1);
-    expect(run.getVideoInfo).toHaveBeenCalledWith("vtok");
+    expect(run.getVideoInfo).toHaveBeenCalledWith('vtok');
     expect(run.fetchRemoteMedia).toHaveBeenCalledTimes(2);
     expect(run.dispatched[0].media).toHaveLength(2);
   });
 
-  it("does not download media of a DM from a sender outside the allowlist", async () => {
-    const { setMaxRuntime } = await import("./runtime.js");
-    const { processIncomingMessage } = await import("./inbound.js");
+  it('does not download media of a DM from a sender outside the allowlist', async () => {
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { processIncomingMessage } = await import('./inbound.js');
     const { core, dispatched } = makeCallbackRuntime();
     const fetchRemoteMedia = vi.fn();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    setMaxRuntime({ ...core, channel: { ...core.channel, media: { fetchRemoteMedia, saveMediaBuffer: vi.fn() } } } as any);
+    setMaxRuntime({
+      ...core,
+      channel: { ...core.channel, media: { fetchRemoteMedia, saveMediaBuffer: vi.fn() } },
+    } as unknown as Parameters<typeof setMaxRuntime>[0]);
     await processIncomingMessage(
       {
-        sender: { user_id: 9, first_name: "Eve", is_bot: false },
-        recipient: { chat_id: 90, chat_type: "dialog" },
+        sender: { user_id: 9, first_name: 'Eve', is_bot: false },
+        recipient: { chat_id: 90, chat_type: 'dialog' },
         timestamp: 1,
-        body: { mid: "mid.dm.photo", text: "", attachments: [{ type: "image", payload: { url: "https://cdn.max.test/p" } }] },
+        body: {
+          mid: 'mid.dm.photo',
+          text: '',
+          attachments: [{ type: 'image', payload: { url: 'https://cdn.max.test/p' } }],
+        },
       } as unknown as MaxMessage,
       null,
-      makeCallbackOpts({ dmPolicy: "allowlist", allowFrom: ["7"] }),
+      makeCallbackOpts({ dmPolicy: 'allowlist', allowFrom: ['7'] }),
     );
     expect(dispatched).toHaveLength(0);
     expect(fetchRemoteMedia).not.toHaveBeenCalled();
@@ -404,29 +480,46 @@ describe("processIncomingMessage attachment downloads after the gates", () => {
 const LIVE_MESSAGE_CALLBACK = {
   callback: {
     timestamp: 1790372541327,
-    callback_id: "f9LHodD0cOIcE0GTHf8RdfJDkzGZdg6GFHBI3eVxF-WDgGebGQjICTeb13K9VXDTSAxWIX9unc3bYj__sVyQ2AhBa3jV9ItunfosDJPY084qccjSZiQo",
-    user: { user_id: 4260364, first_name: "User", is_bot: false, last_name: "", last_activity_time: 1790372539000, name: "User" },
-    payload: "live-callback-test",
+    callback_id:
+      'f9LHodD0cOIcE0GTHf8RdfJDkzGZdg6GFHBI3eVxF-WDgGebGQjICTeb13K9VXDTSAxWIX9unc3bYj__sVyQ2AhBa3jV9ItunfosDJPY084qccjSZiQo',
+    user: {
+      user_id: 4260364,
+      first_name: 'User',
+      is_bot: false,
+      last_name: '',
+      last_activity_time: 1790372539000,
+      name: 'User',
+    },
+    payload: 'live-callback-test',
   },
   timestamp: 1790372541327,
   message: {
-    recipient: { chat_type: "dialog", chat_id: 242316535, user_id: 4260364 },
+    recipient: { chat_type: 'dialog', chat_id: 242316535, user_id: 4260364 },
     timestamp: 1790372383780,
     body: {
-      mid: "mid.000000000e7174f701a0da828c245855",
+      mid: 'mid.000000000e7174f701a0da828c245855',
       seq: 117333844543428693,
-      text: "Live-тест 3: нажми кнопку",
+      text: 'Live-тест 3: нажми кнопку',
       attachments: [
         {
-          payload: { buttons: [[{ payload: "live-callback-test", text: "Нажми меня", type: "callback" }]] },
-          type: "inline_keyboard",
+          payload: {
+            buttons: [[{ payload: 'live-callback-test', text: 'Нажми меня', type: 'callback' }]],
+          },
+          type: 'inline_keyboard',
         },
       ],
     },
-    sender: { user_id: 238057211, first_name: "Bot", is_bot: true, username: "test_bot", last_activity_time: 1790372542172, name: "Bot" },
+    sender: {
+      user_id: 238057211,
+      first_name: 'Bot',
+      is_bot: true,
+      username: 'test_bot',
+      last_activity_time: 1790372542172,
+      name: 'Bot',
+    },
   },
-  user_locale: "ru",
-  update_type: "message_callback",
+  user_locale: 'ru',
+  update_type: 'message_callback',
 } as const;
 
 function makeCallbackRuntime() {
@@ -436,13 +529,13 @@ function makeCallbackRuntime() {
       pairing: { readAllowFromStore: vi.fn(async () => []) },
       routing: {
         resolveAgentRoute: vi.fn(({ peer }: { peer: { kind: string; id: string } }) => ({
-          agentId: "main",
-          accountId: "default",
+          agentId: 'main',
+          accountId: 'default',
           sessionKey: `agent:main:max:${peer.kind}:${peer.id}`,
         })),
       },
       session: {
-        resolveStorePath: vi.fn(() => "/tmp/store"),
+        resolveStorePath: vi.fn(() => '/tmp/store'),
         readSessionUpdatedAt: vi.fn(() => undefined),
         recordSessionMetaFromInbound: vi.fn(async () => undefined),
       },
@@ -450,9 +543,11 @@ function makeCallbackRuntime() {
         resolveEnvelopeFormatOptions: vi.fn(() => ({})),
         formatAgentEnvelope: vi.fn(({ body }: { body: string }) => body),
         finalizeInboundContext: (ctx: Record<string, unknown>) => ctx,
-        dispatchReplyWithBufferedBlockDispatcher: vi.fn(async ({ ctx }: { ctx: Record<string, unknown> }) => {
-          dispatched.push(ctx);
-        }),
+        dispatchReplyWithBufferedBlockDispatcher: vi.fn(
+          async ({ ctx }: { ctx: Record<string, unknown> }) => {
+            dispatched.push(ctx);
+          },
+        ),
       },
     },
   };
@@ -464,10 +559,10 @@ function makeCallbackOpts(accountConfig: Record<string, unknown>) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     api: { sendAction: vi.fn(async () => ({ success: true })) } as any,
     account: {
-      accountId: "default",
+      accountId: 'default',
       enabled: true,
-      token: "t",
-      tokenSource: "config" as const,
+      token: 't',
+      tokenSource: 'config' as const,
       config: accountConfig,
     },
     config: { channels: {} },
@@ -475,21 +570,28 @@ function makeCallbackOpts(accountConfig: Record<string, unknown>) {
   };
 }
 
-describe("message_callback", () => {
-  it("takes the recipient from the sibling message of the live update", async () => {
-    const { buildCallbackMessage } = await import("./callbacks.js");
+describe('message_callback', () => {
+  it('takes the recipient from the sibling message of the live update', async () => {
+    const { buildCallbackMessage } = await import('./callbacks.js');
     const update = structuredClone(LIVE_MESSAGE_CALLBACK) as unknown as MaxUpdate;
 
     const synthetic = buildCallbackMessage(update.callback!, update.message ?? null);
 
-    expect(synthetic.recipient).toEqual({ chat_type: "dialog", chat_id: 242316535, user_id: 4260364 });
+    expect(synthetic.recipient).toEqual({
+      chat_type: 'dialog',
+      chat_id: 242316535,
+      user_id: 4260364,
+    });
     expect(synthetic.sender?.user_id).toBe(4260364);
-    expect(synthetic.body).toEqual({ mid: LIVE_MESSAGE_CALLBACK.callback.callback_id, text: "live-callback-test" });
+    expect(synthetic.body).toEqual({
+      mid: LIVE_MESSAGE_CALLBACK.callback.callback_id,
+      text: 'live-callback-test',
+    });
     expect(synthetic.__maxCallback).toBe(true);
   });
 
-  it("falls back to the pressing user only when the keyboard message is gone", async () => {
-    const { buildCallbackMessage } = await import("./callbacks.js");
+  it('falls back to the pressing user only when the keyboard message is gone', async () => {
+    const { buildCallbackMessage } = await import('./callbacks.js');
     const update = structuredClone(LIVE_MESSAGE_CALLBACK) as unknown as MaxUpdate;
 
     const synthetic = buildCallbackMessage(update.callback!, null);
@@ -497,196 +599,259 @@ describe("message_callback", () => {
     expect(synthetic.recipient).toEqual({ chat_id: 4260364 });
   });
 
-  it("dispatches a live DM callback into the dialog chat, routed by the sender", async () => {
-    const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./dispatch.js");
+  it('dispatches a live DM callback into the dialog chat, routed by the sender', async () => {
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { dispatchUpdate } = await import('./dispatch.js');
     const { core, dispatched } = makeCallbackRuntime();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setMaxRuntime(core as any);
 
     await dispatchUpdate(
       structuredClone(LIVE_MESSAGE_CALLBACK) as unknown as MaxUpdate,
-      makeCallbackOpts({ dmPolicy: "allowlist", allowFrom: ["4260364"] }),
+      makeCallbackOpts({ dmPolicy: 'allowlist', allowFrom: ['4260364'] }),
     );
 
     expect(dispatched).toHaveLength(1);
     expect(dispatched[0]).toMatchObject({
-      ChatType: "direct",
-      From: "max:4260364",
-      To: "max:242316535",
-      OriginatingTo: "max:242316535",
-      RawBody: "live-callback-test",
+      ChatType: 'direct',
+      From: 'max:4260364',
+      To: 'max:242316535',
+      OriginatingTo: 'max:242316535',
+      RawBody: 'live-callback-test',
     });
     expect(core.channel.routing.resolveAgentRoute).toHaveBeenCalledWith(
-      expect.objectContaining({ peer: { kind: "direct", id: "4260364" } }),
+      expect.objectContaining({ peer: { kind: 'direct', id: '4260364' } }),
     );
   });
 
-  it("keeps a group callback in the group chat and lets it past the mention gate", async () => {
-    const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./dispatch.js");
+  it('keeps a group callback in the group chat and lets it past the mention gate', async () => {
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { dispatchUpdate } = await import('./dispatch.js');
     const { core, dispatched } = makeCallbackRuntime();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setMaxRuntime(core as any);
 
     const update = structuredClone(LIVE_MESSAGE_CALLBACK) as unknown as MaxUpdate;
-    update.message!.recipient = { chat_type: "chat", chat_id: -71158913982654 };
+    update.message!.recipient = { chat_type: 'chat', chat_id: -71158913982654 };
 
-    await dispatchUpdate(update, makeCallbackOpts({ groupPolicy: "allowlist", groups: { "-71158913982654": {} } }));
+    await dispatchUpdate(
+      update,
+      makeCallbackOpts({ groupPolicy: 'allowlist', groups: { '-71158913982654': {} } }),
+    );
 
     expect(dispatched).toHaveLength(1);
     expect(dispatched[0]).toMatchObject({
-      ChatType: "group",
-      To: "max:-71158913982654",
+      ChatType: 'group',
+      To: 'max:-71158913982654',
       WasMentioned: true,
     });
     expect(core.channel.routing.resolveAgentRoute).toHaveBeenCalledWith(
-      expect.objectContaining({ peer: { kind: "group", id: "-71158913982654" } }),
+      expect.objectContaining({ peer: { kind: 'group', id: '-71158913982654' } }),
     );
   });
 });
 
-describe("edit streaming (streamMode: partial)", () => {
-  it("puts the keyboard of the final answer onto the edited draft", async () => {
-    const { setMaxRuntime } = await import("./runtime.js");
-    const { processIncomingMessage } = await import("./inbound.js");
+describe('edit streaming (streamMode: partial)', () => {
+  it('puts the keyboard of the final answer onto the edited draft', async () => {
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { processIncomingMessage } = await import('./inbound.js');
     const { core } = makeCallbackRuntime();
     const requests: { method: string; url: string; body: Record<string, unknown> }[] = [];
     const originalFetch = global.fetch;
     global.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
-      requests.push({ method: String(init?.method), url: String(url), body: JSON.parse(String(init?.body ?? "{}")) });
-      return new Response(JSON.stringify({ success: true, message: { body: { mid: "mid.draft" } } }), { status: 200 });
-    }) as typeof fetch;
-    const draftText = "Черновик ответа, достаточно длинный для отправки";
-    core.channel.reply.dispatchReplyWithBufferedBlockDispatcher = vi.fn(async (params: {
-      dispatcherOptions: { deliver: (payload: Record<string, unknown>) => Promise<void> };
-      replyOptions: { onPartialReply?: (payload: { text?: string }) => void };
-    }) => {
-      params.replyOptions.onPartialReply?.({ text: draftText });
-      await vi.waitFor(() => expect(requests.some((r) => r.method === "POST")).toBe(true));
-      await params.dispatcherOptions.deliver({
-        text: draftText,
-        channelData: { max: { buttons: [[{ text: "Ещё", payload: "more" }]] } },
+      requests.push({
+        method: String(init?.method),
+        url: String(url),
+        body: JSON.parse(String(init?.body ?? '{}')),
       });
-    }) as never;
+      return new Response(
+        JSON.stringify({ success: true, message: { body: { mid: 'mid.draft' } } }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+    const draftText = 'Черновик ответа, достаточно длинный для отправки';
+    core.channel.reply.dispatchReplyWithBufferedBlockDispatcher = vi.fn(
+      async (params: {
+        dispatcherOptions: { deliver: (payload: Record<string, unknown>) => Promise<void> };
+        replyOptions: { onPartialReply?: (payload: { text?: string }) => void };
+      }) => {
+        params.replyOptions.onPartialReply?.({ text: draftText });
+        await vi.waitFor(() => expect(requests.some((r) => r.method === 'POST')).toBe(true));
+        await params.dispatcherOptions.deliver({
+          text: draftText,
+          channelData: { max: { buttons: [[{ text: 'Ещё', payload: 'more' }]] } },
+        });
+      },
+    ) as never;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setMaxRuntime(core as any);
     try {
       await processIncomingMessage(
         {
-          sender: { user_id: 7, first_name: "Ann", is_bot: false },
-          recipient: { chat_id: 70, chat_type: "dialog" },
+          sender: { user_id: 7, first_name: 'Ann', is_bot: false },
+          recipient: { chat_id: 70, chat_type: 'dialog' },
           timestamp: 1,
-          body: { mid: "mid.in", text: "привет" },
+          body: { mid: 'mid.in', text: 'привет' },
         } as unknown as MaxMessage,
         null,
-        makeCallbackOpts({ dmPolicy: "open", streamMode: "partial" }),
+        makeCallbackOpts({ dmPolicy: 'open', streamMode: 'partial' }),
       );
     } finally {
       global.fetch = originalFetch;
     }
 
-    const sends = requests.filter((r) => r.method === "POST" && r.url.includes("/messages"));
-    const edits = requests.filter((r) => r.method === "PUT");
+    const sends = requests.filter((r) => r.method === 'POST' && r.url.includes('/messages'));
+    const edits = requests.filter((r) => r.method === 'PUT');
     // Same text, but the buttons still arrive via the edit, not a second message.
     expect(sends).toHaveLength(1);
     expect(edits).toHaveLength(1);
-    expect(edits[0].url).toContain("message_id=mid.draft");
+    expect(edits[0].url).toContain('message_id=mid.draft');
     expect(edits[0].body.attachments).toEqual([
-      { type: "inline_keyboard", payload: { buttons: [[{ type: "callback", text: "Ещё", payload: "more" }]] } },
+      {
+        type: 'inline_keyboard',
+        payload: { buttons: [[{ type: 'callback', text: 'Ещё', payload: 'more' }]] },
+      },
     ]);
   });
 });
 
-describe("typing indicator", () => {
-  async function run(message: Record<string, unknown>, accountConfig: Record<string, unknown>, botUsername?: string) {
-    const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./dispatch.js");
+describe('typing indicator', () => {
+  async function run(
+    message: Record<string, unknown>,
+    accountConfig: Record<string, unknown>,
+    botUsername?: string,
+  ) {
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { dispatchUpdate } = await import('./dispatch.js');
     const { core, dispatched } = makeCallbackRuntime();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setMaxRuntime(core as any);
     const opts = { ...makeCallbackOpts(accountConfig), botUserId: 900, botUsername };
-    await dispatchUpdate({ update_type: "message_created", timestamp: 1, message } as unknown as MaxUpdate, opts);
+    await dispatchUpdate(
+      { update_type: 'message_created', timestamp: 1, message } as unknown as MaxUpdate,
+      opts,
+    );
     const actions = (opts.api.sendAction as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1]);
     return { actions, dispatched };
   }
 
-  it("sends typing_on once per message that reaches the agent", async () => {
-    const { actions, dispatched } = await run({
-      sender: { user_id: 7, first_name: "Ann", is_bot: false },
-      recipient: { chat_id: 70, chat_type: "dialog" },
-      timestamp: 1,
-      body: { mid: "mid.t1", text: "привет" },
-    }, { dmPolicy: "open" });
+  it('sends typing_on once per message that reaches the agent', async () => {
+    const { actions, dispatched } = await run(
+      {
+        sender: { user_id: 7, first_name: 'Ann', is_bot: false },
+        recipient: { chat_id: 70, chat_type: 'dialog' },
+        timestamp: 1,
+        body: { mid: 'mid.t1', text: 'привет' },
+      },
+      { dmPolicy: 'open' },
+    );
     expect(dispatched).toHaveLength(1);
-    expect(actions.filter((a) => a === "typing_on")).toHaveLength(1);
-    expect(actions.filter((a) => a === "mark_seen")).toHaveLength(1);
+    expect(actions.filter((a) => a === 'typing_on')).toHaveLength(1);
+    expect(actions.filter((a) => a === 'mark_seen')).toHaveLength(1);
   });
 
-  it("does not show typing for a group message the bot ignores", async () => {
-    const { actions, dispatched } = await run({
-      sender: { user_id: 7, first_name: "Ann", is_bot: false },
-      recipient: { chat_id: -100, chat_type: "chat" },
-      timestamp: 1,
-      body: { mid: "mid.t2", text: "просто болтаем" },
-    }, { groupPolicy: "open" }, "banzai_bot");
+  it('does not show typing for a group message the bot ignores', async () => {
+    const { actions, dispatched } = await run(
+      {
+        sender: { user_id: 7, first_name: 'Ann', is_bot: false },
+        recipient: { chat_id: -100, chat_type: 'chat' },
+        timestamp: 1,
+        body: { mid: 'mid.t2', text: 'просто болтаем' },
+      },
+      { groupPolicy: 'open' },
+      'banzai_bot',
+    );
     expect(dispatched).toHaveLength(0);
-    expect(actions).not.toContain("typing_on");
+    expect(actions).not.toContain('typing_on');
   });
 });
 
-describe("group mentions via body.markup", () => {
-  it("recognises user_mention by user_id or user_link", async () => {
-    const { isBotMentionedInMarkup } = await import("./inbound.js");
-    expect(isBotMentionedInMarkup([{ type: "user_mention", from: 0, length: 6, user_id: 900 }], 900, "banzai_bot")).toBe(true);
-    expect(isBotMentionedInMarkup([{ type: "user_mention", from: 0, length: 11, user_link: "@Banzai_Bot" }], 900, "banzai_bot")).toBe(true);
-    expect(isBotMentionedInMarkup([{ type: "user_mention", from: 0, length: 5, user_link: "@other" }], 900, "banzai_bot")).toBe(false);
-    expect(isBotMentionedInMarkup([{ type: "user_mention", from: 0, length: 5, user_id: 901 }], 900, "banzai_bot")).toBe(false);
-    expect(isBotMentionedInMarkup([{ type: "strong", from: 0, length: 5 }], 900, "banzai_bot")).toBe(false);
-    expect(isBotMentionedInMarkup(null, 900, "banzai_bot")).toBe(false);
+describe('group mentions via body.markup', () => {
+  it('recognises user_mention by user_id or user_link', async () => {
+    const { isBotMentionedInMarkup } = await import('./inbound.js');
+    expect(
+      isBotMentionedInMarkup(
+        [{ type: 'user_mention', from: 0, length: 6, user_id: 900 }],
+        900,
+        'banzai_bot',
+      ),
+    ).toBe(true);
+    expect(
+      isBotMentionedInMarkup(
+        [{ type: 'user_mention', from: 0, length: 11, user_link: '@Banzai_Bot' }],
+        900,
+        'banzai_bot',
+      ),
+    ).toBe(true);
+    expect(
+      isBotMentionedInMarkup(
+        [{ type: 'user_mention', from: 0, length: 5, user_link: '@other' }],
+        900,
+        'banzai_bot',
+      ),
+    ).toBe(false);
+    expect(
+      isBotMentionedInMarkup(
+        [{ type: 'user_mention', from: 0, length: 5, user_id: 901 }],
+        900,
+        'banzai_bot',
+      ),
+    ).toBe(false);
+    expect(
+      isBotMentionedInMarkup([{ type: 'strong', from: 0, length: 5 }], 900, 'banzai_bot'),
+    ).toBe(false);
+    expect(isBotMentionedInMarkup(null, 900, 'banzai_bot')).toBe(false);
   });
 
   async function runGroup(body: Record<string, unknown>, botUsername?: string) {
-    const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./dispatch.js");
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { dispatchUpdate } = await import('./dispatch.js');
     const { core, dispatched } = makeCallbackRuntime();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setMaxRuntime(core as any);
-    const opts = { ...makeCallbackOpts({ groupPolicy: "open" }), botUserId: 900, botUsername };
-    await dispatchUpdate({
-      update_type: "message_created",
-      timestamp: 1,
-      message: {
-        sender: { user_id: 7, first_name: "Ann", is_bot: false },
-        recipient: { chat_id: -100, chat_type: "chat" },
+    const opts = { ...makeCallbackOpts({ groupPolicy: 'open' }), botUserId: 900, botUsername };
+    await dispatchUpdate(
+      {
+        update_type: 'message_created',
         timestamp: 1,
-        body,
-      },
-    } as unknown as MaxUpdate, opts);
+        message: {
+          sender: { user_id: 7, first_name: 'Ann', is_bot: false },
+          recipient: { chat_id: -100, chat_type: 'chat' },
+          timestamp: 1,
+          body,
+        },
+      } as unknown as MaxUpdate,
+      opts,
+    );
     return dispatched;
   }
 
-  it("passes the mention gate on a markup mention whose text differs from @username", async () => {
+  it('passes the mention gate on a markup mention whose text differs from @username', async () => {
     // Display-name mention: the text has no @banzai_bot, only the markup knows.
-    const dispatched = await runGroup({
-      mid: "mid.m1",
-      text: "Банзай, что нового?",
-      markup: [{ type: "user_mention", from: 0, length: 6, user_id: 900 }],
-    }, "banzai_bot");
+    const dispatched = await runGroup(
+      {
+        mid: 'mid.m1',
+        text: 'Банзай, что нового?',
+        markup: [{ type: 'user_mention', from: 0, length: 6, user_id: 900 }],
+      },
+      'banzai_bot',
+    );
     expect(dispatched).toHaveLength(1);
     expect(dispatched[0]?.WasMentioned).toBe(true);
   });
 
-  it("keeps the @username regex as a fallback without markup", async () => {
-    expect(await runGroup({ mid: "mid.m2", text: "@banzai_bot привет" }, "banzai_bot")).toHaveLength(1);
-    expect(await runGroup({ mid: "mid.m3", text: "привет всем" }, "banzai_bot")).toHaveLength(0);
+  it('keeps the @username regex as a fallback without markup', async () => {
+    expect(
+      await runGroup({ mid: 'mid.m2', text: '@banzai_bot привет' }, 'banzai_bot'),
+    ).toHaveLength(1);
+    expect(await runGroup({ mid: 'mid.m3', text: 'привет всем' }, 'banzai_bot')).toHaveLength(0);
   });
 
-  it("works with the bot user id alone (no username known)", async () => {
+  it('works with the bot user id alone (no username known)', async () => {
     const dispatched = await runGroup({
-      mid: "mid.m4",
-      text: "Бот, ответь",
-      markup: [{ type: "user_mention", from: 0, length: 3, user_id: 900 }],
+      mid: 'mid.m4',
+      text: 'Бот, ответь',
+      markup: [{ type: 'user_mention', from: 0, length: 3, user_id: 900 }],
     });
     expect(dispatched).toHaveLength(1);
   });

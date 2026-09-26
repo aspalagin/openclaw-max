@@ -3,18 +3,18 @@
  * all persistent state inside a throwaway temp dir.
  */
 
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { beforeEach } from "vitest";
+import { beforeEach } from 'vitest';
 
-import { resetMaxSendLimiterForTests, setMaxFetchForTests } from "./api.js";
+import { resetMaxSendLimiterForTests, setMaxFetchForTests } from './api.js';
 
-process.env.OPENCLAW_STATE_DIR = mkdtempSync(join(tmpdir(), "openclaw-max-test-"));
+process.env.OPENCLAW_STATE_DIR = mkdtempSync(join(tmpdir(), 'openclaw-max-test-'));
 // Tests assert on exact fetch call sequences — retries would consume queued mocks.
 // Retry behavior itself is covered by tests that pass retryAttempts explicitly.
-process.env.OPENCLAW_MAX_RETRY_ATTEMPTS = "1";
+process.env.OPENCLAW_MAX_RETRY_ATTEMPTS = '1';
 
 type AnyFetch = (url: string, init?: Record<string, unknown>) => Promise<never>;
 

@@ -8,11 +8,11 @@
  * bot_started / chat_title_changed updates and passively from group messages.
  */
 
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 
-import { readJsonFileWithFallback, writeJsonFileAtomically } from "openclaw/plugin-sdk/json-store";
-import { resolveStateDir } from "openclaw/plugin-sdk/state-paths";
+import { readJsonFileWithFallback, writeJsonFileAtomically } from 'openclaw/plugin-sdk/json-store';
+import { resolveStateDir } from 'openclaw/plugin-sdk/state-paths';
 
 export interface MaxChatRegistryEntry {
   chatId: number;
@@ -34,8 +34,8 @@ export interface MaxAccountState {
 }
 
 export function resolveMaxStatePath(accountId: string): string {
-  const safeId = accountId.replace(/[^a-zA-Z0-9_-]/g, "_");
-  return path.join(resolveStateDir(), "max", `state-${safeId}.json`);
+  const safeId = accountId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return path.join(resolveStateDir(), 'max', `state-${safeId}.json`);
 }
 
 export async function loadMaxAccountState(accountId: string): Promise<MaxAccountState> {
@@ -43,10 +43,13 @@ export async function loadMaxAccountState(accountId: string): Promise<MaxAccount
     resolveMaxStatePath(accountId),
     {},
   );
-  return value && typeof value === "object" ? value : {};
+  return value && typeof value === 'object' ? value : {};
 }
 
-export async function saveMaxAccountState(accountId: string, state: MaxAccountState): Promise<void> {
+export async function saveMaxAccountState(
+  accountId: string,
+  state: MaxAccountState,
+): Promise<void> {
   const filePath = resolveMaxStatePath(accountId);
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await writeJsonFileAtomically(filePath, state);
@@ -105,7 +108,11 @@ export class MaxStateStore {
     const existing = this.chats[key];
     const next: MaxChatRegistryEntry = { ...existing, ...patch, chatId };
     // A re-appearing chat is no longer removed/stopped unless the patch says so
-    if (patch.removedAt === undefined && existing?.removedAt !== undefined && patch.addedAt !== undefined) {
+    if (
+      patch.removedAt === undefined &&
+      existing?.removedAt !== undefined &&
+      patch.addedAt !== undefined
+    ) {
       delete next.removedAt;
     }
     this.chats[key] = next;

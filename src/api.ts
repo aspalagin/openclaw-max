@@ -11,13 +11,13 @@
  * Trusted Root/Sub CA. Trust is scoped to this client only, never process-wide.
  */
 
-import { createHash, randomBytes } from "node:crypto";
-import * as tls from "node:tls";
+import { createHash, randomBytes } from 'node:crypto';
+import * as tls from 'node:tls';
 
-import { retryAsync } from "openclaw/plugin-sdk/runtime-env";
-import { Agent, buildConnector, fetch as undiciFetch } from "undici";
+import { retryAsync } from 'openclaw/plugin-sdk/runtime-env';
+import { Agent, buildConnector, fetch as undiciFetch } from 'undici';
 
-import { RUSSIAN_TRUSTED_ROOT_CA, RUSSIAN_TRUSTED_SUB_CA } from "./russian-trusted-ca.js";
+import { RUSSIAN_TRUSTED_ROOT_CA, RUSSIAN_TRUSTED_SUB_CA } from './russian-trusted-ca.js';
 import type {
   MaxBotCommand,
   MaxBotCommandsInfo,
@@ -34,7 +34,7 @@ import type {
   MaxUploadUrlResponse,
   MaxUser,
   MaxVideoInfo,
-} from "./types.js";
+} from './types.js';
 
 export type {
   MaxAttachment,
@@ -63,13 +63,13 @@ export type {
   MaxUploadUrlResponse,
   MaxUser,
   MaxVideoInfo,
-} from "./types.js";
+} from './types.js';
 
 /**
  * platform-api.max.ru is shut down on 2026-07-19; platform-api2.max.ru is the
  * canonical endpoint since June 2026.
  */
-const BASE_URL = "https://platform-api2.max.ru";
+const BASE_URL = 'https://platform-api2.max.ru';
 
 /**
  * Default per-request deadline. Raised from 10s after an intermittent in-process
@@ -87,7 +87,10 @@ const MAX_SLOW_CONNECT_MS = 2_000;
 
 // ────────────────────── HTTP transport ──────────────────────
 
-type FetchLike = (url: string, init?: Record<string, unknown>) => Promise<{
+type FetchLike = (
+  url: string,
+  init?: Record<string, unknown>,
+) => Promise<{
   ok: boolean;
   status: number;
   headers?: { get(name: string): string | null };
@@ -113,7 +116,7 @@ function getMaxDispatcher(): Agent {
       getCACertificates?: (type: string) => readonly string[];
     };
     // getCACertificates("default") includes NODE_EXTRA_CA_CERTS additions when available
-    const systemCas = tlsWithCaList.getCACertificates?.("default") ?? tls.rootCertificates;
+    const systemCas = tlsWithCaList.getCACertificates?.('default') ?? tls.rootCertificates;
     const ca = [...systemCas, RUSSIAN_TRUSTED_ROOT_CA, RUSSIAN_TRUSTED_SUB_CA];
     // Wrap the TLS connector to time the DNS+TCP+TLS phase, scoped to this
     // dispatcher only (never process-wide). Diagnosing the intermittent
@@ -128,8 +131,8 @@ function getMaxDispatcher(): Agent {
         const elapsedMs = Date.now() - startedAt;
         if (err || elapsedMs > MAX_SLOW_CONNECT_MS) {
           console.error(
-            `[MAX API] connect ${options.hostname} ${err ? "failed" : "slow"} dns+tcp+tls=${elapsedMs}ms`
-            + (err ? ` (${err.name})` : ""),
+            `[MAX API] connect ${options.hostname} ${err ? 'failed' : 'slow'} dns+tcp+tls=${elapsedMs}ms` +
+              (err ? ` (${err.name})` : ''),
           );
         }
         callback(...args);
@@ -149,7 +152,10 @@ function maxFetch(url: string, init: Record<string, unknown>): ReturnType<FetchL
 }
 
 function escapeMultipartHeaderValue(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/[\r\n]/g, "_");
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/[\r\n]/g, '_');
 }
 
 function buildMultipartFileBody(
@@ -158,13 +164,13 @@ function buildMultipartFileBody(
   mimeType: string,
   fileBuffer: Buffer,
 ): { body: Buffer; contentType: string } {
-  const boundary = `----openclaw-max-${randomBytes(12).toString("hex")}`;
+  const boundary = `----openclaw-max-${randomBytes(12).toString('hex')}`;
   const escapedField = escapeMultipartHeaderValue(fieldName);
   const escapedFile = escapeMultipartHeaderValue(fileName);
   const preamble = Buffer.from(
-    `--${boundary}\r\n`
-    + `Content-Disposition: form-data; name="${escapedField}"; filename="${escapedFile}"\r\n`
-    + `Content-Type: ${mimeType}\r\n\r\n`,
+    `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="${escapedField}"; filename="${escapedFile}"\r\n` +
+      `Content-Type: ${mimeType}\r\n\r\n`,
   );
   const closing = Buffer.from(`\r\n--${boundary}--\r\n`);
 
@@ -230,7 +236,8 @@ export class MaxChatSendLimiter {
   private prune(): void {
     const now = Date.now();
     for (const [key, times] of this.recent) {
-      if (!this.tails.has(key) && times.every((t) => now - t >= this.windowMs)) this.recent.delete(key);
+      if (!this.tails.has(key) && times.every((t) => now - t >= this.windowMs))
+        this.recent.delete(key);
     }
   }
 }
@@ -254,10 +261,10 @@ export class MaxApiError extends Error {
     public body?: unknown,
   ) {
     super(message);
-    this.name = "MaxApiError";
-    if (body && typeof body === "object") {
+    this.name = 'MaxApiError';
+    if (body && typeof body === 'object') {
       const code = (body as Record<string, unknown>).code;
-      if (typeof code === "string") this.code = code;
+      if (typeof code === 'string') this.code = code;
     }
   }
 }
@@ -272,10 +279,10 @@ export class MaxRequestTimeoutError extends Error {
     public method: string,
     public path: string,
     public elapsedMs: number,
-    public phase: "awaiting-response" | "reading-body",
+    public phase: 'awaiting-response' | 'reading-body',
   ) {
     super(`MAX API ${method} ${path} timed out after ${elapsedMs}ms (phase=${phase})`);
-    this.name = "MaxRequestTimeoutError";
+    this.name = 'MaxRequestTimeoutError';
   }
 }
 
@@ -295,13 +302,13 @@ function isRetryableError(err: unknown, idempotent: boolean): boolean {
     if (err.status === 502 || err.status === 503 || err.status === 504) return idempotent;
     return false;
   }
-  if (err instanceof Error && err.name === "AbortError") return false;
+  if (err instanceof Error && err.name === 'AbortError') return false;
   // undici network-level failure (fetch failed, ECONNRESET, socket hang up…):
   // ambiguous — the request may have reached the server, so retry only if idempotent.
   return idempotent && (err instanceof TypeError || err instanceof Error);
 }
 
-const IDEMPOTENT_METHODS = new Set(["GET", "PUT", "DELETE"]);
+const IDEMPOTENT_METHODS = new Set(['GET', 'PUT', 'DELETE']);
 
 export class MaxApi {
   private token: string;
@@ -315,12 +322,12 @@ export class MaxApi {
   constructor(opts: MaxApiOptions) {
     this.token = opts.token;
     this.sendLimiter = opts.sendLimiter === undefined ? sharedSendLimiter : opts.sendLimiter;
-    this.tokenKey = createHash("sha256").update(opts.token).digest("hex").slice(0, 12);
+    this.tokenKey = createHash('sha256').update(opts.token).digest('hex').slice(0, 12);
     this.baseUrl = opts.baseUrl ?? BASE_URL;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const envAttempts = Number(process.env.OPENCLAW_MAX_RETRY_ATTEMPTS);
-    this.retryAttempts = opts.retryAttempts
-      ?? (Number.isFinite(envAttempts) && envAttempts >= 0 ? envAttempts : 3);
+    this.retryAttempts =
+      opts.retryAttempts ?? (Number.isFinite(envAttempts) && envAttempts >= 0 ? envAttempts : 3);
   }
 
   // ── HTTP helpers ──
@@ -360,7 +367,7 @@ export class MaxApi {
         method,
         headers: {
           Authorization: this.token,
-          ...(body ? { "Content-Type": "application/json" } : {}),
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
         },
         body: body ? JSON.stringify(body) : undefined,
         signal,
@@ -373,7 +380,7 @@ export class MaxApi {
       // The long poll blocks server-side for its `timeout` seconds by design, so
       // it is excluded here; every other call reaching the server slowly is a
       // fingerprint that points away from a connect hang.
-      if (elapsedMs > MAX_SLOW_REQUEST_MS && path !== "/updates") {
+      if (elapsedMs > MAX_SLOW_REQUEST_MS && path !== '/updates') {
         console.error(`[MAX API] ${method} ${path} slow: ${elapsedMs}ms (status ${res.status})`);
       }
 
@@ -386,7 +393,7 @@ export class MaxApi {
           res.status,
           json,
         );
-        const retryAfter = res.headers?.get?.("retry-after");
+        const retryAfter = res.headers?.get?.('retry-after');
         if (retryAfter) {
           const seconds = Number(retryAfter);
           if (Number.isFinite(seconds) && seconds > 0) error.retryAfterMs = seconds * 1000;
@@ -397,19 +404,23 @@ export class MaxApi {
       return json;
     } catch (err) {
       const elapsedMs = Date.now() - startedAt;
-      const isAbort = err instanceof Error && err.name === "AbortError";
+      const isAbort = err instanceof Error && err.name === 'AbortError';
       if (timedOutByUs && isAbort) {
         // Our own deadline fired (not the caller's stop signal). Convert the
         // opaque "This operation was aborted" into a typed, loggable timeout
         // that records whether a response had started.
-        const phase = gotResponse ? "reading-body" : "awaiting-response";
-        console.error(`[MAX API] ${method} ${path} timed out after ${elapsedMs}ms (phase=${phase})`);
+        const phase = gotResponse ? 'reading-body' : 'awaiting-response';
+        console.error(
+          `[MAX API] ${method} ${path} timed out after ${elapsedMs}ms (phase=${phase})`,
+        );
         throw new MaxRequestTimeoutError(method, path, elapsedMs, phase);
       }
       if (!isAbort && !(err instanceof MaxApiError)) {
         // Network-level failure (DNS/TCP/TLS/reset): record timing so a connect
         // stall is distinguishable from a response-wait stall in the log.
-        console.error(`[MAX API] ${method} ${path} failed after ${elapsedMs}ms: ${(err as Error).name}`);
+        console.error(
+          `[MAX API] ${method} ${path} failed after ${elapsedMs}ms: ${(err as Error).name}`,
+        );
       }
       throw err;
     } finally {
@@ -431,20 +442,23 @@ export class MaxApi {
       return this.requestOnce<T>(method, path, params, body, timeoutMs, externalSignal);
     }
     const idempotent = IDEMPOTENT_METHODS.has(method);
-    return retryAsync(() => this.requestOnce<T>(method, path, params, body, timeoutMs, externalSignal), {
-      attempts,
-      minDelayMs: 500,
-      maxDelayMs: 5_000,
-      label: `MAX ${method} ${path}`,
-      shouldRetry: (err) => isRetryableError(err, idempotent),
-      retryAfterMs: (err) => (err instanceof MaxApiError ? err.retryAfterMs : undefined),
-    });
+    return retryAsync(
+      () => this.requestOnce<T>(method, path, params, body, timeoutMs, externalSignal),
+      {
+        attempts,
+        minDelayMs: 500,
+        maxDelayMs: 5_000,
+        label: `MAX ${method} ${path}`,
+        shouldRetry: (err) => isRetryableError(err, idempotent),
+        retryAfterMs: (err) => (err instanceof MaxApiError ? err.retryAfterMs : undefined),
+      },
+    );
   }
 
   // ── Bot info ──
 
   async getMe(): Promise<MaxUser> {
-    return this.request<MaxUser>("GET", "/me");
+    return this.request<MaxUser>('GET', '/me');
   }
 
   // ── Messages ──
@@ -455,82 +469,90 @@ export class MaxApi {
   ): Promise<MaxSendResult> {
     const chat = params.chat_id != null ? `c${params.chat_id}` : `u${params.user_id}`;
     await this.sendLimiter?.acquire(`${this.tokenKey}:${chat}`);
-    return this.request<MaxSendResult>("POST", "/messages", params as Record<string, string | number>, body);
+    return this.request<MaxSendResult>(
+      'POST',
+      '/messages',
+      params as Record<string, string | number>,
+      body,
+    );
   }
 
-  async editMessage(
-    messageId: string,
-    body: MaxNewMessageBody,
-  ): Promise<MaxSimpleResult> {
-    return this.request<MaxSimpleResult>("PUT", "/messages", { message_id: messageId }, body);
+  async editMessage(messageId: string, body: MaxNewMessageBody): Promise<MaxSimpleResult> {
+    return this.request<MaxSimpleResult>('PUT', '/messages', { message_id: messageId }, body);
   }
 
   async deleteMessage(messageId: string): Promise<MaxSimpleResult> {
-    return this.request<MaxSimpleResult>("DELETE", "/messages", { message_id: messageId });
+    return this.request<MaxSimpleResult>('DELETE', '/messages', { message_id: messageId });
   }
 
   /**
    * List messages in a chat, newest first (GET /messages). `before`/`after` are
    * Unix-time bounds in ms; they replace the deprecated `from`/`to`.
    */
-  async getMessages(chatId: number, params?: {
-    message_ids?: string[];
-    before?: number;
-    after?: number;
-    count?: number;
-  }): Promise<{ messages: MaxMessage[] }> {
+  async getMessages(
+    chatId: number,
+    params?: {
+      message_ids?: string[];
+      before?: number;
+      after?: number;
+      count?: number;
+    },
+  ): Promise<{ messages: MaxMessage[] }> {
     const qp: Record<string, string | number> = { chat_id: chatId };
-    if (params?.message_ids) qp.message_ids = params.message_ids.join(",");
+    if (params?.message_ids) qp.message_ids = params.message_ids.join(',');
     if (params?.before != null) qp.before = params.before;
     if (params?.after != null) qp.after = params.after;
     if (params?.count) qp.count = params.count;
-    return this.request("GET", "/messages", qp);
+    return this.request('GET', '/messages', qp);
   }
 
   /** Get a single message by its mid (GET /messages/{messageId}); 404 if gone or inaccessible. */
   async getMessageById(messageId: string): Promise<MaxMessage> {
-    return this.request<MaxMessage>("GET", `/messages/${encodeURIComponent(messageId)}`);
+    return this.request<MaxMessage>('GET', `/messages/${encodeURIComponent(messageId)}`);
   }
 
   // ── Chats ──
 
   /** Get chat info by numeric id (GET /chats/{chatId}). */
   async getChat(chatId: number): Promise<MaxChat> {
-    return this.request("GET", `/chats/${chatId}`);
+    return this.request('GET', `/chats/${chatId}`);
   }
 
   /** Bot's own membership in a chat — is_admin matters: long polling delivers group updates only to admin bots. */
   async getMembership(chatId: number): Promise<MaxChatMember> {
-    return this.request("GET", `/chats/${chatId}/members/me`);
+    return this.request('GET', `/chats/${chatId}/members/me`);
   }
 
   // ── Pinned messages ──
 
   async getPinnedMessage(chatId: number): Promise<{ message?: MaxMessage | null }> {
-    return this.request("GET", `/chats/${chatId}/pin`);
+    return this.request('GET', `/chats/${chatId}/pin`);
   }
 
   async pinMessage(chatId: number, messageId: string, notify?: boolean): Promise<MaxSimpleResult> {
-    return this.request("PUT", `/chats/${chatId}/pin`, undefined, {
+    return this.request('PUT', `/chats/${chatId}/pin`, undefined, {
       message_id: messageId,
       ...(notify != null ? { notify } : {}),
     });
   }
 
   async unpinMessage(chatId: number): Promise<MaxSimpleResult> {
-    return this.request("DELETE", `/chats/${chatId}/pin`);
+    return this.request('DELETE', `/chats/${chatId}/pin`);
   }
 
   // ── Chat actions ──
 
   async sendAction(chatId: number, action: MaxSenderAction): Promise<MaxSimpleResult> {
-    return this.request("POST", `/chats/${chatId}/actions`, undefined, { action });
+    return this.request('POST', `/chats/${chatId}/actions`, undefined, { action });
   }
 
   // ── Callbacks ──
 
-  async answerCallback(callbackId: string, body?: { message?: MaxNewMessageBody; notification?: string }): Promise<MaxSimpleResult> {
-    return this.request("POST", "/answers", { callback_id: callbackId }, body);
+  async answerCallback(
+    callbackId: string,
+    body?: { message?: MaxNewMessageBody; notification?: string },
+  ): Promise<MaxSimpleResult> {
+    return this.request('POST', '/answers', { callback_id: callbackId }, body);
   }
 
   // ── Updates (long polling) ──
@@ -547,24 +569,24 @@ export class MaxApi {
     if (params?.limit) qp.limit = params.limit;
     if (params?.timeout != null) qp.timeout = params.timeout;
     if (params?.marker != null) qp.marker = params.marker;
-    if (params?.types?.length) qp.types = params.types.join(",");
+    if (params?.types?.length) qp.types = params.types.join(',');
 
     // Long polling needs a longer timeout; the polling loop owns retries
     const pollTimeout = ((params?.timeout ?? 30) + 5) * 1000;
-    return this.request("GET", "/updates", qp, undefined, pollTimeout, 0, params?.signal);
+    return this.request('GET', '/updates', qp, undefined, pollTimeout, 0, params?.signal);
   }
 
   // ── Videos ──
 
   /** Playback info for an inbound video attachment (GET /videos/{videoToken}). */
   async getVideoInfo(videoToken: string): Promise<MaxVideoInfo> {
-    return this.request("GET", `/videos/${encodeURIComponent(videoToken)}`);
+    return this.request('GET', `/videos/${encodeURIComponent(videoToken)}`);
   }
 
   // ── Subscriptions (webhooks) ──
 
   async getSubscriptions(): Promise<MaxSubscriptionsResponse> {
-    return this.request("GET", "/subscriptions");
+    return this.request('GET', '/subscriptions');
   }
 
   async subscribe(params: {
@@ -572,11 +594,11 @@ export class MaxApi {
     update_types?: string[];
     secret?: string;
   }): Promise<MaxSimpleResult> {
-    return this.request("POST", "/subscriptions", undefined, params);
+    return this.request('POST', '/subscriptions', undefined, params);
   }
 
   async unsubscribe(subscriptionUrl: string): Promise<MaxSimpleResult> {
-    return this.request("DELETE", "/subscriptions", { url: subscriptionUrl });
+    return this.request('DELETE', '/subscriptions', { url: subscriptionUrl });
   }
 
   // ── Commands ──
@@ -588,18 +610,20 @@ export class MaxApi {
   async setMyCommands(commands: MaxBotCommand[]): Promise<MaxBotCommandsInfo> {
     const normalized = commands
       .map((cmd) => ({
-        name: cmd.name.replace(/^\//, "").slice(0, 64),
+        name: cmd.name.replace(/^\//, '').slice(0, 64),
         ...(cmd.description ? { description: cmd.description.slice(0, 128) } : {}),
       }))
       .filter((cmd) => cmd.name.length > 0)
       .slice(0, 32);
-    return this.request<MaxBotCommandsInfo>("PATCH", "/me/commands", undefined, { commands: normalized });
+    return this.request<MaxBotCommandsInfo>('PATCH', '/me/commands', undefined, {
+      commands: normalized,
+    });
   }
 
   // ── Upload ──
 
-  async getUploadUrl(type: "image" | "video" | "audio" | "file"): Promise<MaxUploadUrlResponse> {
-    return this.request("POST", `/uploads`, { type });
+  async getUploadUrl(type: 'image' | 'video' | 'audio' | 'file'): Promise<MaxUploadUrlResponse> {
+    return this.request('POST', `/uploads`, { type });
   }
 
   /**
@@ -613,7 +637,7 @@ export class MaxApi {
    * @returns Upload result with token (for use in attachment payload)
    */
   async uploadMedia(
-    type: "image" | "video" | "audio" | "file",
+    type: 'image' | 'video' | 'audio' | 'file',
     data: string | Buffer | Uint8Array,
     contentType?: string,
   ): Promise<{ token: string; url?: string }> {
@@ -627,62 +651,62 @@ export class MaxApi {
     // Step 2: Load file if data is a path
     let fileBuffer: Buffer;
     let mimeType = contentType;
-    let fileName = "file";
+    let fileName = 'file';
 
-    if (typeof data === "string") {
+    if (typeof data === 'string') {
       // File path — read from disk
-      const fs = await import("fs/promises");
-      const path = await import("path");
+      const fs = await import('fs/promises');
+      const path = await import('path');
       fileBuffer = await fs.readFile(data);
       fileName = path.basename(data);
 
       // Auto-detect MIME type if not provided
       if (!mimeType) {
-        const ext = data.split(".").pop()?.toLowerCase();
+        const ext = data.split('.').pop()?.toLowerCase();
         const mimeMap: Record<string, string> = {
-          jpg: "image/jpeg",
-          jpeg: "image/jpeg",
-          png: "image/png",
-          gif: "image/gif",
-          webp: "image/webp",
-          heic: "image/heic",
-          heif: "image/heif",
-          tif: "image/tiff",
-          tiff: "image/tiff",
-          bmp: "image/bmp",
-          mp4: "video/mp4",
-          mov: "video/quicktime",
-          avi: "video/x-msvideo",
-          mkv: "video/x-matroska",
-          webm: "video/webm",
-          mp3: "audio/mpeg",
-          wav: "audio/wav",
-          ogg: "audio/ogg",
-          m4a: "audio/mp4",
-          aac: "audio/aac",
-          flac: "audio/flac",
-          opus: "audio/opus",
-          pdf: "application/pdf",
-          txt: "text/plain",
+          jpg: 'image/jpeg',
+          jpeg: 'image/jpeg',
+          png: 'image/png',
+          gif: 'image/gif',
+          webp: 'image/webp',
+          heic: 'image/heic',
+          heif: 'image/heif',
+          tif: 'image/tiff',
+          tiff: 'image/tiff',
+          bmp: 'image/bmp',
+          mp4: 'video/mp4',
+          mov: 'video/quicktime',
+          avi: 'video/x-msvideo',
+          mkv: 'video/x-matroska',
+          webm: 'video/webm',
+          mp3: 'audio/mpeg',
+          wav: 'audio/wav',
+          ogg: 'audio/ogg',
+          m4a: 'audio/mp4',
+          aac: 'audio/aac',
+          flac: 'audio/flac',
+          opus: 'audio/opus',
+          pdf: 'application/pdf',
+          txt: 'text/plain',
         };
-        mimeType = ext ? mimeMap[ext] : "application/octet-stream";
+        mimeType = ext ? mimeMap[ext] : 'application/octet-stream';
       }
     } else {
       // Already a buffer
       fileBuffer = Buffer.from(data);
-      mimeType = mimeType ?? "application/octet-stream";
+      mimeType = mimeType ?? 'application/octet-stream';
     }
 
     // Step 3: POST file as multipart/form-data to upload URL. MAX upload hosts
     // reject Node's native FormData in some cases with 412, while curl-style
     // multipart with a known Content-Length is accepted.
-    const multipart = buildMultipartFileBody("data", fileName, mimeType, fileBuffer);
+    const multipart = buildMultipartFileBody('data', fileName, mimeType, fileBuffer);
 
     const uploadRes = await maxFetch(uploadUrl, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "Content-Type": multipart.contentType,
-        "Content-Length": String(multipart.body.byteLength),
+        'Content-Type': multipart.contentType,
+        'Content-Length': String(multipart.body.byteLength),
       },
       body: multipart.body,
     });
@@ -701,15 +725,17 @@ export class MaxApi {
     const result = (await uploadRes.json().catch(() => ({}))) as Record<string, unknown>;
 
     // Try to find token from nested response structure
-    let token = typeof uploadInfo.token === "string" ? uploadInfo.token : "";
+    let token = typeof uploadInfo.token === 'string' ? uploadInfo.token : '';
     let url: string | undefined;
 
     let foundNested = false;
-    const nestedContainers = ["photos", "videos", "audios", "files"] as const;
+    const nestedContainers = ['photos', 'videos', 'audios', 'files'] as const;
     for (const key of nestedContainers) {
       const container = result[key];
-      if (container && typeof container === "object" && !Array.isArray(container)) {
-        const first = Object.values(container as Record<string, { token?: string; url?: string }>)[0];
+      if (container && typeof container === 'object' && !Array.isArray(container)) {
+        const first = Object.values(
+          container as Record<string, { token?: string; url?: string }>,
+        )[0];
         if (first?.token) {
           token = first.token;
           url = first.url;
@@ -718,17 +744,13 @@ export class MaxApi {
         }
       }
     }
-    if (!foundNested && result.token && typeof result.token === "string") {
+    if (!foundNested && result.token && typeof result.token === 'string') {
       token = result.token;
       url = (result.url as string) ?? undefined;
     }
 
     if (!token) {
-      throw new MaxApiError(
-        "MAX media upload: no token in response",
-        200,
-        result,
-      );
+      throw new MaxApiError('MAX media upload: no token in response', 200, result);
     }
 
     return { token, url };

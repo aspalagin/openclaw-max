@@ -11,10 +11,10 @@
  * stream-draft.ts (replies).
  */
 
-import { type MaxMonitorOptions, resolveMaxTransport } from "./monitor-types.js";
-import { clearMaxSubscriptionsForPolling, startMaxPollingLoop } from "./polling.js";
-import { MaxStateStore } from "./state.js";
-import { startMaxWebhook } from "./webhook-runner.js";
+import { type MaxMonitorOptions, resolveMaxTransport } from './monitor-types.js';
+import { clearMaxSubscriptionsForPolling, startMaxPollingLoop } from './polling.js';
+import { MaxStateStore } from './state.js';
+import { startMaxWebhook } from './webhook-runner.js';
 
 export {
   MAX_SUBSCRIBED_UPDATE_TYPES,
@@ -22,7 +22,7 @@ export {
   type MaxStatusPatch,
   type MaxTransport,
   resolveMaxTransport,
-} from "./monitor-types.js";
+} from './monitor-types.js';
 
 export async function startMaxPolling(opts: MaxMonitorOptions): Promise<void> {
   const { account, log } = opts;
@@ -39,7 +39,7 @@ export async function startMaxPolling(opts: MaxMonitorOptions): Promise<void> {
     log?.error(`[${account.accountId}] MAX state load failed: ${String(err)}`);
   }
 
-  if (resolveMaxTransport(account.config) === "webhook") {
+  if (resolveMaxTransport(account.config) === 'webhook') {
     await startMaxWebhook(opts);
   } else {
     // An active subscription silently disables long polling on the MAX side.

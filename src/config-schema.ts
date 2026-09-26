@@ -2,15 +2,15 @@
  * MAX channel config Zod schema
  */
 
-import { MarkdownConfigSchema, ToolPolicySchema } from "openclaw/plugin-sdk/channel-config-schema";
-import { z } from "zod";
+import { MarkdownConfigSchema, ToolPolicySchema } from 'openclaw/plugin-sdk/channel-config-schema';
+import { z } from 'zod';
 
 // Defaulted policy fields are built with this package's own zod: wrapping the
 // SDK's enum instances in `.optional().default()` breaks as soon as the plugin
 // and the gateway resolve different zod copies (4.4 vs 4.6 → "expected
 // nonoptional"). Values mirror the SDK's DmPolicySchema/GroupPolicySchema.
-export const DmPolicySchema = z.enum(["pairing", "allowlist", "open", "disabled"]);
-export const GroupPolicySchema = z.enum(["open", "disabled", "allowlist"]);
+export const DmPolicySchema = z.enum(['pairing', 'allowlist', 'open', 'disabled']);
+export const GroupPolicySchema = z.enum(['open', 'disabled', 'allowlist']);
 
 // These schemas were removed from the public plugin-sdk surface in OpenClaw 2026.3.x.
 // Inlined here to stay compatible with both old and new runtimes.
@@ -35,9 +35,9 @@ function requireOpenAllowFrom(params: {
   path: (string | number)[];
   message: string;
 }): void {
-  if (params.policy !== "open") return;
+  if (params.policy !== 'open') return;
   const normalized = (params.allowFrom ?? []).map(String);
-  if (normalized.includes("*")) return;
+  if (normalized.includes('*')) return;
   params.ctx.addIssue({
     code: z.ZodIssueCode.custom,
     path: params.path,
@@ -69,13 +69,13 @@ export const MaxAccountSchemaBase = z
     markdown: MarkdownConfigSchema.optional(),
     botToken: z.string().optional(),
     tokenFile: z.string().optional(),
-    dmPolicy: DmPolicySchema.optional().default("pairing"),
+    dmPolicy: DmPolicySchema.optional().default('pairing'),
     allowFrom: z.array(z.union([z.string(), z.number()])).optional(),
     groupAllowFrom: z.array(z.union([z.string(), z.number()])).optional(),
-    groupPolicy: GroupPolicySchema.optional().default("allowlist"),
+    groupPolicy: GroupPolicySchema.optional().default('allowlist'),
     groups: z.record(z.string(), MaxGroupSchema.optional()).optional(),
     /** Update transport; default: "webhook" when webhookUrl is set, otherwise "polling" */
-    transport: z.enum(["polling", "webhook"]).optional(),
+    transport: z.enum(['polling', 'webhook']).optional(),
     webhookUrl: z.string().optional(),
     /** MAX secret: 5–256 of [A-Za-z0-9_-]; checked at start */
     webhookSecret: z.string().optional(),
@@ -87,7 +87,7 @@ export const MaxAccountSchemaBase = z
     dms: z.record(z.string(), DmConfigSchema.optional()).optional(),
     textChunkLimit: z.number().int().positive().optional(),
     blockStreaming: z.boolean().optional(),
-    streamMode: z.enum(["off", "partial", "block"]).optional(),
+    streamMode: z.enum(['off', 'partial', 'block']).optional(),
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
     responsePrefix: z.string().optional(),
     mediaMaxMb: z.number().positive().optional(),
@@ -95,7 +95,7 @@ export const MaxAccountSchemaBase = z
     actions: z
       .record(
         z.string(),
-        z.union([z.boolean(), z.enum(["pairing", "allowlist", "open"])]).optional(),
+        z.union([z.boolean(), z.enum(['pairing', 'allowlist', 'open'])]).optional(),
       )
       .optional(),
   })
@@ -106,10 +106,10 @@ function requireWebhookUrl(params: {
   webhookUrl: string | undefined;
   ctx: z.RefinementCtx;
 }): void {
-  if (params.transport !== "webhook" || params.webhookUrl?.trim()) return;
+  if (params.transport !== 'webhook' || params.webhookUrl?.trim()) return;
   params.ctx.addIssue({
     code: z.ZodIssueCode.custom,
-    path: ["webhookUrl"],
+    path: ['webhookUrl'],
     message: 'channels.max.transport="webhook" requires channels.max.webhookUrl',
   });
 }
@@ -122,7 +122,7 @@ export const MaxAccountSchema = MaxAccountSchemaBase.superRefine((value, ctx) =>
     policy: value.dmPolicy,
     allowFrom: value.allowFrom,
     ctx,
-    path: ["allowFrom"],
+    path: ['allowFrom'],
     message: 'channels.max.dmPolicy="open" requires channels.max.allowFrom to include "*"',
   });
   requireWebhookUrl({ transport: value.transport, webhookUrl: value.webhookUrl, ctx });
@@ -147,7 +147,7 @@ export const MaxConfigSchema = MaxAccountSchemaBase.extend({
     policy: value.dmPolicy,
     allowFrom: value.allowFrom,
     ctx,
-    path: ["allowFrom"],
+    path: ['allowFrom'],
     message: 'channels.max.dmPolicy="open" requires channels.max.allowFrom to include "*"',
   });
   requireWebhookUrl({ transport: value.transport, webhookUrl: value.webhookUrl, ctx });

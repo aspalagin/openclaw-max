@@ -3,15 +3,15 @@
  * requireMention and tool policy, security warnings, pairing approval.
  */
 
-import type { ChannelPlugin } from "openclaw/plugin-sdk/channel-core";
-import type { GroupToolPolicyConfig } from "openclaw/plugin-sdk/channel-policy";
-import { resolveToolsBySender } from "openclaw/plugin-sdk/channel-policy";
-import { PAIRING_APPROVED_MESSAGE } from "openclaw/plugin-sdk/channel-status";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
-import { DEFAULT_ACCOUNT_ID, formatPairingApproveHint } from "openclaw/plugin-sdk/core";
+import type { ChannelPlugin } from 'openclaw/plugin-sdk/channel-core';
+import type { GroupToolPolicyConfig } from 'openclaw/plugin-sdk/channel-policy';
+import { resolveToolsBySender } from 'openclaw/plugin-sdk/channel-policy';
+import { PAIRING_APPROVED_MESSAGE } from 'openclaw/plugin-sdk/channel-status';
+import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
+import { DEFAULT_ACCOUNT_ID, formatPairingApproveHint } from 'openclaw/plugin-sdk/core';
 
-import { type ResolvedMaxAccount, resolveMaxAccount } from "./accounts.js";
-import { sendMaxMessage } from "./send.js";
+import { type ResolvedMaxAccount, resolveMaxAccount } from './accounts.js';
+import { sendMaxMessage } from './send.js';
 
 type MaxChannelPlugin = ChannelPlugin<ResolvedMaxAccount>;
 
@@ -25,8 +25,7 @@ function resolveMaxGroupConfig(
   accountId?: string | null,
 ) {
   const maxSection = (cfg.channels as Record<string, unknown>)?.max as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   if (!maxSection) return { groupConfig: undefined, defaultConfig: undefined };
 
   // Resolve groups map: account-level takes priority over channel-level
@@ -98,8 +97,7 @@ function resolveMaxGroupToolPolicy(params: {
   // Default config fallback
   const defaultSenderPolicy = resolveToolsBySender({
     toolsBySender: defaultConfig?.toolsBySender as
-      | Record<string, GroupToolPolicyConfig>
-      | undefined,
+      Record<string, GroupToolPolicyConfig> | undefined,
     senderId: params.senderId,
     senderName: params.senderName,
     senderUsername: params.senderUsername,
@@ -112,12 +110,11 @@ function resolveMaxGroupToolPolicy(params: {
 }
 
 /** DM policy (default pairing) and warnings for open group policy. */
-export const maxSecurityAdapter: NonNullable<MaxChannelPlugin["security"]> = {
+export const maxSecurityAdapter: NonNullable<MaxChannelPlugin['security']> = {
   resolveDmPolicy: ({ cfg, accountId, account }) => {
     const resolvedAccountId = accountId ?? account.accountId ?? DEFAULT_ACCOUNT_ID;
     const maxSection = (cfg.channels as Record<string, unknown>)?.max as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     const useAccountPath = Boolean(
       (maxSection?.accounts as Record<string, unknown>)?.[resolvedAccountId],
     );
@@ -153,7 +150,7 @@ export const maxSecurityAdapter: NonNullable<MaxChannelPlugin["security"]> = {
 };
 
 /** Group requireMention (default true) and tool policy from channels.max.groups. */
-export const maxGroupsAdapter: NonNullable<MaxChannelPlugin["groups"]> = {
+export const maxGroupsAdapter: NonNullable<MaxChannelPlugin['groups']> = {
   resolveRequireMention: ({ cfg, groupId, accountId }) =>
     resolveMaxGroupRequireMention({ cfg, groupId, accountId }),
   resolveToolPolicy: ({
@@ -177,7 +174,7 @@ export const maxGroupsAdapter: NonNullable<MaxChannelPlugin["groups"]> = {
 };
 
 /** Pairing ids are MAX user ids; approval is announced to the user in MAX. */
-export const maxPairingAdapter: NonNullable<MaxChannelPlugin["pairing"]> = {
+export const maxPairingAdapter: NonNullable<MaxChannelPlugin['pairing']> = {
   idLabel: 'maxUserId',
   normalizeAllowEntry: (entry) => entry.replace(/^max:/i, ''),
   notifyApproval: async ({ cfg, id }) => {

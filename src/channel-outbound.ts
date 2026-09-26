@@ -3,22 +3,28 @@
  * presentation rendering and delivery pins for core's outbound path.
  */
 
-import type { ChannelPlugin } from "openclaw/plugin-sdk/channel-core";
+import type { ChannelPlugin } from 'openclaw/plugin-sdk/channel-core';
 
-import { type ResolvedMaxAccount, resolveMaxAccount } from "./accounts.js";
+import { type ResolvedMaxAccount, resolveMaxAccount } from './accounts.js';
 import {
   materializeMaxPresentation,
   MAX_PRESENTATION_CAPABILITIES,
   MAX_TEXT_LIMIT,
   renderMaxPresentation,
-} from "./presentation.js";
-import { getMaxRuntime, loadMaxConfig } from "./runtime.js";
-import { pinMaxMessage, readMaxChannelButtons, sendMaxMediaGroup, sendMaxMediaMessage, sendMaxMessage } from "./send.js";
+} from './presentation.js';
+import { getMaxRuntime, loadMaxConfig } from './runtime.js';
+import {
+  pinMaxMessage,
+  readMaxChannelButtons,
+  sendMaxMediaGroup,
+  sendMaxMediaMessage,
+  sendMaxMessage,
+} from './send.js';
 
 type MaxChannelPlugin = ChannelPlugin<ResolvedMaxAccount>;
 
 /** Direct delivery with 4000-character markdown chunks. */
-export const maxOutboundAdapter: NonNullable<MaxChannelPlugin["outbound"]> = {
+export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
   deliveryMode: 'direct',
   chunker: (text, limit) => getMaxRuntime().channel.text.chunkMarkdownText(text, limit),
   chunkerMode: 'markdown',
@@ -48,7 +54,9 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin["outbound"]> = {
 
     // Core renders presentation before sendPayload; a payload that still
     // carries one came through a path that did not, so apply the same policy.
-    const payload = rawPayload.presentation ? await materializeMaxPresentation(rawPayload) : rawPayload;
+    const payload = rawPayload.presentation
+      ? await materializeMaxPresentation(rawPayload)
+      : rawPayload;
     const effectiveText = payload === rawPayload ? text : (payload.text ?? '');
     const buttons = readMaxChannelButtons(payload.channelData);
     const mediaUrls = mediaUrl
@@ -77,14 +85,15 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin["outbound"]> = {
 
     // MAX caps a message at 4000 characters: split, keyboard on the last
     // chunk, report the first one (delivery.pin pins the first chunk).
-    const chunks = effectiveText.length > MAX_TEXT_LIMIT
-      ? getMaxRuntime().channel.text.chunkMarkdownText(effectiveText, MAX_TEXT_LIMIT)
-      : [effectiveText];
+    const chunks =
+      effectiveText.length > MAX_TEXT_LIMIT
+        ? getMaxRuntime().channel.text.chunkMarkdownText(effectiveText, MAX_TEXT_LIMIT)
+        : [effectiveText];
     let firstMessageId = '';
     for (let index = 0; index < chunks.length; index += 1) {
       const result = await sendMaxMessage(to, chunks[index], {
         token: account.token,
-        replyToMessageId: index === 0 ? replyToId ?? undefined : undefined,
+        replyToMessageId: index === 0 ? (replyToId ?? undefined) : undefined,
         format: 'markdown',
         buttons: index === chunks.length - 1 ? buttons : undefined,
       });

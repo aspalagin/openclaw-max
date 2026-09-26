@@ -3,7 +3,7 @@
  * and resolution, enable/delete, allowFrom formatting, `openclaw channels add`.
  */
 
-import type { ChannelPlugin } from "openclaw/plugin-sdk/channel-core";
+import type { ChannelPlugin } from 'openclaw/plugin-sdk/channel-core';
 import {
   applyAccountNameToChannelSection,
   DEFAULT_ACCOUNT_ID,
@@ -11,14 +11,14 @@ import {
   migrateBaseNameToDefaultAccount,
   normalizeAccountId,
   setAccountEnabledInConfigSection,
-} from "openclaw/plugin-sdk/core";
+} from 'openclaw/plugin-sdk/core';
 
-import { listMaxAccountIds, type ResolvedMaxAccount, resolveMaxAccount } from "./accounts.js";
+import { listMaxAccountIds, type ResolvedMaxAccount, resolveMaxAccount } from './accounts.js';
 
 type MaxChannelPlugin = ChannelPlugin<ResolvedMaxAccount>;
 
 /** Accounts under channels.max (top level = default account, plus channels.max.accounts). */
-export const maxConfigAdapter: NonNullable<MaxChannelPlugin["config"]> = {
+export const maxConfigAdapter: NonNullable<MaxChannelPlugin['config']> = {
   listAccountIds: (cfg) => listMaxAccountIds(cfg),
   resolveAccount: (cfg, accountId) => resolveMaxAccount({ cfg, accountId }),
   defaultAccountId: () => DEFAULT_ACCOUNT_ID,
@@ -61,7 +61,7 @@ export const maxConfigAdapter: NonNullable<MaxChannelPlugin["config"]> = {
 };
 
 /** Non-interactive setup: token / token file / MAX_BOT_TOKEN for the default account. */
-export const maxSetupAdapter: NonNullable<MaxChannelPlugin["setup"]> = {
+export const maxSetupAdapter: NonNullable<MaxChannelPlugin['setup']> = {
   resolveAccountId: ({ accountId }) => normalizeAccountId(accountId),
 
   applyAccountName: ({ cfg, accountId, name }) =>

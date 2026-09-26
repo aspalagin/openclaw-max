@@ -7,7 +7,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getMaxRuntime, loadMaxConfig, setMaxRuntime, writeMaxConfig } from './runtime.js';
 
 describe('MAX Runtime Bridge', () => {
-   
   const mockRuntime = {
     channel: {} as never,
     config: {} as never,

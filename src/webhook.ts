@@ -9,29 +9,29 @@
  * reporting ready without live ingress.
  */
 
-import { timingSafeEqual } from "node:crypto";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import { timingSafeEqual } from 'node:crypto';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 
-import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
+import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
 import {
   normalizeWebhookPath,
   readJsonWebhookBodyOrReject,
   registerPluginHttpRoute,
   resolveWebhookPath,
-} from "openclaw/plugin-sdk/webhook-ingress";
+} from 'openclaw/plugin-sdk/webhook-ingress';
 
-import type { ResolvedMaxAccount } from "./accounts.js";
-import type { MaxUpdate } from "./api.js";
-import type { MaxApi } from "./api.js";
+import type { ResolvedMaxAccount } from './accounts.js';
+import type { MaxUpdate } from './api.js';
+import type { MaxApi } from './api.js';
 
 /** Plugin id from openclaw.plugin.json — the owner of the gateway route. */
-export const MAX_PLUGIN_ID = "openclaw-max";
+export const MAX_PLUGIN_ID = 'openclaw-max';
 /** Stable same-plugin route sub-owner (see gateway-routes docs). */
-export const MAX_WEBHOOK_ROUTE_SOURCE = "max-webhook";
-export const DEFAULT_MAX_WEBHOOK_PATH = "/max/webhook";
+export const MAX_WEBHOOK_ROUTE_SOURCE = 'max-webhook';
+export const DEFAULT_MAX_WEBHOOK_PATH = '/max/webhook';
 
 /** Header MAX sends with the subscription secret. */
-const SECRET_HEADER = "x-max-bot-api-secret";
+const SECRET_HEADER = 'x-max-bot-api-secret';
 const DEDUPE_CAPACITY = 1000;
 
 function secretsMatch(expected: string, provided: string): boolean {
@@ -56,8 +56,10 @@ type RegisteredTarget = MaxWebhookTarget & { seen: Map<string, true> };
 const webhookTargets = new Map<string, RegisteredTarget[]>();
 
 export function resolveMaxWebhookPath(webhookPath?: string, webhookUrl?: string): string {
-  return resolveWebhookPath({ webhookPath, webhookUrl, defaultPath: DEFAULT_MAX_WEBHOOK_PATH })
-    ?? DEFAULT_MAX_WEBHOOK_PATH;
+  return (
+    resolveWebhookPath({ webhookPath, webhookUrl, defaultPath: DEFAULT_MAX_WEBHOOK_PATH }) ??
+    DEFAULT_MAX_WEBHOOK_PATH
+  );
 }
 
 export function registerMaxWebhookTarget(target: MaxWebhookTarget): () => void {
@@ -93,8 +95,8 @@ export function registerMaxWebhookRoute(params: {
   const register = params.register ?? registerPluginHttpRoute;
   return register({
     path: normalizeWebhookPath(params.path),
-    auth: "plugin",
-    match: "exact",
+    auth: 'plugin',
+    match: 'exact',
     pluginId: MAX_PLUGIN_ID,
     source: MAX_WEBHOOK_ROUTE_SOURCE,
     accountId: params.accountId,
@@ -111,11 +113,12 @@ export function registerMaxWebhookRoute(params: {
  * @internal exported for testing.
  */
 export function maxUpdateDedupeKey(update: MaxUpdate): string | undefined {
-  const id = update.callback?.callback_id
-    ?? update.message?.body?.mid
-    ?? (typeof update.message_id === "string" ? update.message_id : undefined);
+  const id =
+    update.callback?.callback_id ??
+    update.message?.body?.mid ??
+    (typeof update.message_id === 'string' ? update.message_id : undefined);
   if (!id && update.timestamp == null) return undefined;
-  return `${update.update_type}:${update.timestamp ?? ""}:${id ?? ""}`;
+  return `${update.update_type}:${update.timestamp ?? ''}:${id ?? ''}`;
 }
 
 /** Returns true when the key was already seen (LRU bounded by DEDUPE_CAPACITY). */
@@ -137,7 +140,7 @@ export async function handleMaxWebhookRequest(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<boolean> {
-  const url = new URL(req.url ?? "/", "http://localhost");
+  const url = new URL(req.url ?? '/', 'http://localhost');
   const path = normalizeWebhookPath(url.pathname);
   const targets = webhookTargets.get(path);
 
@@ -145,24 +148,24 @@ export async function handleMaxWebhookRequest(
     return false;
   }
 
-  if (req.method !== "POST") {
+  if (req.method !== 'POST') {
     res.statusCode = 405;
-    res.setHeader("Allow", "POST");
-    res.end("Method Not Allowed");
+    res.setHeader('Allow', 'POST');
+    res.end('Method Not Allowed');
     return true;
   }
 
   // Authenticate before reading the body. Targets without a secret never
   // match: an unauthenticated webhook would let anyone inject updates.
   const rawSecret = req.headers[SECRET_HEADER];
-  const providedSecret = Array.isArray(rawSecret) ? rawSecret[0] ?? "" : rawSecret ?? "";
+  const providedSecret = Array.isArray(rawSecret) ? (rawSecret[0] ?? '') : (rawSecret ?? '');
   const matchedTarget = providedSecret
     ? targets.find((target) => target.secret && secretsMatch(target.secret, providedSecret))
     : undefined;
 
   if (!matchedTarget) {
     res.statusCode = 401;
-    res.end("Unauthorized");
+    res.end('Unauthorized');
     return true;
   }
 
@@ -174,7 +177,7 @@ export async function handleMaxWebhookRequest(
     maxBytes: 1024 * 1024,
     timeoutMs: 30_000,
     emptyObjectOnEmpty: false,
-    invalidJsonMessage: "invalid payload",
+    invalidJsonMessage: 'invalid payload',
   });
   if (!body.ok) {
     return true;
@@ -182,13 +185,13 @@ export async function handleMaxWebhookRequest(
 
   const raw = body.value;
   if (
-    !raw
-    || typeof raw !== "object"
-    || Array.isArray(raw)
-    || typeof (raw as { update_type?: unknown }).update_type !== "string"
+    !raw ||
+    typeof raw !== 'object' ||
+    Array.isArray(raw) ||
+    typeof (raw as { update_type?: unknown }).update_type !== 'string'
   ) {
     res.statusCode = 400;
-    res.end("invalid payload");
+    res.end('invalid payload');
     return true;
   }
 
@@ -198,19 +201,23 @@ export async function handleMaxWebhookRequest(
   // then process asynchronously. Errors are logged, never turned into a non-200
   // (that would only make MAX redeliver and eventually unsubscribe the bot).
   res.statusCode = 200;
-  res.setHeader("Content-Type", "application/json");
+  res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify({ ok: true }));
 
   const dedupeKey = maxUpdateDedupeKey(update);
   if (dedupeKey && rememberUpdate(matchedTarget.seen, dedupeKey)) {
-    matchedTarget.log?.(`[${matchedTarget.account.accountId}] MAX webhook: duplicate ${dedupeKey} skipped`);
+    matchedTarget.log?.(
+      `[${matchedTarget.account.accountId}] MAX webhook: duplicate ${dedupeKey} skipped`,
+    );
     return true;
   }
 
   void Promise.resolve()
     .then(() => matchedTarget.onUpdate(update))
     .catch((err: unknown) => {
-      matchedTarget.error?.(`[${matchedTarget.account.accountId}] Webhook update processing failed: ${String(err)}`);
+      matchedTarget.error?.(
+        `[${matchedTarget.account.accountId}] Webhook update processing failed: ${String(err)}`,
+      );
     });
 
   return true;
@@ -230,17 +237,17 @@ export async function subscribeMaxWebhook(params: {
   await api.subscribe({
     url: webhookUrl,
     update_types: updateTypes ?? [
-      "message_created",
-      "message_callback",
-      "message_edited",
-      "message_removed",
-      "bot_started",
-      "bot_stopped",
-      "bot_added",
-      "bot_removed",
-      "dialog_cleared",
-      "dialog_removed",
-      "chat_title_changed",
+      'message_created',
+      'message_callback',
+      'message_edited',
+      'message_removed',
+      'bot_started',
+      'bot_stopped',
+      'bot_added',
+      'bot_removed',
+      'dialog_cleared',
+      'dialog_removed',
+      'chat_title_changed',
     ],
     secret,
   });

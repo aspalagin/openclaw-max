@@ -16,7 +16,7 @@ const CODE_OR_URL = /(```[\s\S]*?```|`[^`]*`|https?:\/\/\S+)/g;
 
 /** Заменяет только <u>…</u> → ++…++; markdown-подчёркивание MAX не поддерживает. */
 function convertSegment(text: string): string {
-  return text.replace(/<u>([\s\S]*?)<\/u>/gi, "++$1++");
+  return text.replace(/<u>([\s\S]*?)<\/u>/gi, '++$1++');
 }
 
 /**
@@ -29,5 +29,5 @@ export function toMaxMarkdown(text: string): string {
   return text
     .split(CODE_OR_URL)
     .map((segment, index) => (index % 2 === 0 ? convertSegment(segment) : segment))
-    .join("");
+    .join('');
 }

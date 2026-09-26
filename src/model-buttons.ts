@@ -31,7 +31,7 @@ function isCurrentModelSelection(params: {
 }): boolean {
   const currentModel = params.currentModel?.trim();
   if (!currentModel) return false;
-  return currentModel.includes("/")
+  return currentModel.includes('/')
     ? currentModel === `${params.provider}/${params.model}`
     : currentModel === params.model;
 }
@@ -61,7 +61,7 @@ export function buildMaxModelsKeyboard(params: {
 }): MaxButton[][] {
   const pageSize = params.pageSize ?? MODELS_PAGE_SIZE;
   if (params.models.length === 0) {
-    return [[{ text: "← Назад", payload: "/models" }]];
+    return [[{ text: '← Назад', payload: '/models' }]];
   }
 
   const rows: MaxButton[][] = [];
@@ -69,7 +69,7 @@ export function buildMaxModelsKeyboard(params: {
   const pageModels = params.models.slice(startIndex, startIndex + pageSize);
 
   for (const model of pageModels) {
-    const fallbackLabel = model.includes("/") ? `${params.provider}/${model}` : model;
+    const fallbackLabel = model.includes('/') ? `${params.provider}/${model}` : model;
     const displayText = truncateModelId(
       params.modelNames?.get(`${params.provider}/${model}`) ?? fallbackLabel,
       38,
@@ -89,7 +89,7 @@ export function buildMaxModelsKeyboard(params: {
     const paginationRow: MaxButton[] = [];
     if (params.currentPage > 1) {
       paginationRow.push({
-        text: "◀ Назад",
+        text: '◀ Назад',
         payload: `/models ${params.provider} page=${params.currentPage - 1}`,
       });
     }
@@ -99,19 +99,19 @@ export function buildMaxModelsKeyboard(params: {
     });
     if (params.currentPage < params.totalPages) {
       paginationRow.push({
-        text: "Вперёд ▶",
+        text: 'Вперёд ▶',
         payload: `/models ${params.provider} page=${params.currentPage + 1}`,
       });
     }
     rows.push(paginationRow);
   }
 
-  rows.push([{ text: "← Назад", payload: "/models" }]);
+  rows.push([{ text: '← Назад', payload: '/models' }]);
   return rows;
 }
 
 export function buildMaxBrowseProvidersButton(): MaxButton[][] {
-  return [[{ text: "Выбрать провайдера", payload: "/models" }]];
+  return [[{ text: 'Выбрать провайдера', payload: '/models' }]];
 }
 
 export function buildMaxModelsMenuChannelData(params: { providers: ProviderInfo[] }) {
@@ -124,10 +124,12 @@ export function buildMaxModelsProviderChannelData(params: { providers: ProviderI
 
 export function buildMaxModelsAddProviderChannelData(params: { providers: Array<{ id: string }> }) {
   return maxChannelData(
-    params.providers.map((provider) => [{
-      text: provider.id,
-      payload: `/models add ${provider.id}`,
-    }]),
+    params.providers.map((provider) => [
+      {
+        text: provider.id,
+        payload: `/models add ${provider.id}`,
+      },
+    ]),
   );
 }
 
