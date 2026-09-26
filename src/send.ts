@@ -292,13 +292,33 @@ async function sendWithBody(params: {
   const { api, to, opts, retry } = params;
   const target = await resolveMaxTarget(api, to);
   const body = typeof params.body === 'function' ? await params.body() : params.body;
-  const sendParams = buildSendParams(target, opts);
-  const send = () => api.sendMessage(body, sendParams);
-  const result = await (retry ? retry(send) : send());
+  const sendTo = (to: MaxSendTarget) => {
+    const sendParams = buildSendParams(to, opts);
+    const send = () => api.sendMessage(body, sendParams);
+    return retry ? retry(send) : send();
+  };
+  let result: MaxSendResult;
+  try {
+    result = await sendTo(target);
+  } catch (err) {
+    // A bare positive number is ambiguous: agents often pass a user id where
+    // a chat id is expected (the directory hands out user ids of DM peers).
+    // MAX rejected the send outright, so nothing was delivered and one retry
+    // as user_id cannot duplicate.
+    if (!('chat_id' in target) || target.chat_id <= 0 || !isChatNotFound(err)) throw err;
+    result = await sendTo({ user_id: target.chat_id });
+  }
   return {
     messageId: result.message?.body?.mid ?? '',
     raw: result,
   };
+}
+
+/** MAX answer for a chat_id that names no chat of the bot (e.g. a user id). */
+export function isChatNotFound(err: unknown): boolean {
+  if (!(err instanceof MaxApiError)) return false;
+  if (err.code === 'dialog.not.found' || err.code === 'chat.not.found') return true;
+  return /\b(dialog|chat)\.not\.found\b/.test(err.message);
 }
 
 /**

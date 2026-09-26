@@ -11,18 +11,27 @@ import { loadMaxAccountState } from './state.js';
 
 type MaxChannelPlugin = ChannelPlugin<ResolvedMaxAccount>;
 
-/** Targets are numeric chat/user ids with an optional max: prefix. */
+/** `user:<id>` addresses a user (DM); a bare number is a chat id. */
+const MAX_TARGET_PATTERN = /^(?:user:\d+|-?\d+)$/;
+
+function stripMaxPrefix(raw: string): string {
+  const trimmed = raw.trim();
+  return trimmed.startsWith('max:') ? trimmed.slice(4) : trimmed;
+}
+
+/**
+ * Targets are numeric chat ids or `user:<id>`, with an optional max: prefix.
+ * The `user:` prefix must survive normalization: dropping it turns a user id
+ * into a chat_id and MAX answers dialog.not.found.
+ */
 export const maxMessagingAdapter: NonNullable<MaxChannelPlugin['messaging']> = {
   normalizeTarget: (raw) => {
-    const trimmed = raw.trim();
-    const normalized = trimmed.startsWith('max:') ? trimmed.slice(4) : trimmed;
-    // MAX uses numeric IDs
-    if (/^-?\d+$/.test(normalized)) return normalized;
-    return undefined;
+    const normalized = stripMaxPrefix(raw);
+    return MAX_TARGET_PATTERN.test(normalized) ? normalized : undefined;
   },
   targetResolver: {
-    looksLikeId: (raw) => /^-?\d+$/.test(raw.trim().replace(/^max:/, '')),
-    hint: '<chatId|userId>',
+    looksLikeId: (raw) => MAX_TARGET_PATTERN.test(stripMaxPrefix(raw)),
+    hint: '<chatId|user:userId>',
   },
 };
 

@@ -64,6 +64,43 @@ describe('MAX Message Sending', () => {
       spy.mockRestore();
     });
 
+    it('retries a bare positive id as user_id once when MAX answers dialog.not.found', async () => {
+      const { MaxApiError } = await import('./api.js');
+      const spy = vi
+        .spyOn(MaxApi.prototype, 'sendMessage')
+        .mockRejectedValueOnce(
+          new MaxApiError('MAX API 404', 404, { code: 'dialog.not.found', message: 'x' }),
+        )
+        .mockResolvedValueOnce({
+          message: { body: { mid: 'msg-user' }, timestamp: 1, recipient: { chat_id: 9 } },
+        } as never);
+
+      const result = await sendMaxMessage('4260364', 'Hi', { token: MOCK_TOKEN });
+
+      expect(result.messageId).toBe('msg-user');
+      expect(spy).toHaveBeenCalledTimes(2);
+      expect(spy.mock.calls[0][1]).toMatchObject({ chat_id: 4260364 });
+      expect(spy.mock.calls[1][1]).toMatchObject({ user_id: 4260364 });
+      expect(spy.mock.calls[1][1]).not.toHaveProperty('chat_id');
+      spy.mockRestore();
+    });
+
+    it('does not retry as user_id for group ids, user: targets or other errors', async () => {
+      const { MaxApiError } = await import('./api.js');
+      const notFound = () =>
+        new MaxApiError('MAX API 404', 404, { code: 'chat.not.found', message: 'x' });
+      const spy = vi.spyOn(MaxApi.prototype, 'sendMessage').mockImplementation(async () => {
+        throw notFound();
+      });
+      await expect(sendMaxMessage('-7115', 'Hi', { token: MOCK_TOKEN })).rejects.toThrow();
+      await expect(sendMaxMessage('user:5', 'Hi', { token: MOCK_TOKEN })).rejects.toThrow();
+      expect(spy).toHaveBeenCalledTimes(2);
+      spy.mockRejectedValueOnce(new MaxApiError('MAX API 403', 403, { code: 'chat.denied' }));
+      await expect(sendMaxMessage('5', 'Hi', { token: MOCK_TOKEN })).rejects.toThrow('403');
+      expect(spy).toHaveBeenCalledTimes(3);
+      spy.mockRestore();
+    });
+
     it('does not retry a text send on a non-timeout error', async () => {
       const spy = vi.spyOn(MaxApi.prototype, 'sendMessage').mockRejectedValue(new Error('boom'));
 

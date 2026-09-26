@@ -428,6 +428,14 @@ describe('MAX Group Functionality', () => {
     it('should return undefined for empty string', () => {
       expect(normalize('')).toBeUndefined();
     });
+
+    it('keeps the user: prefix (a user id is not a chat id)', () => {
+      expect(normalize('user:4260364')).toBe('user:4260364');
+      expect(normalize('max:user:4260364')).toBe('user:4260364');
+      expect(normalize('max:12345')).toBe('12345');
+      expect(normalize('user:abc')).toBeUndefined();
+      expect(normalize('user:-5')).toBeUndefined();
+    });
   });
 
   describe('messaging.targetResolver', () => {
@@ -436,6 +444,8 @@ describe('MAX Group Functionality', () => {
     it('should recognize numeric IDs', () => {
       expect(resolver.looksLikeId('12345')).toBe(true);
       expect(resolver.looksLikeId('-71158913982654')).toBe(true);
+      expect(resolver.looksLikeId('user:4260364')).toBe(true);
+      expect(resolver.looksLikeId('max:user:4260364')).toBe(true);
     });
 
     it('should reject non-numeric strings', () => {
@@ -444,7 +454,7 @@ describe('MAX Group Functionality', () => {
     });
 
     it('should have correct hint', () => {
-      expect(resolver.hint).toBe('<chatId|userId>');
+      expect(resolver.hint).toBe('<chatId|user:userId>');
     });
   });
 
