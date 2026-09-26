@@ -75,11 +75,16 @@ export interface MaxAttachment {
   [key: string]: unknown;
 }
 
+/**
+ * LinkedMessage (schema.yaml): the forwarded or replied-to message. `message`
+ * is a MessageBody (mid, text, attachments, markup), not a full Message;
+ * `sender` is null for posts made on behalf of a channel.
+ */
 export interface MaxLinkedMessage {
   type: 'forward' | 'reply';
-  sender?: MaxUser;
+  sender?: MaxUser | null;
   chat_id?: number;
-  message?: MaxMessage;
+  message?: MaxMessageBody | null;
 }
 
 export interface MaxUpdatesResponse {
@@ -224,7 +229,8 @@ export interface MaxMessage {
   recipient: MaxRecipient;
   timestamp: number;
   link?: MaxLinkedMessage | null;
-  body: MaxMessageBody;
+  /** Null when the message consists only of a forward (content in link.message). */
+  body: MaxMessageBody | null;
   stat?: { views?: number } | null;
   url?: string | null;
 }

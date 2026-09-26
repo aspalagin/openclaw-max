@@ -636,7 +636,7 @@ describe('MAX Group Functionality', () => {
 
       expect(synthetic.recipient).toEqual({ chat_id: -71158913982654, chat_type: 'chat' });
       expect(synthetic.sender?.user_id).toBe(5975998);
-      expect(synthetic.body.text).toBe('/models');
+      expect(synthetic.body?.text).toBe('/models');
     });
   });
 

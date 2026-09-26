@@ -6,7 +6,7 @@
 import { toInboundMediaFacts } from 'openclaw/plugin-sdk/channel-inbound';
 import { createReplyPrefixOptions } from 'openclaw/plugin-sdk/channel-outbound';
 
-import type { MaxMessage, MaxUser } from './api.js';
+import type { MaxAttachment, MaxLinkedMessage, MaxMessage, MaxUser } from './api.js';
 import { deliverMaxReply, withoutMaxButtons } from './deliver.js';
 import { collectInboundAttachments } from './inbound-attachments.js';
 import type { MaxMonitorOptions } from './monitor-types.js';
@@ -15,6 +15,9 @@ import { getMaxRuntime } from './runtime.js';
 import { readMaxChannelButtons, sendMaxMessage } from './send.js';
 import { createMaxDraftStream } from './stream-draft.js';
 import type { MaxMarkupElement } from './types.js';
+
+/** Longest quote of a replied-to message handed to the agent. */
+const MAX_REPLY_QUOTE_CHARS = 1000;
 
 /**
  * Process incoming MAX message through OpenClaw pipeline (also the target of
@@ -37,24 +40,38 @@ export async function processIncomingMessage(
   const chatType = message.recipient.chat_type; // "dialog", "chat", "channel"
   const isGroup = chatType === 'chat' || chatType === 'channel';
 
-  const rawText = message.body.text ?? '';
-  const messageId = message.body.mid;
+  // body is null when the message is only a forward; the content then lives
+  // in link.message. Such a message has no mid of its own: a stable synthetic
+  // id keeps redelivery dedup working, and replies go out without a link.
+  const messageBody = message.body ?? undefined;
+  const rawText = messageBody?.text ?? '';
+  const messageId =
+    messageBody?.mid ??
+    `link_${chatId ?? senderId}_${message.timestamp}_${message.link?.message?.mid ?? ''}`;
   const isCallbackCommand =
     (message as MaxMessage & { __maxCallback?: boolean }).__maxCallback === true;
-  const attachments = message.body.attachments ?? [];
+  const attachments = messageBody?.attachments ?? [];
+  const forward = readForwardedMessage(message.link);
 
   log?.debug?.(
     `[${account.accountId}] Processing message: mid=${messageId} chatId=${message.recipient.chat_id} chatType=${message.recipient.chat_type} senderId=${message.sender?.user_id} text="${rawText.slice(0, 50)}" attachments=${attachments.length}`,
   );
 
   // Skip truly empty messages (no text and no attachment that yields media or
-  // a description; inline keyboards yield neither). Attachments are
-  // downloaded only after the DM/group gates below, so ignored group chatter
-  // costs no traffic or disk.
-  if (!rawText.trim() && !attachments.some((att) => att.type !== 'inline_keyboard')) return;
+  // a description; inline keyboards yield neither), counting forwarded
+  // content. Attachments are downloaded only after the DM/group gates below,
+  // so ignored group chatter costs no traffic or disk.
+  if (
+    !rawText.trim() &&
+    !hasAgentAttachments(attachments) &&
+    !(forward && (forward.text.trim() || hasAgentAttachments(forward.attachments)))
+  ) {
+    return;
+  }
 
-  // Check for reply context
-  const replyToId = message.link?.type === 'reply' ? message.link.message?.body?.mid : undefined;
+  // Check for reply context (link.message is the replied-to MessageBody)
+  const reply = message.link?.type === 'reply' ? message.link : undefined;
+  const replyToId = reply?.message?.mid ?? undefined;
 
   // Check for bot mention in group chats
   let wasMentioned: boolean | undefined;
@@ -165,18 +182,36 @@ export async function processIncomingMessage(
   }
 
   // Process attachments: download media, build descriptions for non-downloadable types
-  const { descriptions: attachmentDescriptions, mediaInputs } = await collectInboundAttachments({
-    attachments,
-    messageId,
-    chatId,
-    api: opts.api,
-    account,
-    log,
-  });
+  const { descriptions: attachmentDescriptions, mediaInputs: ownMediaInputs } =
+    await collectInboundAttachments({
+      attachments,
+      messageId,
+      chatId,
+      api: opts.api,
+      account,
+      log,
+    });
+  // Forwarded attachments pass the same gates and download limits as the
+  // sender's own; their descriptions stay inside the forwarded block.
+  const forwarded = forward
+    ? await collectInboundAttachments({
+        attachments: forward.attachments,
+        messageId,
+        chatId,
+        api: opts.api,
+        account,
+        log,
+      })
+    : undefined;
+  const mediaInputs = [...ownMediaInputs, ...(forwarded?.mediaInputs ?? [])];
+  const forwardBlock =
+    forward && forwarded
+      ? formatForwardBlock(forward, forwarded.descriptions, forwarded.mediaInputs.length > 0)
+      : '';
 
   const attachmentText = attachmentDescriptions.join(' ');
   const hasMedia = mediaInputs.length > 0;
-  const effectiveText = rawText.trim() || attachmentText;
+  const effectiveText = rawText.trim() || attachmentText || forwardBlock;
 
   // Nothing usable came out of the attachments (e.g. a failed sticker download)
   if (!effectiveText && !hasMedia) return;
@@ -210,12 +245,18 @@ export async function processIncomingMessage(
     sessionKey: route.sessionKey,
   });
 
-  // Combine text and attachment descriptions for the agent
-  const bodyForAgent = attachmentText
+  // Combine text and attachment descriptions for the agent; a forward follows
+  // the sender's own text as a marked block.
+  const ownBodyForAgent = attachmentText
     ? rawText.trim()
       ? `${rawText.trim()}\n${attachmentText}`
       : attachmentText
     : rawText;
+  const bodyForAgent = forwardBlock
+    ? ownBodyForAgent.trim()
+      ? `${ownBodyForAgent.trim()}\n\n${forwardBlock}`
+      : forwardBlock
+    : ownBodyForAgent;
 
   const body = core.channel.reply.formatAgentEnvelope({
     channel: 'MAX',
@@ -234,7 +275,9 @@ export async function processIncomingMessage(
     Body: body,
     BodyForAgent: bodyForAgent,
     RawBody: rawText,
-    CommandBody: rawText || attachmentText,
+    // Forwarded text is someone else's words: never parse it as a command or
+    // an inline directive, only the sender's own text.
+    CommandBody: rawText || (forward ? '' : attachmentText),
     From: `max:${senderId}`,
     To: `max:${chatIdStr}`,
     SessionKey: route.sessionKey,
@@ -251,6 +294,7 @@ export async function processIncomingMessage(
     MessageSidFull: messageId,
     ReplyToId: replyToId,
     ReplyToIdFull: replyToId,
+    SupplementalContext: buildSupplementalContext(reply, replyToId, forward),
     OriginatingChannel: 'max',
     OriginatingTo: `max:${chatIdStr}`,
     // Media attachments (downloaded to local paths) as ordered media facts
@@ -300,7 +344,8 @@ export async function processIncomingMessage(
   const streamMode = account.config.streamMode ?? 'off';
   const useEditStreaming = streamMode === 'partial';
   const useBlockStreaming = streamMode === 'block';
-  const replyMid = isCallbackCommand ? undefined : messageId.replace(/_edited_\d+$/, '');
+  const replyMid =
+    isCallbackCommand || !messageBody ? undefined : messageId.replace(/_edited_\d+$/, '');
   const callbackId = isCallbackCommand ? messageId : undefined;
 
   // Draft stream for edit-streaming (like Telegram's partial reply approach)
@@ -398,6 +443,112 @@ export function isBotMentionedInMarkup(
         : '';
     return Boolean(username && link === username);
   });
+}
+
+interface MaxForwardedContent {
+  text: string;
+  attachments: MaxAttachment[];
+  /** Original author; null/undefined for channel posts or hidden senders. */
+  sender?: MaxUser | null;
+  /** Chat where the message was originally posted. */
+  chatId?: number;
+}
+
+/** Content of a forwarded message (link.type 'forward'), if any. */
+function readForwardedMessage(
+  link: MaxLinkedMessage | null | undefined,
+): MaxForwardedContent | undefined {
+  if (link?.type !== 'forward' || !link.message) return undefined;
+  return {
+    text: link.message.text ?? '',
+    attachments: link.message.attachments ?? [],
+    sender: link.sender,
+    chatId: link.chat_id,
+  };
+}
+
+function hasAgentAttachments(attachments: MaxAttachment[]): boolean {
+  return attachments.some((att) => att.type !== 'inline_keyboard');
+}
+
+/** Author label of a linked message: sender name, or the origin chat for channel posts. */
+function formatLinkedAuthor(
+  sender: MaxUser | null | undefined,
+  chatId: number | undefined,
+): string | undefined {
+  if (sender) return formatSenderName(sender);
+  return chatId != null ? `chat:${chatId}` : undefined;
+}
+
+/**
+ * The forwarded message as a marked block for the agent: header with the
+ * author, then its text and attachment descriptions. Empty when nothing
+ * usable is left (no text, descriptions or downloaded media).
+ */
+function formatForwardBlock(
+  forward: MaxForwardedContent,
+  descriptions: string[],
+  hasMedia: boolean,
+): string {
+  const text = forward.text.trim();
+  const attachmentText = descriptions.join(' ');
+  if (!text && !attachmentText && !hasMedia) return '';
+  const author = formatLinkedAuthor(forward.sender, forward.chatId);
+  const header = author ? `[Forwarded message from ${author}]` : '[Forwarded message]';
+  return [header, text, attachmentText].filter(Boolean).join('\n');
+}
+
+/**
+ * Reply quote and forward origin as SDK supplemental facts; core renders
+ * them as untrusted "Reply target" / "Forwarded message context" blocks.
+ * @internal exported for testing.
+ */
+export function buildSupplementalContext(
+  reply: MaxLinkedMessage | undefined,
+  replyToId: string | undefined,
+  forward: MaxForwardedContent | undefined,
+): { quote?: Record<string, string>; forwarded?: Record<string, string> } | undefined {
+  const quote = reply ? buildReplyQuote(reply, replyToId) : undefined;
+  const from = forward ? formatLinkedAuthor(forward.sender, forward.chatId) : undefined;
+  const forwarded =
+    forward && from
+      ? {
+          from,
+          fromType: forward.sender ? 'user' : 'channel',
+          ...(forward.sender
+            ? { fromId: String(forward.sender.user_id) }
+            : forward.chatId != null
+              ? { fromId: String(forward.chatId) }
+              : {}),
+        }
+      : undefined;
+  if (!quote && !forwarded) return undefined;
+  return { ...(quote ? { quote } : {}), ...(forwarded ? { forwarded } : {}) };
+}
+
+/** Bounded quote of the replied-to message: its text, else its attachment types. */
+function buildReplyQuote(
+  reply: MaxLinkedMessage,
+  replyToId: string | undefined,
+): Record<string, string> | undefined {
+  const text = (reply.message?.text ?? '').trim();
+  const attachmentTypes = (reply.message?.attachments ?? [])
+    .filter((att) => att.type !== 'inline_keyboard')
+    .map((att) => `[${att.type ?? 'attachment'}]`)
+    .join(' ');
+  // Clip by code points so an emoji is never cut in half.
+  const quoted = Array.from(text || attachmentTypes);
+  const body =
+    quoted.length > MAX_REPLY_QUOTE_CHARS
+      ? `${quoted.slice(0, MAX_REPLY_QUOTE_CHARS - 1).join('')}…`
+      : quoted.join('');
+  const sender = formatLinkedAuthor(reply.sender, reply.chat_id);
+  if (!body && !sender && !replyToId) return undefined;
+  return {
+    ...(replyToId ? { id: replyToId, fullId: replyToId } : {}),
+    ...(body ? { body } : {}),
+    ...(sender ? { sender } : {}),
+  };
 }
 
 function escapeRegExp(value: string): string {

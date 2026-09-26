@@ -67,7 +67,9 @@ export async function dispatchUpdate(update: MaxUpdate, opts: MaxMonitorOptions)
     }
 
     case 'message_edited': {
-      if (!update.message) break;
+      // An edit always carries the edited body; a forward-only message
+      // (body null) cannot be edited.
+      if (!update.message?.body) break;
       // Skip edits from the bot itself
       if (opts.botUserId && update.message.sender?.user_id === opts.botUserId) break;
       log?.debug?.(
@@ -78,11 +80,10 @@ export async function dispatchUpdate(update: MaxUpdate, opts: MaxMonitorOptions)
       sendReadReceipt(update.message.recipient?.chat_id, opts);
       // Process edited message through the same pipeline as new messages.
       // Use a unique mid suffix to avoid OpenClaw dedup (same mid = skipped).
-      const editedMessage = { ...update.message };
-      const originalMid = editedMessage.body.mid;
-      editedMessage.body = {
-        ...editedMessage.body,
-        mid: `${originalMid}_edited_${update.timestamp}`,
+      const originalMid = update.message.body.mid;
+      const editedMessage = {
+        ...update.message,
+        body: { ...update.message.body, mid: `${originalMid}_edited_${update.timestamp}` },
       };
 
       // MAX message_edited may not include text — fetch it from API if missing

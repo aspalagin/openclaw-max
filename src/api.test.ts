@@ -240,7 +240,7 @@ describe('MaxApi', () => {
       ];
       expect(url).toBe(`${MOCK_BASE_URL}/messages/mid.abc_1`);
       expect(init.method).toBe('GET');
-      expect(result.body.mid).toBe('mid.abc_1');
+      expect(result.body?.mid).toBe('mid.abc_1');
     });
   });
 

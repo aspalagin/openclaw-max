@@ -116,6 +116,8 @@ export function maxUpdateDedupeKey(update: MaxUpdate): string | undefined {
   const id =
     update.callback?.callback_id ??
     update.message?.body?.mid ??
+    // A forward-only message has no body; its link carries the original mid.
+    update.message?.link?.message?.mid ??
     (typeof update.message_id === 'string' ? update.message_id : undefined);
   if (!id && update.timestamp == null) return undefined;
   return `${update.update_type}:${update.timestamp ?? ''}:${id ?? ''}`;
