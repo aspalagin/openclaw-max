@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.7.3 - 2026-09-27
+
+### Changed
+
+- Манифест: убрано устаревшее верхнеуровневое поле `channelEnvVars` (нет в списке поддерживаемых полей OpenClaw 2026.9.x); env-метаданные канала объявлены в `package.json` → `openclaw.channel.configuredState.env.anyOf: ["MAX_BOT_TOKEN"]`, как читает gateway. Добавлены `categories: ["channels"]` и `label`/`description` в `channelConfigs.max`. Предупреждения ClawHub Plugin Inspector (`channel-env-vars`, `manifest-unknown-fields`) закрыты.
+
 ## 0.7.2 - 2026-09-27
 
 ### Changed

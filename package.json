@@ -1,6 +1,6 @@
 {
   "name": "@aspalagin/openclaw-max",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "MAX messenger channel plugin for OpenClaw",
   "keywords": [
     "openclaw",
@@ -61,7 +61,14 @@
       "selectionLabel": "MAX (max.ru)",
       "docsPath": "/channels/max",
       "docsLabel": "max",
-      "blurb": "MAX messenger channel (max.ru Bot API)."
+      "blurb": "MAX messenger channel (max.ru Bot API).",
+      "configuredState": {
+        "env": {
+          "anyOf": [
+            "MAX_BOT_TOKEN"
+          ]
+        }
+      }
     },
     "compat": {
       "pluginApi": ">=2026.9.6",
