@@ -352,7 +352,39 @@ function retryWhileAttachmentNotReady(send: () => Promise<MaxSendResult>): Promi
 }
 
 /**
- * Send a text message to a MAX chat or user.
+ * MAX refused a formatted text request as a whole (400) for a reason other
+ * than the target, an unready attachment or a dialog-only restriction, so the
+ * likely cause is the markup. MAX documents no dedicated code for bad markup:
+ * the known unrelated refusals are excluded instead. A 400 means nothing was
+ * created, so one plain-text resend cannot duplicate the message.
+ */
+export function isMaxFormatRejection(err: unknown): boolean {
+  if (!(err instanceof MaxApiError) || err.status !== 400) return false;
+  return !isChatNotFound(err) && !isAttachmentNotReady(err) && !isPinUnavailableForDialog(err);
+}
+
+/**
+ * Run a formatted text request; when MAX refuses the markup, repeat it once
+ * without `format` (the text goes as written). The second failure propagates.
+ */
+async function withPlainTextFallback<T>(
+  text: string,
+  opts: MaxSendOptions,
+  attempt: (opts: MaxSendOptions) => Promise<T>,
+): Promise<T> {
+  try {
+    return await attempt(opts);
+  } catch (err) {
+    if (!opts.format || !text.trim() || !isMaxFormatRejection(err)) throw err;
+    const code = err instanceof MaxApiError ? (err.code ?? err.status) : '';
+    console.warn(`[MAX] ${opts.format} refused (${code}); resending as plain text`);
+    return attempt({ ...opts, format: undefined });
+  }
+}
+
+/**
+ * Send a text message to a MAX chat or user. A markup refusal is retried
+ * once as plain text.
  */
 export async function sendMaxMessage(
   to: string,
@@ -360,13 +392,15 @@ export async function sendMaxMessage(
   opts: MaxSendOptions = {},
 ): Promise<MaxSendOutcome> {
   const api = new MaxApi({ token: resolveToken(opts) });
-  return sendWithBody({
-    api,
-    to,
-    opts,
-    body: buildMaxTextBody(text, opts),
-    retry: retryOnceOnTimeout,
-  });
+  return withPlainTextFallback(text, opts, (sendOpts) =>
+    sendWithBody({
+      api,
+      to,
+      opts: sendOpts,
+      body: buildMaxTextBody(text, sendOpts),
+      retry: retryOnceOnTimeout,
+    }),
+  );
 }
 
 /**
@@ -380,10 +414,11 @@ export async function answerMaxCallback(
 ): Promise<void> {
   const token = resolveToken(opts);
   const api = new MaxApi({ token });
-  const body = buildMaxTextBody(text, opts);
-  await api.answerCallback(callbackId, {
-    ...(text || opts.buttons?.length ? { message: body } : {}),
-    ...(opts.notification ? { notification: opts.notification } : {}),
+  await withPlainTextFallback(text, opts, async (answerOpts) => {
+    await api.answerCallback(callbackId, {
+      ...(text || opts.buttons?.length ? { message: buildMaxTextBody(text, answerOpts) } : {}),
+      ...(opts.notification ? { notification: opts.notification } : {}),
+    });
   });
 }
 
@@ -391,7 +426,8 @@ export async function answerMaxCallback(
  * Edit an existing MAX message. PUT /messages keeps the current attachments
  * when `attachments` is absent/null and deletes them all on an empty list, so
  * the keyboard is sent only when `buttons` are given (it then replaces the
- * message attachments, e.g. adds buttons to a text-only stream draft).
+ * message attachments, e.g. adds buttons to a text-only stream draft). A
+ * markup refusal is retried once as plain text.
  */
 export async function editMaxMessage(
   messageId: string,
@@ -401,10 +437,12 @@ export async function editMaxMessage(
   const token = resolveToken(opts);
   const api = new MaxApi({ token });
 
-  await api.editMessage(messageId, {
-    text: formatOutboundText(text, opts.format),
-    format: opts.format ?? undefined,
-    ...(opts.buttons?.length ? { attachments: [buildInlineKeyboard(opts.buttons)] } : {}),
+  await withPlainTextFallback(text, opts, async (editOpts) => {
+    await api.editMessage(messageId, {
+      text: formatOutboundText(text, editOpts.format),
+      format: editOpts.format ?? undefined,
+      ...(opts.buttons?.length ? { attachments: [buildInlineKeyboard(opts.buttons)] } : {}),
+    });
   });
 }
 

@@ -7,12 +7,12 @@ import { toInboundMediaFacts } from 'openclaw/plugin-sdk/channel-inbound';
 import { createReplyPrefixOptions } from 'openclaw/plugin-sdk/channel-outbound';
 
 import type { MaxAttachment, MaxLinkedMessage, MaxMessage, MaxUser } from './api.js';
-import { deliverMaxReply, withoutMaxButtons } from './deliver.js';
+import { deliverMaxReply } from './deliver.js';
 import { collectInboundAttachments } from './inbound-attachments.js';
 import type { MaxMonitorOptions } from './monitor-types.js';
 import { materializeMaxPresentation } from './presentation.js';
 import { getMaxRuntime } from './runtime.js';
-import { readMaxChannelButtons, sendMaxMessage } from './send.js';
+import { sendMaxMessage } from './send.js';
 import { createMaxDraftStream } from './stream-draft.js';
 import type { MaxMarkupElement } from './types.js';
 
@@ -366,30 +366,8 @@ export async function processIncomingMessage(
         // This funnel consumes ReplyPayload directly, so it must apply the same
         // presentation fallback/render policy as core's outbound path.
         const payload = await materializeMaxPresentation(rawPayload);
-        if (useEditStreaming && draft.messageId && payload.text) {
-          await draft.finalize(payload.text, readMaxChannelButtons(payload.channelData));
-
-          // Handle media if present (buttons already sit on the draft)
-          if (payload.mediaUrls?.length || payload.mediaUrl) {
-            await deliverMaxReply({
-              payload: {
-                ...payload,
-                text: undefined,
-                channelData: withoutMaxButtons(payload.channelData),
-              },
-              account,
-              chatId: chatIdStr,
-              replyToId: replyMid,
-              callbackId,
-              config,
-              log,
-              statusSink,
-            });
-          }
-          return;
-        }
-
-        // Non-streaming path or no draft yet
+        // With a live stream draft the first text chunk replaces it; longer
+        // answers continue as new messages, the keyboard on the last chunk.
         await deliverMaxReply({
           payload,
           account,
@@ -399,6 +377,7 @@ export async function processIncomingMessage(
           config,
           log,
           statusSink,
+          draft: useEditStreaming ? draft : undefined,
         });
       },
       onError: (err, info) => {

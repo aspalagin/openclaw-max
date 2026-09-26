@@ -1,12 +1,17 @@
 /**
  * Reply delivery for the inbound pipeline: callback answers, markdown chunks
- * with the keyboard on the last one, media albums and delivery.pin.
+ * with the keyboard on the last one (the first chunk may fill the stream
+ * draft), media albums and delivery.pin. Failures are rejected per the SDK
+ * delivery contract instead of being swallowed.
  */
 
 import type { ChannelLogSink } from 'openclaw/plugin-sdk/channel-contract';
+import { createChannelPartialDeliveryError } from 'openclaw/plugin-sdk/channel-inbound';
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
+import { PlatformMessageNotDispatchedError } from 'openclaw/plugin-sdk/error-runtime';
 
 import type { ResolvedMaxAccount } from './accounts.js';
+import { MaxApiError } from './api.js';
 import { readMaxDeliveryPin } from './presentation.js';
 import { getMaxRuntime } from './runtime.js';
 import {
@@ -17,6 +22,53 @@ import {
   sendMaxMediaGroup,
   sendMaxMessage,
 } from './send.js';
+import type { MaxDraftStream } from './stream-draft.js';
+
+/** What already reached the chat when a later send failed. */
+interface MaxVisibleDelivery {
+  messageIds: string[];
+  /** Text chunks the recipient can see, in order. */
+  texts: string[];
+}
+
+/**
+ * Delivery failure per the SDK contract: once anything became visible (a
+ * chunk, an album, the stream draft) the error keeps that subset
+ * (createChannelPartialDeliveryError); a send MAX refused outright (4xx)
+ * proves nothing was dispatched (PlatformMessageNotDispatchedError, retryable
+ * only for 429); anything else (5xx, timeout, network) may have been applied
+ * and is rethrown as is.
+ * @internal exported for testing.
+ */
+export function toMaxDeliveryError(err: unknown, visible: MaxVisibleDelivery): unknown {
+  if (visible.messageIds.length > 0) {
+    const content = visible.texts.join('\n\n');
+    return createChannelPartialDeliveryError(err, {
+      visibleReplySent: true,
+      messageIds: [...visible.messageIds],
+      ...(content ? { content } : {}),
+    });
+  }
+  if (err instanceof MaxApiError && err.status >= 400 && err.status < 500) {
+    return new PlatformMessageNotDispatchedError(err.message, {
+      cause: err,
+      retryable: err.status === 429,
+    });
+  }
+  return err;
+}
+
+function logSendFailure(
+  account: ResolvedMaxAccount,
+  log: ChannelLogSink | undefined,
+  what: string,
+  err: unknown,
+): void {
+  const body = (err as { body?: unknown })?.body;
+  log?.error(
+    `[${account.accountId}] MAX ${what} failed: ${String(err)}${body ? ` body=${JSON.stringify(body)}` : ''}`,
+  );
+}
 
 export async function deliverMaxReply(params: {
   payload: {
@@ -34,13 +86,16 @@ export async function deliverMaxReply(params: {
   config: OpenClawConfig;
   log?: ChannelLogSink;
   statusSink?: (patch: { lastInboundAt?: number; lastOutboundAt?: number }) => void;
+  /** Edit-streaming draft: the first text chunk replaces it instead of a new message. */
+  draft?: MaxDraftStream;
 }): Promise<void> {
   const { payload, account, chatId, config, log, statusSink } = params;
   const core = getMaxRuntime();
   const buttons = readMaxChannelButtons(payload.channelData);
   const sendOptions = readMaxChannelSendOptions(payload.channelData);
+  const draftMid = payload.text ? (params.draft?.messageId ?? undefined) : undefined;
 
-  if (params.callbackId && (payload.text || buttons?.length)) {
+  if (params.callbackId && !draftMid && (payload.text || buttons?.length)) {
     try {
       await answerMaxCallback(params.callbackId, payload.text ?? '', {
         token: account.token,
@@ -49,22 +104,38 @@ export async function deliverMaxReply(params: {
       });
       statusSink?.({ lastOutboundAt: Date.now() });
     } catch (err: unknown) {
-      const body = (err as { body?: unknown })?.body;
-      log?.error(
-        `[${account.accountId}] MAX callback answer failed: ${String(err)}${body ? ` body=${JSON.stringify(body)}` : ''}`,
-      );
+      logSendFailure(account, log, 'callback answer', err);
+      throw toMaxDeliveryError(err, { messageIds: [], texts: [] });
     }
     return;
   }
 
+  // Everything the recipient can already see; a visible stream draft counts
+  // until it is replaced or deleted.
+  const visible: MaxVisibleDelivery = { messageIds: draftMid ? [draftMid] : [], texts: [] };
+  let failure: { err: unknown } | undefined;
+
   // delivery.pin: pin the first delivered message (first chunk).
   let firstMessageId: string | undefined;
   let firstChatType: string | undefined;
-  const noteDelivered = (messageId: string, chatType?: string) => {
+  const noteDelivered = (messageId: string, chatType?: string, text?: string) => {
+    if (messageId && !visible.messageIds.includes(messageId)) visible.messageIds.push(messageId);
+    if (text) visible.texts.push(text);
     if (!firstMessageId && messageId) {
       firstMessageId = messageId;
       firstChatType = chatType;
     }
+  };
+  const sendTextMessage = async (text: string, messageButtons: typeof buttons) => {
+    const sent = await sendMaxMessage(chatId, text, {
+      token: account.token,
+      replyToMessageId: params.replyToId,
+      format: 'markdown',
+      buttons: messageButtons,
+      ...sendOptions,
+    });
+    noteDelivered(sent.messageId, sent.raw.message?.recipient?.chat_type, text);
+    statusSink?.({ lastOutboundAt: Date.now() });
   };
 
   if (payload.text) {
@@ -74,39 +145,34 @@ export async function deliverMaxReply(params: {
 
     for (let index = 0; index < chunks.length; index += 1) {
       const chunk = chunks[index];
+      const chunkButtons = index === chunks.length - 1 ? buttons : undefined;
+      if (index === 0 && draftMid && params.draft) {
+        // The draft becomes the first chunk. If MAX refuses that edit, the
+        // stale partial draft is deleted and the answer goes as new messages.
+        if (await params.draft.finalize(chunk, chunkButtons)) {
+          noteDelivered(draftMid, undefined, chunk);
+          continue;
+        }
+        if (await params.draft.discard()) {
+          visible.messageIds.splice(visible.messageIds.indexOf(draftMid), 1);
+        }
+      }
       try {
-        const sent = await sendMaxMessage(chatId, chunk, {
-          token: account.token,
-          replyToMessageId: params.replyToId,
-          format: 'markdown',
-          buttons: index === chunks.length - 1 ? buttons : undefined,
-          ...sendOptions,
-        });
-        noteDelivered(sent.messageId, sent.raw.message?.recipient?.chat_type);
-        statusSink?.({ lastOutboundAt: Date.now() });
+        await sendTextMessage(chunk, chunkButtons);
       } catch (err: unknown) {
-        const body = (err as { body?: unknown })?.body;
-        log?.error(
-          `[${account.accountId}] MAX send failed: ${String(err)}${body ? ` body=${JSON.stringify(body)}` : ''}`,
-        );
+        // A later chunk after a gap would garble the answer: stop the text,
+        // still send the media (independent content), then reject.
+        logSendFailure(account, log, 'send', err);
+        failure = { err };
+        break;
       }
     }
   } else if (buttons?.length) {
     try {
-      const sent = await sendMaxMessage(chatId, '', {
-        token: account.token,
-        replyToMessageId: params.replyToId,
-        format: 'markdown',
-        buttons,
-        ...sendOptions,
-      });
-      noteDelivered(sent.messageId, sent.raw.message?.recipient?.chat_type);
-      statusSink?.({ lastOutboundAt: Date.now() });
+      await sendTextMessage('', buttons);
     } catch (err: unknown) {
-      const body = (err as { body?: unknown })?.body;
-      log?.error(
-        `[${account.accountId}] MAX send failed: ${String(err)}${body ? ` body=${JSON.stringify(body)}` : ''}`,
-      );
+      logSendFailure(account, log, 'send', err);
+      failure = { err };
     }
   }
 
@@ -125,10 +191,12 @@ export async function deliverMaxReply(params: {
       replyToMessageId: params.replyToId,
       mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
       ...sendOptions,
-      onError: (err, failed) =>
+      onError: (err, failed) => {
         log?.error(
           `[${account.accountId}] MAX media send failed (${failed.length} item(s)): ${String(err)}`,
-        ),
+        );
+        failure ??= { err };
+      },
     });
     for (const id of sent.messageIds) noteDelivered(id);
     if (sent.messageIds.length) statusSink?.({ lastOutboundAt: Date.now() });
@@ -154,15 +222,6 @@ export async function deliverMaxReply(params: {
       );
     }
   }
-}
 
-/** channelData with `max.buttons` removed (other max options kept). */
-export function withoutMaxButtons(channelData: unknown): unknown {
-  if (!channelData || typeof channelData !== 'object' || Array.isArray(channelData))
-    return channelData;
-  const maxData = (channelData as Record<string, unknown>).max;
-  if (!maxData || typeof maxData !== 'object' || Array.isArray(maxData)) return channelData;
-  const rest = { ...(maxData as Record<string, unknown>) };
-  delete rest.buttons;
-  return { ...(channelData as Record<string, unknown>), max: rest };
+  if (failure) throw toMaxDeliveryError(failure.err, visible);
 }

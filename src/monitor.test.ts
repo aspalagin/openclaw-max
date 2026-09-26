@@ -540,6 +540,13 @@ describe('edit streaming (streamMode: partial)', () => {
     const { setMaxRuntime } = await import('./runtime.js');
     const { processIncomingMessage } = await import('./inbound.js');
     const { core } = makeCallbackRuntime();
+    // The final answer goes through the reply chunker (first chunk → draft).
+    Object.assign(core.channel, {
+      text: {
+        resolveChunkMode: vi.fn(() => 'length'),
+        chunkMarkdownTextWithMode: vi.fn((text: string) => [text]),
+      },
+    });
     const requests: { method: string; url: string; body: Record<string, unknown> }[] = [];
     const originalFetch = global.fetch;
     global.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {

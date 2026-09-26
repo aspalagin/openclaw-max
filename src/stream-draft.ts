@@ -1,13 +1,15 @@
 /**
  * Edit streaming (streamMode "partial"): the first partial reply is sent as a
  * message, later partials edit it (throttled), and the final answer replaces
- * the draft together with its inline keyboard.
+ * the draft together with its inline keyboard. The draft holds one MAX
+ * message: a longer final answer is split by the reply delivery, which puts
+ * the first chunk into the draft and sends the rest as new messages.
  */
 
 import type { ChannelLogSink } from 'openclaw/plugin-sdk/channel-contract';
 
 import type { ResolvedMaxAccount } from './accounts.js';
-import { editMaxMessage, type MaxSendButton, sendMaxMessage } from './send.js';
+import { deleteMaxMessage, editMaxMessage, type MaxSendButton, sendMaxMessage } from './send.js';
 
 const DRAFT_THROTTLE_MS = 1200;
 const DRAFT_MAX_CHARS = 4000;
@@ -18,8 +20,13 @@ export interface MaxDraftStream {
   readonly messageId: string | null;
   /** Show a partial reply (throttled; stops on errors or past 4000 chars). */
   update(text: string): Promise<void>;
-  /** Replace the draft with the final text; buttons go onto the same edit. */
-  finalize(text: string, buttons: MaxSendButton[][] | undefined): Promise<void>;
+  /**
+   * Replace the draft with the final text (at most one MAX message); buttons
+   * go onto the same edit. Resolves false when MAX refused the edit.
+   */
+  finalize(text: string, buttons: MaxSendButton[][] | undefined): Promise<boolean>;
+  /** Delete the draft (its final edit was refused); resolves false when that fails too. */
+  discard(): Promise<boolean>;
   /** Cancel a pending update and stop streaming. */
   clear(): Promise<void>;
 }
@@ -100,19 +107,36 @@ export function createMaxDraftStream(params: {
       // Final delivery replaces the draft message with final text. The
       // keyboard (presentation buttons) goes onto the same edit, otherwise
       // the final answer would lose its buttons.
-      if (draftMid && (finalText !== draftLastText || buttons?.length)) {
-        try {
-          await editMaxMessage(draftMid, finalText, {
-            token: account.token,
-            format: 'markdown',
-            buttons,
-          });
-          draftLastText = finalText;
-        } catch {
-          /* best effort */
-        }
+      if (draftTimer) {
+        clearTimeout(draftTimer);
+        draftTimer = null;
       }
       draftStopped = true;
+      if (!draftMid) return false;
+      if (finalText === draftLastText && !buttons?.length) return true;
+      try {
+        await editMaxMessage(draftMid, finalText, {
+          token: account.token,
+          format: 'markdown',
+          buttons,
+        });
+        draftLastText = finalText;
+        return true;
+      } catch (err) {
+        log?.warn(`[${account.accountId}] MAX draft final edit failed: ${String(err)}`);
+        return false;
+      }
+    },
+    discard: async () => {
+      if (!draftMid) return true;
+      try {
+        await deleteMaxMessage(draftMid, { token: account.token });
+        draftMid = null;
+        return true;
+      } catch (err) {
+        log?.warn(`[${account.accountId}] MAX draft delete failed: ${String(err)}`);
+        return false;
+      }
     },
     clear: async () => {
       if (draftTimer) {
