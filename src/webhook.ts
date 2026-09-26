@@ -198,8 +198,11 @@ export async function handleMaxWebhookRequest(
   const update = raw as MaxUpdate;
 
   // MAX needs 200 within 30 s while an agent turn can take minutes: ack first,
-  // then process asynchronously. Errors are logged, never turned into a non-200
-  // (that would only make MAX redeliver and eventually unsubscribe the bot).
+  // then hand the update to the account task. Errors are logged, never turned
+  // into a non-200 (that would only make MAX redeliver and eventually
+  // unsubscribe the bot). onUpdate must only enqueue: this request's work
+  // admission is released when the handler returns, so agent/session work
+  // started from here would fail with GatewayDrainingError.
   res.statusCode = 200;
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify({ ok: true }));

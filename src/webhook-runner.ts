@@ -1,7 +1,7 @@
 /**
  * Webhook transport: secret resolution, MAX subscription lifecycle (sync on
  * start, periodic re-check), the gateway route/target registration and the
- * ack-first per-chat serialized update queue.
+ * account-task consumer of the ack-first per-chat update queue.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -25,40 +25,7 @@ import {
   resolveMaxWebhookPath,
   subscribeMaxWebhook,
 } from './webhook.js';
-
-/**
- * Build a webhook onUpdate handler that acks immediately (returns a resolved
- * promise) and processes updates through per-chat serialized queues: ordering
- * is preserved within a chat, but a slow agent run in chat A never blocks
- * chat B (no cross-chat head-of-line blocking). Queued work checks abort so a
- * stopped monitor stops draining stale updates with its old config.
- * @internal exported for testing.
- */
-export function createSerializedWebhookHandler(params: {
-  dispatch: (update: MaxUpdate) => Promise<void>;
-  abortSignal: AbortSignal;
-  onError: (err: unknown) => void;
-}): (update: MaxUpdate) => Promise<void> {
-  const { dispatch, abortSignal, onError } = params;
-  const chatQueues = new Map<string, Promise<void>>();
-
-  return (update: MaxUpdate) => {
-    const key = String(update.message?.recipient?.chat_id ?? update.chat_id ?? 'global');
-    const next = (chatQueues.get(key) ?? Promise.resolve()).then(async () => {
-      if (abortSignal.aborted) return;
-      try {
-        await dispatch(update);
-      } catch (err) {
-        onError(err);
-      }
-    });
-    chatQueues.set(key, next);
-    void next.finally(() => {
-      if (chatQueues.get(key) === next) chatQueues.delete(key);
-    });
-    return Promise.resolve();
-  };
-}
+import { createMaxWebhookUpdateQueue } from './webhook-queue.js';
 
 /** MAX secret format (SubscriptionRequestBody.secret): 5–256 of [A-Za-z0-9_-]. */
 const MAX_WEBHOOK_SECRET_PATTERN = /^[\w-]{5,256}$/;
@@ -236,13 +203,10 @@ export async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
   } as MaxStatusPatch);
 
   // MAX requires HTTP 200 within 30s while agent runs regularly take minutes.
-  // The handler acks first; updates go through per-chat serialized queues.
-  const enqueue = createSerializedWebhookHandler({
-    dispatch: (update) => dispatchUpdate(update, opts),
-    abortSignal,
-    onError: (err) =>
-      log?.error(`[${account.accountId}] Webhook update dispatch failed: ${String(err)}`),
-  });
+  // The route handler acks and only enqueues; this account task dispatches
+  // (see webhook-queue.ts: dispatching from the request context fails with
+  // GatewayDrainingError once the request's work admission is released).
+  const queue = createMaxWebhookUpdateQueue({ accountId: account.accountId });
   const onUpdate = (update: MaxUpdate): Promise<void> => {
     const at = Date.now();
     statusSink?.(
@@ -252,7 +216,8 @@ export async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
         mode: 'webhook',
       }) as MaxStatusPatch,
     );
-    return enqueue(update);
+    queue.push(update);
+    return Promise.resolve();
   };
 
   const target: MaxWebhookTarget = {
@@ -287,6 +252,7 @@ export async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
     log?.error(`[${account.accountId}] MAX webhook start failed: ${String(err)}`);
     unregisterRoute();
     unregisterTarget();
+    queue.close();
     statusSink?.({ mode: 'webhook', connected: false, lastError: String(err) } as MaxStatusPatch);
     throw err;
   }
@@ -302,7 +268,16 @@ export async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
     log,
   });
 
-  await waitForAbort(abortSignal);
+  // Runs until abort; every dispatch starts here, under the account task.
+  await queue.consume({
+    dispatch: (update) => dispatchUpdate(update, opts),
+    abortSignal,
+    onError: (err, update) =>
+      log?.error(
+        `[${account.accountId}] Webhook update dispatch failed (${update.update_type}): ${String(err)}`,
+      ),
+    onWarn: (message) => log?.warn(message),
+  });
   stopSubscriptionWatch();
 
   // The subscription is kept on purpose: a restart or config reload must not
@@ -313,13 +288,6 @@ export async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
   unregisterTarget();
   statusSink?.({ mode: 'webhook', connected: false } as MaxStatusPatch);
   log?.info(`[${account.accountId}] MAX webhook mode stopped (subscription kept)`);
-}
-
-function waitForAbort(signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) =>
-    signal.addEventListener('abort', () => resolve(), { once: true }),
-  );
 }
 
 /** MAX webhook secret: 5–256 chars of [A-Za-z0-9-]. */

@@ -22,6 +22,7 @@ import {
 import { clearMaxSubscriptionsForPolling } from './polling.js';
 import { MaxStateStore } from './state.js';
 import { handleMaxWebhookRequest } from './webhook.js';
+import { resetMaxWebhookHandoversForTest } from './webhook-queue.js';
 import {
   MAX_SUBSCRIPTION_CHECK_INTERVAL_MS,
   resolveMaxWebhookSecret,
@@ -56,6 +57,8 @@ async function runUntil(
   controller.abort();
   await start;
 }
+
+afterEach(() => resetMaxWebhookHandoversForTest());
 
 describe('resolveMaxTransport', () => {
   it('defaults to webhook only when webhookUrl is set', () => {
