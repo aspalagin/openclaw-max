@@ -322,6 +322,83 @@ describe("processIncomingMessage inbound media", () => {
   });
 });
 
+describe("processIncomingMessage attachment downloads after the gates", () => {
+  async function runGroupImage(accountConfig: Record<string, unknown>, text: string) {
+    const { setMaxRuntime } = await import("./runtime.js");
+    const { processIncomingMessage } = await import("./inbound.js");
+    const { core, dispatched } = makeCallbackRuntime();
+    const fetchRemoteMedia = vi.fn(async () => ({ buffer: Buffer.from("jpg"), contentType: "image/jpeg" }));
+    const saveMediaBuffer = vi.fn(async () => ({ path: "/state/media/inbound/photo.jpg", contentType: "image/jpeg" }));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setMaxRuntime({ ...core, channel: { ...core.channel, media: { fetchRemoteMedia, saveMediaBuffer } } } as any);
+    const getVideoInfo = vi.fn(async () => ({ urls: { mp4_720: "https://cdn.max.test/video.mp4" } }));
+    const opts = makeCallbackOpts(accountConfig);
+    await processIncomingMessage(
+      {
+        sender: { user_id: 7, first_name: "Ann", is_bot: false },
+        recipient: { chat_id: -500, chat_type: "chat" },
+        timestamp: 1,
+        body: {
+          mid: "mid.group.photo",
+          text,
+          attachments: [
+            { type: "image", payload: { url: "https://cdn.max.test/photo" } },
+            { type: "video", payload: { token: "vtok" } },
+          ],
+        },
+      } as unknown as MaxMessage,
+      null,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      { ...opts, api: { ...opts.api, getVideoInfo } as any, botUserId: 1, botUsername: "banzai_bot" },
+    );
+    return { dispatched, fetchRemoteMedia, saveMediaBuffer, getVideoInfo };
+  }
+
+  it("does not download media of a group that is not in the allowlist", async () => {
+    const run = await runGroupImage({ groupPolicy: "allowlist", groups: { "-777": {} } }, "@banzai_bot смотри");
+    expect(run.dispatched).toHaveLength(0);
+    expect(run.fetchRemoteMedia).not.toHaveBeenCalled();
+    expect(run.saveMediaBuffer).not.toHaveBeenCalled();
+    expect(run.getVideoInfo).not.toHaveBeenCalled();
+  });
+
+  it("does not download media of a group message that does not mention the bot", async () => {
+    const run = await runGroupImage({ groupPolicy: "allowlist", groups: { "-500": {} } }, "просто фото");
+    expect(run.dispatched).toHaveLength(0);
+    expect(run.fetchRemoteMedia).not.toHaveBeenCalled();
+    expect(run.getVideoInfo).not.toHaveBeenCalled();
+  });
+
+  it("downloads media once the group message passes the allowlist and mention gates", async () => {
+    const run = await runGroupImage({ groupPolicy: "allowlist", groups: { "-500": {} } }, "@banzai_bot смотри");
+    expect(run.dispatched).toHaveLength(1);
+    expect(run.getVideoInfo).toHaveBeenCalledWith("vtok");
+    expect(run.fetchRemoteMedia).toHaveBeenCalledTimes(2);
+    expect(run.dispatched[0].media).toHaveLength(2);
+  });
+
+  it("does not download media of a DM from a sender outside the allowlist", async () => {
+    const { setMaxRuntime } = await import("./runtime.js");
+    const { processIncomingMessage } = await import("./inbound.js");
+    const { core, dispatched } = makeCallbackRuntime();
+    const fetchRemoteMedia = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setMaxRuntime({ ...core, channel: { ...core.channel, media: { fetchRemoteMedia, saveMediaBuffer: vi.fn() } } } as any);
+    await processIncomingMessage(
+      {
+        sender: { user_id: 9, first_name: "Eve", is_bot: false },
+        recipient: { chat_id: 90, chat_type: "dialog" },
+        timestamp: 1,
+        body: { mid: "mid.dm.photo", text: "", attachments: [{ type: "image", payload: { url: "https://cdn.max.test/p" } }] },
+      } as unknown as MaxMessage,
+      null,
+      makeCallbackOpts({ dmPolicy: "allowlist", allowFrom: ["7"] }),
+    );
+    expect(dispatched).toHaveLength(0);
+    expect(fetchRemoteMedia).not.toHaveBeenCalled();
+  });
+});
+
 // Raw `message_callback` update captured live on 2026-09-26 (names/usernames
 // neutralized). `message` is a sibling of `callback`, not nested in it.
 const LIVE_MESSAGE_CALLBACK = {

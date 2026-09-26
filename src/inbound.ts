@@ -44,22 +44,11 @@ export async function processIncomingMessage(
 
   log?.debug?.(`[${account.accountId}] Processing message: mid=${messageId} chatId=${message.recipient.chat_id} chatType=${message.recipient.chat_type} senderId=${message.sender?.user_id} text="${rawText.slice(0, 50)}" attachments=${attachments.length}`);
 
-  // Process attachments: download media, build descriptions for non-downloadable types
-  const { descriptions: attachmentDescriptions, mediaInputs } = await collectInboundAttachments({
-    attachments,
-    messageId,
-    chatId,
-    api: opts.api,
-    account,
-    log,
-  });
-
-  const attachmentText = attachmentDescriptions.join(" ");
-  const hasMedia = mediaInputs.length > 0;
-  const effectiveText = rawText.trim() || attachmentText;
-
-  // Skip truly empty messages (no text, no media, no meaningful attachments)
-  if (!effectiveText && !hasMedia) return;
+  // Skip truly empty messages (no text and no attachment that yields media or
+  // a description; inline keyboards yield neither). Attachments are
+  // downloaded only after the DM/group gates below, so ignored group chatter
+  // costs no traffic or disk.
+  if (!rawText.trim() && !attachments.some((att) => att.type !== "inline_keyboard")) return;
 
   // Check for reply context
   const replyToId = message.link?.type === "reply" ? message.link.message?.body?.mid : undefined;
@@ -167,6 +156,23 @@ export async function processIncomingMessage(
       return;
     }
   }
+
+  // Process attachments: download media, build descriptions for non-downloadable types
+  const { descriptions: attachmentDescriptions, mediaInputs } = await collectInboundAttachments({
+    attachments,
+    messageId,
+    chatId,
+    api: opts.api,
+    account,
+    log,
+  });
+
+  const attachmentText = attachmentDescriptions.join(" ");
+  const hasMedia = mediaInputs.length > 0;
+  const effectiveText = rawText.trim() || attachmentText;
+
+  // Nothing usable came out of the attachments (e.g. a failed sticker download)
+  if (!effectiveText && !hasMedia) return;
 
   // Resolve agent route
   // chatIdStr stays the delivery address (MAX addresses replies by chat_id).
