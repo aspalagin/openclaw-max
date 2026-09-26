@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.7.2 - 2026-09-27
+
+### Changed
+
+- Пакет переименован в `@aspalagin/openclaw-max` для публикации в npm (имя `openclaw-max` в npm занято чужим пакетом v0.5.0); id плагина в OpenClaw остаётся `openclaw-max`.
+- В `package.json` добавлены `openclaw.compat` (`pluginApi >=2026.9.6`, `minGatewayVersion 2026.9.6`) и `openclaw.build` — обязательные поля для публикации внешних плагинов в ClawHub; `peerDependencies.openclaw` → `>=2026.9.6`.
+- Установка одной командой: `openclaw plugins install clawhub:@aspalagin/openclaw-max` или `npm:@aspalagin/openclaw-max` (issue #7); ручная установка из исходников сохранена для разработки.
+- В npm-пакет больше не попадают тесты, `test-setup.ts` и снимок схемы MAX.
+
 ## 0.7.1 - 2026-09-26
 
 ### Fixed

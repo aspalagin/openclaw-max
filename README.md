@@ -92,12 +92,24 @@ openclaw-max/
 
 ### 2. Установить плагин
 
-```bash
-# Скопировать папку плагина в extensions
-cp -r openclaw-max ~/.openclaw/extensions/openclaw-max
+Через ClawHub (рекомендуется):
 
-# Загрузить плагин
-openclaw plugins load ~/.openclaw/extensions/openclaw-max
+```bash
+openclaw plugins install clawhub:@aspalagin/openclaw-max
+```
+
+Через npm:
+
+```bash
+openclaw plugins install npm:@aspalagin/openclaw-max
+```
+
+Вручную из исходников (для разработки):
+
+```bash
+cd ~/.openclaw/extensions
+git clone https://github.com/aspalagin/openclaw-max openclaw-max
+cd openclaw-max && npm install && npm run build
 ```
 
 ### 3. Настроить конфиг
@@ -119,7 +131,7 @@ openclaw plugins load ~/.openclaw/extensions/openclaw-max
       // "allowlist" — только из allowFrom (по умолчанию)
       // "open" — любой может писать
       // "pairing" — новые контакты проходят pairing-код
-      "dmSecurity": "allowlist"
+      "dmPolicy": "allowlist"
     }
   }
 }
@@ -295,7 +307,7 @@ MAX_BOT_TOKEN=xxx node scripts/test-api.mjs
         "zaya": {
           "botToken": "токен_второго_бота",
           "allowFrom": ["87654321"],
-          "dmSecurity": "open"
+          "dmPolicy": "open"
         }
       }
     }

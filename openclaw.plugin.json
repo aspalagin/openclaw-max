@@ -2,7 +2,7 @@
   "id": "openclaw-max",
   "name": "MAX",
   "description": "MAX messenger channel plugin (max.ru Bot API via platform-api2.max.ru, long polling or webhook)",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "channels": [
     "max"
   ],
@@ -21,50 +21,97 @@
             "type": "array",
             "items": {
               "anyOf": [
-                { "type": "string" },
-                { "type": "number" }
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
               ]
             }
           },
           "groupConfig": {
             "type": "object",
             "properties": {
-              "requireMention": { "type": "boolean" },
-              "tools": { "type": "object" },
-              "skills": { "type": "array", "items": { "type": "string" } },
-              "enabled": { "type": "boolean" },
-              "allowFrom": { "$ref": "#/definitions/allowList" },
-              "systemPrompt": { "type": "string" }
+              "requireMention": {
+                "type": "boolean"
+              },
+              "tools": {
+                "type": "object"
+              },
+              "skills": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "allowFrom": {
+                "$ref": "#/definitions/allowList"
+              },
+              "systemPrompt": {
+                "type": "string"
+              }
             },
             "additionalProperties": false
           },
           "accountConfig": {
             "type": "object",
             "properties": {
-              "name": { "type": "string" },
-              "enabled": { "type": "boolean" },
-              "markdown": { "type": "object" },
-              "botToken": { "type": "string" },
-              "tokenFile": { "type": "string" },
+              "name": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "markdown": {
+                "type": "object"
+              },
+              "botToken": {
+                "type": "string"
+              },
+              "tokenFile": {
+                "type": "string"
+              },
               "dmPolicy": {
                 "type": "string",
-                "enum": ["pairing", "allowlist", "open", "disabled"],
+                "enum": [
+                  "pairing",
+                  "allowlist",
+                  "open",
+                  "disabled"
+                ],
                 "default": "pairing"
               },
-              "allowFrom": { "$ref": "#/definitions/allowList" },
-              "groupAllowFrom": { "$ref": "#/definitions/allowList" },
+              "allowFrom": {
+                "$ref": "#/definitions/allowList"
+              },
+              "groupAllowFrom": {
+                "$ref": "#/definitions/allowList"
+              },
               "groupPolicy": {
                 "type": "string",
-                "enum": ["allowlist", "open", "disabled"],
+                "enum": [
+                  "allowlist",
+                  "open",
+                  "disabled"
+                ],
                 "default": "allowlist"
               },
               "groups": {
                 "type": "object",
-                "additionalProperties": { "$ref": "#/definitions/groupConfig" }
+                "additionalProperties": {
+                  "$ref": "#/definitions/groupConfig"
+                }
               },
               "transport": {
                 "type": "string",
-                "enum": ["polling", "webhook"],
+                "enum": [
+                  "polling",
+                  "webhook"
+                ],
                 "description": "Update transport. Default: webhook when webhookUrl is set, otherwise polling. MAX does not serve long polling while a webhook subscription exists."
               },
               "webhookUrl": {
@@ -83,42 +130,82 @@
                 "type": "string",
                 "description": "Gateway route path when it differs from the webhookUrl pathname (default: webhookUrl pathname, else /max/webhook)."
               },
-              "historyLimit": { "type": "integer", "minimum": 0 },
-              "dmHistoryLimit": { "type": "integer", "minimum": 0 },
+              "historyLimit": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "dmHistoryLimit": {
+                "type": "integer",
+                "minimum": 0
+              },
               "dms": {
                 "type": "object",
                 "additionalProperties": {
                   "type": "object",
                   "properties": {
-                    "historyLimit": { "type": "integer", "minimum": 0 }
+                    "historyLimit": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
                   },
                   "additionalProperties": false
                 }
               },
-              "textChunkLimit": { "type": "integer", "minimum": 1 },
-              "blockStreaming": { "type": "boolean" },
+              "textChunkLimit": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "blockStreaming": {
+                "type": "boolean"
+              },
               "streamMode": {
                 "type": "string",
-                "enum": ["off", "partial", "block"]
+                "enum": [
+                  "off",
+                  "partial",
+                  "block"
+                ]
               },
               "blockStreamingCoalesce": {
                 "type": "object",
                 "properties": {
-                  "minChars": { "type": "integer" },
-                  "maxChars": { "type": "integer" },
-                  "idleMs": { "type": "integer" }
+                  "minChars": {
+                    "type": "integer"
+                  },
+                  "maxChars": {
+                    "type": "integer"
+                  },
+                  "idleMs": {
+                    "type": "integer"
+                  }
                 },
                 "additionalProperties": false
               },
-              "responsePrefix": { "type": "string" },
-              "mediaMaxMb": { "type": "number", "exclusiveMinimum": 0 },
-              "markSeen": { "type": "boolean" },
+              "responsePrefix": {
+                "type": "string"
+              },
+              "mediaMaxMb": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "markSeen": {
+                "type": "boolean"
+              },
               "actions": {
                 "type": "object",
                 "additionalProperties": {
                   "anyOf": [
-                    { "type": "boolean" },
-                    { "type": "string", "enum": ["pairing", "allowlist", "open"] }
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "pairing",
+                        "allowlist",
+                        "open"
+                      ]
+                    }
                   ]
                 }
               }
@@ -126,12 +213,16 @@
           }
         },
         "allOf": [
-          { "$ref": "#/definitions/accountConfig" }
+          {
+            "$ref": "#/definitions/accountConfig"
+          }
         ],
         "properties": {
           "accounts": {
             "type": "object",
-            "additionalProperties": { "$ref": "#/definitions/accountConfig" }
+            "additionalProperties": {
+              "$ref": "#/definitions/accountConfig"
+            }
           },
           "commands": {
             "type": "array",
@@ -139,15 +230,25 @@
             "items": {
               "type": "object",
               "properties": {
-                "name": { "type": "string", "maxLength": 64 },
-                "description": { "type": "string", "maxLength": 128 }
+                "name": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 128
+                }
               },
-              "required": ["name"],
+              "required": [
+                "name"
+              ],
               "additionalProperties": false
             },
             "maxItems": 32
           },
-          "defaultAccount": { "type": "string" }
+          "defaultAccount": {
+            "type": "string"
+          }
         }
       },
       "label": "MAX",

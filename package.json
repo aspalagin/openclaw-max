@@ -1,6 +1,6 @@
 {
-  "name": "openclaw-max",
-  "version": "0.7.1",
+  "name": "@aspalagin/openclaw-max",
+  "version": "0.7.2",
   "description": "MAX messenger channel plugin for OpenClaw",
   "keywords": [
     "openclaw",
@@ -41,6 +41,9 @@
   "files": [
     "dist/",
     "src/",
+    "!src/**/*.test.ts",
+    "!src/test-setup.ts",
+    "!src/__fixtures__/",
     "scripts/",
     "openclaw.plugin.json",
     "README.md",
@@ -59,6 +62,14 @@
       "docsPath": "/channels/max",
       "docsLabel": "max",
       "blurb": "MAX messenger channel (max.ru Bot API)."
+    },
+    "compat": {
+      "pluginApi": ">=2026.9.6",
+      "minGatewayVersion": "2026.9.6"
+    },
+    "build": {
+      "openclawVersion": "2026.9.6",
+      "pluginSdkVersion": "2026.9.6"
     }
   },
   "devDependencies": {
@@ -75,7 +86,7 @@
     "yaml": "^2.9.1"
   },
   "peerDependencies": {
-    "openclaw": "*"
+    "openclaw": ">=2026.9.6"
   },
   "peerDependenciesMeta": {
     "openclaw": {
