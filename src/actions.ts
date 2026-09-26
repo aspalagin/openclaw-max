@@ -19,6 +19,8 @@ import {
   readMaxSendButtons,
   sendMaxContact,
   sendMaxLocation,
+  type MaxMediaSendOptions,
+  sendMaxMediaGroup,
   sendMaxMediaMessage,
   sendMaxMessage,
   sendMaxSticker,
@@ -44,24 +46,93 @@ function readTargetParam(params: Record<string, unknown>, required = true): stri
   );
 }
 
-function readMediaSource(params: Record<string, unknown>): string | undefined {
+/**
+ * Media sources in order: the direct media field first, then every
+ * structured `attachments[]` item (one source per item). Duplicates dropped.
+ */
+function readMediaSources(params: Record<string, unknown>): string[] {
+  const sources: string[] = [];
+  const add = (value: string | undefined) => {
+    if (value && !sources.includes(value)) sources.push(value);
+  };
+
   for (const key of mediaSourceKeys) {
     const value = readStringParam(params, key, { trim: false });
-    if (value) return value;
-  }
-
-  if (!Array.isArray(params.attachments)) return undefined;
-
-  for (const item of params.attachments) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
-    const attachment = item as Record<string, unknown>;
-    for (const key of mediaSourceKeys) {
-      const value = typeof attachment[key] === 'string' ? attachment[key] : undefined;
-      if (value) return value;
+    if (value) {
+      add(value);
+      break;
     }
   }
 
-  return undefined;
+  if (Array.isArray(params.attachments)) {
+    for (const item of params.attachments) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+      const attachment = item as Record<string, unknown>;
+      for (const key of mediaSourceKeys) {
+        const value = typeof attachment[key] === 'string' ? attachment[key] : undefined;
+        if (value) {
+          add(value);
+          break;
+        }
+      }
+    }
+  }
+
+  return sources;
+}
+
+/**
+ * Send one or more media sources: one goes as a single message, several as
+ * albums (up to 12 images/videos per message, audio/files one by one, order
+ * kept). Returns every sent message id; the first one carries the caption.
+ */
+async function sendMaxMediaSources(
+  to: string,
+  caption: string,
+  sources: string[],
+  opts: MaxMediaSendOptions,
+): Promise<{
+  messageId: string;
+  messageIds: string[];
+  chatType?: string;
+  mediaErrors?: string[];
+}> {
+  if (sources.length === 1) {
+    const result = await sendMaxMediaMessage(to, caption, sources[0], opts);
+    return {
+      messageId: result.messageId,
+      messageIds: result.messageId ? [result.messageId] : [],
+      chatType: result.raw.message?.recipient?.chat_type,
+    };
+  }
+  // A failed group must not hide the ones already sent (a retry by the agent
+  // would duplicate them): report partial failures, throw only when none went.
+  const errors: string[] = [];
+  let firstError: unknown;
+  const { messageIds } = await sendMaxMediaGroup(to, caption, sources, {
+    ...opts,
+    onError: (err, failed) => {
+      firstError ??= err;
+      errors.push(`${failed.join(', ')}: ${String(err)}`);
+    },
+  });
+  if (messageIds.length === 0 && firstError !== undefined) throw firstError;
+  return {
+    messageId: messageIds[0] ?? '',
+    messageIds,
+    ...(errors.length ? { mediaErrors: errors } : {}),
+  };
+}
+
+/** messageIds / mediaErrors for a multi-message media send. */
+function mediaResultExtra(result: {
+  messageIds: string[];
+  mediaErrors?: string[];
+}): Record<string, unknown> {
+  return {
+    ...(result.messageIds.length > 1 ? { messageIds: result.messageIds } : {}),
+    ...(result.mediaErrors ? { mediaErrors: result.mediaErrors } : {}),
+  };
 }
 
 /**
@@ -171,17 +242,40 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
 
       // Pin the sent message when delivery.pin (or pin=true) was requested.
       // Optional pin failures degrade; a required one fails the action.
-      const withPin = async (messageId: string) => {
-        if (!pin || !messageId) return jsonResult({ ok: true, to, messageId });
+      // Dialogs cannot pin: that is reported as pinned:false with pinSkipped.
+      const withPin = async (
+        messageId: string,
+        chatType?: string,
+        extra: Record<string, unknown> = {},
+      ) => {
+        if (!pin || !messageId) return jsonResult({ ok: true, to, messageId, ...extra });
         try {
-          await pinMaxMessage(to, messageId, {
+          const pinned = await pinMaxMessage(to, messageId, {
             token: account.token,
             pinNotify: pin.notify === true,
+            chatType,
           });
-          return jsonResult({ ok: true, to, messageId, pinned: true });
+          if (!pinned.pinned) {
+            return jsonResult({
+              ok: true,
+              to,
+              messageId,
+              ...extra,
+              pinned: false,
+              pinSkipped: pinned.reason,
+            });
+          }
+          return jsonResult({ ok: true, to, messageId, ...extra, pinned: true });
         } catch (err) {
           if (pin.required) throw err;
-          return jsonResult({ ok: true, to, messageId, pinned: false, pinError: String(err) });
+          return jsonResult({
+            ok: true,
+            to,
+            messageId,
+            ...extra,
+            pinned: false,
+            pinError: String(err),
+          });
         }
       };
 
@@ -196,6 +290,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
             ? getMaxRuntime().channel.text.chunkMarkdownText(text, MAX_TEXT_LIMIT)
             : [text];
         let firstMessageId = '';
+        let firstChatType: string | undefined;
         for (let index = 0; index < chunks.length; index += 1) {
           const sent = await sendMaxMessage(to, chunks[index], {
             token: account.token,
@@ -204,9 +299,12 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
             format: 'markdown',
             buttons: index === chunks.length - 1 ? renderedButtons : undefined,
           });
-          if (index === 0) firstMessageId = sent.messageId;
+          if (index === 0) {
+            firstMessageId = sent.messageId;
+            firstChatType = sent.raw.message?.recipient?.chat_type;
+          }
         }
-        return withPin(firstMessageId);
+        return withPin(firstMessageId, firstChatType);
       }
       const replyTo = readStringParam(params, 'replyTo');
       const stickerId = readStringParam(params, 'stickerId');
@@ -227,7 +325,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
             token: account.token,
             replyToMessageId: replyTo ?? undefined,
           });
-          return withPin(result.messageId);
+          return withPin(result.messageId, result.raw.message?.recipient?.chat_type);
         }
       }
 
@@ -239,7 +337,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
           replyToMessageId: replyTo ?? undefined,
           format: 'markdown',
         });
-        return withPin(result.messageId);
+        return withPin(result.messageId, result.raw.message?.recipient?.chat_type);
       }
 
       // Contact sending: if contactName param exists
@@ -249,22 +347,22 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
           token: account.token,
           replyToMessageId: replyTo ?? undefined,
         });
-        return withPin(result.messageId);
+        return withPin(result.messageId, result.raw.message?.recipient?.chat_type);
       }
 
-      // Resolve media source: direct media fields or structured attachments[].
-      const mediaSource = readMediaSource(params);
+      // Media: direct media fields and every structured attachments[] item.
+      const mediaSources = readMediaSources(params);
 
-      if (mediaSource) {
+      if (mediaSources.length) {
         // Local path or URL: https image links go by URL, other remote media
         // is downloaded to a temp file and uploaded.
-        const result = await sendMaxMediaMessage(to, content, mediaSource, {
+        const result = await sendMaxMediaSources(to, content, mediaSources, {
           token: account.token,
           replyToMessageId: replyTo ?? undefined,
           format: 'markdown',
           mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
         });
-        return withPin(result.messageId);
+        return withPin(result.messageId, result.chatType, mediaResultExtra(result));
       }
 
       const result = await sendMaxMessage(to, content, {
@@ -273,7 +371,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
         format: 'markdown',
         buttons,
       });
-      return withPin(result.messageId);
+      return withPin(result.messageId, result.raw.message?.recipient?.chat_type);
     }
 
     if (action === 'edit') {
@@ -301,10 +399,13 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       const to = stripPrefix(readTargetParam(params))!;
       const messageId = readStringParam(params, 'messageId', { required: true });
       const notifyParam = params.notify;
-      await pinMaxMessage(to, messageId, {
+      const pinned = await pinMaxMessage(to, messageId, {
         token: account.token,
         pinNotify: typeof notifyParam === 'boolean' ? notifyParam : undefined,
       });
+      if (!pinned.pinned) {
+        return jsonResult({ ok: true, to, messageId, pinned: false, reason: pinned.reason });
+      }
       return jsonResult({ ok: true, to, messageId, pinned: true });
     }
 
@@ -344,16 +445,21 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
         readStringParam(params, 'message') ?? readStringParam(params, 'caption') ?? '';
       const attachType =
         readStringParam(params, 'type') ?? readStringParam(params, 'attachmentType') ?? '';
-      const mediaSource = readMediaSource(params);
+      const mediaSources = readMediaSources(params);
 
-      if (mediaSource) {
-        const result = await sendMaxMediaMessage(to, caption, mediaSource, {
+      if (mediaSources.length) {
+        const result = await sendMaxMediaSources(to, caption, mediaSources, {
           token: account.token,
           replyToMessageId: replyTo ?? undefined,
           format: 'markdown',
           mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
         });
-        return jsonResult({ ok: true, to, messageId: result.messageId });
+        return jsonResult({
+          ok: true,
+          to,
+          messageId: result.messageId,
+          ...mediaResultExtra(result),
+        });
       }
 
       // Location attachment

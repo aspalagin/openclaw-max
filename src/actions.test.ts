@@ -534,3 +534,92 @@ describe('MAX Message Actions', () => {
     });
   });
 });
+
+describe('message tool: several attachments and dialog pins', () => {
+  const cfg = { channels: { max: { botToken: 'token' } } } as OpenClawConfig;
+
+  beforeEach(() => vi.restoreAllMocks());
+
+  const mockSends = async () => {
+    const { MaxApi } = await import('./api.js');
+    let n = 0;
+    const send = vi.spyOn(MaxApi.prototype, 'sendMessage').mockImplementation(
+      async () =>
+        ({
+          message: { body: { mid: `m${++n}` }, recipient: { chat_id: 9, chat_type: 'dialog' } },
+        }) as never,
+    );
+    vi.spyOn(MaxApi.prototype, 'uploadMedia').mockImplementation(async (type, data) => ({
+      token: `tok:${type}:${String(data).split('/').pop()}`,
+    }));
+    return { MaxApi, send };
+  };
+
+  it('sends every attachments[] item in order (album + file), returning all message ids', async () => {
+    const { send } = await mockSends();
+    const tempDir = await mkdtemp(join(tmpdir(), 'max-action-multi-'));
+    const files = ['a.jpg', 'b.png', 'c.pdf'].map((name) => join(tempDir, name));
+    for (const file of files) await writeFile(file, Buffer.from('x'));
+    try {
+      const result = await actions.handleAction({
+        action: 'send',
+        params: {
+          target: 'user:4260364',
+          message: 'Три файла',
+          attachments: files.map((path) => ({ path })),
+        },
+        cfg,
+      } as never);
+
+      expect(send).toHaveBeenCalledTimes(2);
+      const [album, file] = send.mock.calls.map((c) => c[0]);
+      expect(album.text).toBe('Три файла');
+      expect(album.attachments?.map((a) => a.type)).toEqual(['image', 'image']);
+      expect(file.attachments?.map((a) => a.type)).toEqual(['file']);
+      const payload = JSON.stringify(result);
+      expect(payload).toContain('"messageId":"m1"');
+      expect(payload).toContain('"messageIds":["m1","m2"]');
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('sendAttachment also sends all attachments', async () => {
+    const { send } = await mockSends();
+    await actions.handleAction({
+      action: 'sendAttachment',
+      params: {
+        target: '-7001',
+        attachments: [{ url: 'https://cdn.example/1.png' }, { url: 'https://cdn.example/2.png' }],
+      },
+      cfg,
+    } as never);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0].attachments).toHaveLength(2);
+  });
+
+  it('reports pinned:false for a dialog without calling the pin API', async () => {
+    const { MaxApi, send } = await mockSends();
+    const pin = vi.spyOn(MaxApi.prototype, 'pinMessage');
+    const getChat = vi.spyOn(MaxApi.prototype, 'getChat');
+
+    const sent = await actions.handleAction({
+      action: 'send',
+      params: { target: '9', message: 'hi', pin: true },
+      cfg,
+    } as never);
+    const pinned = await actions.handleAction({
+      action: 'pin',
+      params: { target: 'user:4260364', messageId: 'm1' },
+      cfg,
+    } as never);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(pin).not.toHaveBeenCalled();
+    expect(getChat).not.toHaveBeenCalled();
+    expect(JSON.stringify(sent)).toContain('"pinned":false');
+    expect(JSON.stringify(sent)).toContain('pinSkipped');
+    expect(JSON.stringify(sent)).not.toContain('pinError');
+    expect(JSON.stringify(pinned)).toContain('"pinned":false');
+  });
+});
