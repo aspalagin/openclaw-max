@@ -14,17 +14,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MaxAccountConfig, ResolvedMaxAccount } from "./accounts.js";
 import type { MaxApi } from "./api.js";
 import {
-  clearMaxSubscriptionsForPolling,
   MAX_SUBSCRIBED_UPDATE_TYPES,
-  MAX_SUBSCRIPTION_CHECK_INTERVAL_MS,
   type MaxStatusPatch,
   resolveMaxTransport,
-  resolveMaxWebhookSecret,
   startMaxPolling,
-  startMaxSubscriptionWatch,
 } from "./monitor.js";
+import { clearMaxSubscriptionsForPolling } from "./polling.js";
 import { MaxStateStore } from "./state.js";
 import { handleMaxWebhookRequest } from "./webhook.js";
+import {
+  MAX_SUBSCRIPTION_CHECK_INTERVAL_MS,
+  resolveMaxWebhookSecret,
+  startMaxSubscriptionWatch,
+} from "./webhook-runner.js";
 
 function account(config: MaxAccountConfig, accountId = "default"): ResolvedMaxAccount {
   return { accountId, enabled: true, token: "t", tokenSource: "config", config };

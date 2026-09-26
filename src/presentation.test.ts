@@ -452,7 +452,7 @@ describe("presentation button round trip", () => {
 
   it("delivers an opaque callback to the agent labelled, not as a command", async () => {
     const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./monitor.js");
+    const { dispatchUpdate } = await import("./dispatch.js");
     const { core, dispatched } = makeRuntime();
     setMaxRuntime(core as never);
 
@@ -464,7 +464,7 @@ describe("presentation button round trip", () => {
 
   it("re-enters a command button as the command text", async () => {
     const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./monitor.js");
+    const { dispatchUpdate } = await import("./dispatch.js");
     const { core, dispatched } = makeRuntime();
     setMaxRuntime(core as never);
 
@@ -475,7 +475,7 @@ describe("presentation button round trip", () => {
 
   it("resolves an approval through the canonical approval service", async () => {
     const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./monitor.js");
+    const { dispatchUpdate } = await import("./dispatch.js");
     const { core, dispatched } = makeRuntime();
     setMaxRuntime(core as never);
     const opts = makeOpts({ dmPolicy: "allowlist", allowFrom: ["max:4260364"] });
@@ -496,7 +496,7 @@ describe("presentation button round trip", () => {
 
   it("refuses approvals from senders outside allowFrom (wildcard is not enough)", async () => {
     const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./monitor.js");
+    const { dispatchUpdate } = await import("./dispatch.js");
     setMaxRuntime(makeRuntime().core as never);
     const opts = makeOpts({ dmPolicy: "open", allowFrom: ["*"] });
 
@@ -508,7 +508,7 @@ describe("presentation button round trip", () => {
 
   it("answers an ask_user question through the question gateway", async () => {
     const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./monitor.js");
+    const { dispatchUpdate } = await import("./dispatch.js");
     setMaxRuntime(makeRuntime().core as never);
     const opts = makeOpts({ allowFrom: ["4260364"] });
 
@@ -526,7 +526,7 @@ describe("presentation button round trip", () => {
 
   it("reports a failed resolution instead of throwing", async () => {
     const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./monitor.js");
+    const { dispatchUpdate } = await import("./dispatch.js");
     setMaxRuntime(makeRuntime().core as never);
     approvalMock.resolve.mockRejectedValue(new Error("gateway unreachable"));
     const opts = makeOpts({ allowFrom: ["4260364"] });
@@ -540,7 +540,7 @@ describe("presentation button round trip", () => {
 describe("agent reply funnel", () => {
   it("renders a presentation reply as a keyboard message and pins it", async () => {
     const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./monitor.js");
+    const { dispatchUpdate } = await import("./dispatch.js");
     const { core } = makeRuntime();
     Object.assign(core.channel, {
       text: {

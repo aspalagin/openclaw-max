@@ -609,7 +609,7 @@ describe("MAX Group Functionality", () => {
 
   describe("Group callback (button) handling", () => {
     it("should synthesize a group callback in the keyboard's chat", async () => {
-      const { buildCallbackMessage } = await import("./monitor.js");
+      const { buildCallbackMessage } = await import("./callbacks.js");
       const synthetic = buildCallbackMessage(
         { timestamp: 1, callback_id: "cb-1", payload: "/models", user: { user_id: 5975998, first_name: "Evgeniy", is_bot: false } },
         {

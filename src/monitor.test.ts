@@ -5,7 +5,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { MaxMessage, MaxUpdate } from "./api.js";
-import { createSerializedWebhookHandler,MAX_SUBSCRIBED_UPDATE_TYPES, startMaxPolling } from "./monitor.js";
+import { MAX_SUBSCRIBED_UPDATE_TYPES, startMaxPolling } from "./monitor.js";
+import { createSerializedWebhookHandler } from "./webhook-runner.js";
 
 function makeMsgUpdate(chatId: number, mid: string): MaxUpdate {
   return {
@@ -173,7 +174,7 @@ describe("processIncomingMessage inbound media", () => {
   it("passes downloaded attachments to the agent as ordered media facts", async () => {
     const { finalizeInboundContext } = await import("openclaw/plugin-sdk/reply-dispatch-runtime");
     const { setMaxRuntime } = await import("./runtime.js");
-    const { processIncomingMessage } = await import("./monitor.js");
+    const { processIncomingMessage } = await import("./inbound.js");
 
     const saved = [
       { path: "/state/media/inbound/photo-1.jpg", contentType: "image/jpeg" },
@@ -263,7 +264,7 @@ describe("processIncomingMessage inbound media", () => {
 
   async function runVoiceMessage(audio: Record<string, unknown>) {
     const { setMaxRuntime } = await import("./runtime.js");
-    const { processIncomingMessage } = await import("./monitor.js");
+    const { processIncomingMessage } = await import("./inbound.js");
     const { core, dispatched } = makeCallbackRuntime();
     const fetchRemoteMedia = vi.fn(async () => ({ buffer: Buffer.from("ogg"), contentType: "audio/ogg" }));
     const runtime = {
@@ -399,7 +400,7 @@ function makeCallbackOpts(accountConfig: Record<string, unknown>) {
 
 describe("message_callback", () => {
   it("takes the recipient from the sibling message of the live update", async () => {
-    const { buildCallbackMessage } = await import("./monitor.js");
+    const { buildCallbackMessage } = await import("./callbacks.js");
     const update = structuredClone(LIVE_MESSAGE_CALLBACK) as unknown as MaxUpdate;
 
     const synthetic = buildCallbackMessage(update.callback!, update.message ?? null);
@@ -411,7 +412,7 @@ describe("message_callback", () => {
   });
 
   it("falls back to the pressing user only when the keyboard message is gone", async () => {
-    const { buildCallbackMessage } = await import("./monitor.js");
+    const { buildCallbackMessage } = await import("./callbacks.js");
     const update = structuredClone(LIVE_MESSAGE_CALLBACK) as unknown as MaxUpdate;
 
     const synthetic = buildCallbackMessage(update.callback!, null);
@@ -421,7 +422,7 @@ describe("message_callback", () => {
 
   it("dispatches a live DM callback into the dialog chat, routed by the sender", async () => {
     const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./monitor.js");
+    const { dispatchUpdate } = await import("./dispatch.js");
     const { core, dispatched } = makeCallbackRuntime();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setMaxRuntime(core as any);
@@ -446,7 +447,7 @@ describe("message_callback", () => {
 
   it("keeps a group callback in the group chat and lets it past the mention gate", async () => {
     const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./monitor.js");
+    const { dispatchUpdate } = await import("./dispatch.js");
     const { core, dispatched } = makeCallbackRuntime();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setMaxRuntime(core as any);
@@ -471,7 +472,7 @@ describe("message_callback", () => {
 describe("edit streaming (streamMode: partial)", () => {
   it("puts the keyboard of the final answer onto the edited draft", async () => {
     const { setMaxRuntime } = await import("./runtime.js");
-    const { processIncomingMessage } = await import("./monitor.js");
+    const { processIncomingMessage } = await import("./inbound.js");
     const { core } = makeCallbackRuntime();
     const requests: { method: string; url: string; body: Record<string, unknown> }[] = [];
     const originalFetch = global.fetch;
@@ -523,7 +524,7 @@ describe("edit streaming (streamMode: partial)", () => {
 describe("typing indicator", () => {
   async function run(message: Record<string, unknown>, accountConfig: Record<string, unknown>, botUsername?: string) {
     const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./monitor.js");
+    const { dispatchUpdate } = await import("./dispatch.js");
     const { core, dispatched } = makeCallbackRuntime();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setMaxRuntime(core as any);
@@ -559,7 +560,7 @@ describe("typing indicator", () => {
 
 describe("group mentions via body.markup", () => {
   it("recognises user_mention by user_id or user_link", async () => {
-    const { isBotMentionedInMarkup } = await import("./monitor.js");
+    const { isBotMentionedInMarkup } = await import("./inbound.js");
     expect(isBotMentionedInMarkup([{ type: "user_mention", from: 0, length: 6, user_id: 900 }], 900, "banzai_bot")).toBe(true);
     expect(isBotMentionedInMarkup([{ type: "user_mention", from: 0, length: 11, user_link: "@Banzai_Bot" }], 900, "banzai_bot")).toBe(true);
     expect(isBotMentionedInMarkup([{ type: "user_mention", from: 0, length: 5, user_link: "@other" }], 900, "banzai_bot")).toBe(false);
@@ -570,7 +571,7 @@ describe("group mentions via body.markup", () => {
 
   async function runGroup(body: Record<string, unknown>, botUsername?: string) {
     const { setMaxRuntime } = await import("./runtime.js");
-    const { dispatchUpdate } = await import("./monitor.js");
+    const { dispatchUpdate } = await import("./dispatch.js");
     const { core, dispatched } = makeCallbackRuntime();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setMaxRuntime(core as any);
