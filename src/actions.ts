@@ -14,12 +14,12 @@ import { getMaxRuntime } from './runtime.js';
 import {
   deleteMaxMessage,
   editMaxMessage,
+  type MaxMediaSendOptions,
   pinMaxMessage,
   readMaxChannelButtons,
   readMaxSendButtons,
   sendMaxContact,
   sendMaxLocation,
-  type MaxMediaSendOptions,
   sendMaxMediaGroup,
   sendMaxMediaMessage,
   sendMaxMessage,
