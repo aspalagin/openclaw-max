@@ -59,8 +59,12 @@ export async function deliverMaxReply(params: {
 
   // delivery.pin: pin the first delivered message (first chunk).
   let firstMessageId: string | undefined;
-  const noteDelivered = (messageId: string) => {
-    if (!firstMessageId && messageId) firstMessageId = messageId;
+  let firstChatType: string | undefined;
+  const noteDelivered = (messageId: string, chatType?: string) => {
+    if (!firstMessageId && messageId) {
+      firstMessageId = messageId;
+      firstChatType = chatType;
+    }
   };
 
   if (payload.text) {
@@ -78,7 +82,7 @@ export async function deliverMaxReply(params: {
           buttons: index === chunks.length - 1 ? buttons : undefined,
           ...sendOptions,
         });
-        noteDelivered(sent.messageId);
+        noteDelivered(sent.messageId, sent.raw.message?.recipient?.chat_type);
         statusSink?.({ lastOutboundAt: Date.now() });
       } catch (err: unknown) {
         const body = (err as { body?: unknown })?.body;
@@ -96,7 +100,7 @@ export async function deliverMaxReply(params: {
         buttons,
         ...sendOptions,
       });
-      noteDelivered(sent.messageId);
+      noteDelivered(sent.messageId, sent.raw.message?.recipient?.chat_type);
       statusSink?.({ lastOutboundAt: Date.now() });
     } catch (err: unknown) {
       const body = (err as { body?: unknown })?.body;
@@ -133,10 +137,16 @@ export async function deliverMaxReply(params: {
   const pin = readMaxDeliveryPin(payload.delivery);
   if (pin && firstMessageId) {
     try {
-      await pinMaxMessage(chatId, firstMessageId, {
+      const pinned = await pinMaxMessage(chatId, firstMessageId, {
         token: account.token,
         pinNotify: pin.notify === true,
+        chatType: firstChatType,
       });
+      if (!pinned.pinned) {
+        log?.debug?.(
+          `[${account.accountId}] MAX pin of ${firstMessageId} skipped: ${pinned.reason}`,
+        );
+      }
     } catch (err) {
       // Optional pins degrade; the delivered message stays.
       log?.[pin.required ? 'error' : 'warn'](

@@ -421,31 +421,63 @@ export async function deleteMaxMessage(
   await api.deleteMessage(messageId);
 }
 
+/** Pin result: MAX has no pinned messages in dialogs (1:1 chats). */
+export type MaxPinOutcome = { pinned: true } | { pinned: false; reason: string };
+
+export const MAX_PIN_DIALOG_REASON = 'MAX does not support pinned messages in dialogs';
+
+/** 400 proto.payload "Method is not available for dialogs" from /chats/{id}/pin. */
+function isPinUnavailableForDialog(err: unknown): boolean {
+  if (!(err instanceof MaxApiError)) return false;
+  const message =
+    typeof (err.body as { message?: unknown })?.message === 'string'
+      ? String((err.body as { message?: unknown }).message)
+      : err.message;
+  return /not available for dialogs/i.test(message);
+}
+
 /**
- * Pin/unpin a message in a MAX chat.
+ * Pin a message in a MAX chat. Dialogs cannot have pinned messages (MAX
+ * answers 400 "Method is not available for dialogs"), so a dialog target is
+ * reported as `{ pinned: false }` without calling the pin API: `user:<id>`
+ * targets are always dialogs, negative ids are groups/channels, and a
+ * positive chat id is checked through `chatType` (the recipient of the sent
+ * message) or GET /chats/{id}.
  */
 export async function pinMaxMessage(
   to: string,
   messageId: string,
   opts: MaxSendOptions & {
     pinNotify?: boolean;
+    /** recipient.chat_type of the sent message, when the caller has it. */
+    chatType?: string;
     /** Checked synchronously right before each MAX request (delivery-owner guard). */
     beforeRequest?: () => void;
   } = {},
-): Promise<void> {
+): Promise<MaxPinOutcome> {
   const token = resolveToken(opts);
   const api = new MaxApi({ token });
   const target = await resolveMaxTarget(api, to);
-  let chatId: number | undefined = 'chat_id' in target ? target.chat_id : undefined;
-  if (chatId == null) {
-    // user:<id> targets: PUT /chats/{chatId}/pin needs the dialog chat id,
-    // which differs from the user id — take it from the sent message.
+  if (!('chat_id' in target) || opts.chatType === 'dialog') {
+    return { pinned: false, reason: MAX_PIN_DIALOG_REASON };
+  }
+  const chatId = target.chat_id;
+  if (chatId > 0 && !opts.chatType) {
     opts.beforeRequest?.();
-    chatId = (await api.getMessageById(messageId)).recipient?.chat_id ?? undefined;
-    if (chatId == null) throw new Error('MAX pin: could not resolve the chat id of the message');
+    const chatType = await api.getChat(chatId).then(
+      (chat) => chat.type,
+      () => undefined, // unknown: let the pin call decide
+    );
+    if (chatType === 'dialog') return { pinned: false, reason: MAX_PIN_DIALOG_REASON };
   }
   opts.beforeRequest?.();
-  await api.pinMessage(chatId, messageId, opts.pinNotify);
+  try {
+    await api.pinMessage(chatId, messageId, opts.pinNotify);
+  } catch (err) {
+    if (isPinUnavailableForDialog(err)) return { pinned: false, reason: MAX_PIN_DIALOG_REASON };
+    throw err;
+  }
+  return { pinned: true };
 }
 
 export async function unpinMaxMessage(to: string, opts: MaxSendOptions = {}): Promise<void> {

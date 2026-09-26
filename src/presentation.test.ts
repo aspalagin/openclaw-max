@@ -357,30 +357,39 @@ describe('outbound adapter', () => {
     expect(assertDirectAdapterHandoff).toHaveBeenCalled();
   });
 
-  it('resolves the dialog chat id of a user target from the sent message', async () => {
+  it('skips the pin for a user (dialog) target without calling MAX', async () => {
     const { maxPlugin } = await import('./channel.js');
-    global.fetch = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          body: { mid: 'mid.dm' },
-          recipient: { chat_id: 242316535, chat_type: 'dialog', user_id: 4260364 },
-        }),
-      })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) });
+    global.fetch = vi.fn();
+
+    await expect(
+      maxPlugin.outbound!.pinDeliveredMessage!({
+        cfg: { channels: { max: { botToken: 'tok' } } } as never,
+        target: { channel: 'max', to: 'user:4260364' },
+        messageId: 'mid.dm',
+        pin: { enabled: true },
+      }),
+    ).resolves.toBeUndefined();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('skips the pin when GET /chats says a positive chat id is a dialog', async () => {
+    const { maxPlugin } = await import('./channel.js');
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ chat_id: 242316535, type: 'dialog', status: 'active' }),
+    });
 
     await maxPlugin.outbound!.pinDeliveredMessage!({
       cfg: { channels: { max: { botToken: 'tok' } } } as never,
-      target: { channel: 'max', to: 'user:4260364' },
+      target: { channel: 'max', to: '242316535' },
       messageId: 'mid.dm',
       pin: { enabled: true },
     });
 
     const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
-    expect(String(calls[0][0])).toContain('/messages/mid.dm');
-    expect(String(calls[1][0])).toContain('/chats/242316535/pin');
-    expect(JSON.parse(calls[1][1].body)).toEqual({ message_id: 'mid.dm', notify: false });
+    expect(calls).toHaveLength(1);
+    expect(String(calls[0][0])).toContain('/chats/242316535');
+    expect(calls[0][1].method).toBe('GET');
   });
 });
 
@@ -630,7 +639,7 @@ describe('presentation button round trip', () => {
 });
 
 describe('agent reply funnel', () => {
-  it('renders a presentation reply as a keyboard message and pins it', async () => {
+  it('renders a presentation reply as a keyboard message and skips the pin in a dialog', async () => {
     const { setMaxRuntime } = await import('./runtime.js');
     const { dispatchUpdate } = await import('./dispatch.js');
     const { core } = makeRuntime();
@@ -655,7 +664,10 @@ describe('agent reply funnel', () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          message: { body: { mid: 'mid.reply' }, recipient: { chat_id: 242316535 } },
+          message: {
+            body: { mid: 'mid.reply' },
+            recipient: { chat_id: 242316535, chat_type: 'dialog' },
+          },
         }),
       })
       .mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
@@ -688,8 +700,9 @@ describe('agent reply funnel', () => {
     expect(body.attachments[0].payload.buttons.flat().map((b: { text: string }) => b.text)).toEqual(
       ['Approve', 'Status', 'Notes', 'Allow once', 'Yes'],
     );
-    const pin = calls.find(([url]) => String(url).includes('/chats/242316535/pin'));
-    expect(pin).toBeDefined();
-    expect(JSON.parse(pin![1].body)).toEqual({ message_id: 'mid.reply', notify: false });
+    // A dialog cannot pin (MAX: "Method is not available for dialogs"): the
+    // recipient chat_type of the sent message skips the pin without any call.
+    expect(calls.some(([url]) => String(url).includes('/pin'))).toBe(false);
+    expect(calls.some(([, init]) => init.method === 'GET')).toBe(false);
   });
 });

@@ -893,3 +893,60 @@ describe('albums and images by URL', () => {
     expect(result.messageIds).toEqual(['m-2']);
   });
 });
+
+describe('pinMaxMessage in dialogs', () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it('does not call MAX for user: targets or a dialog chatType hint', async () => {
+    const { pinMaxMessage } = await import('./send.js');
+    const pin = vi.spyOn(MaxApi.prototype, 'pinMessage');
+    const getChat = vi.spyOn(MaxApi.prototype, 'getChat');
+
+    await expect(pinMaxMessage('user:4260364', 'mid.1', { token: MOCK_TOKEN })).resolves.toEqual({
+      pinned: false,
+      reason: expect.stringMatching(/dialogs/),
+    });
+    await expect(
+      pinMaxMessage('242316535', 'mid.2', { token: MOCK_TOKEN, chatType: 'dialog' }),
+    ).resolves.toMatchObject({ pinned: false });
+    expect(pin).not.toHaveBeenCalled();
+    expect(getChat).not.toHaveBeenCalled();
+  });
+
+  it('checks the type of a positive chat id and pins only non-dialogs', async () => {
+    const { pinMaxMessage } = await import('./send.js');
+    const pin = vi.spyOn(MaxApi.prototype, 'pinMessage').mockResolvedValue(undefined as never);
+    const getChat = vi
+      .spyOn(MaxApi.prototype, 'getChat')
+      .mockResolvedValueOnce({ chat_id: 5, type: 'dialog', status: 'active' })
+      .mockResolvedValueOnce({ chat_id: 6, type: 'chat', status: 'active' });
+
+    await expect(pinMaxMessage('5', 'mid.a', { token: MOCK_TOKEN })).resolves.toMatchObject({
+      pinned: false,
+    });
+    await expect(pinMaxMessage('6', 'mid.b', { token: MOCK_TOKEN })).resolves.toEqual({
+      pinned: true,
+    });
+    // Negative ids are groups/channels: no type lookup.
+    await expect(pinMaxMessage('-7001', 'mid.c', { token: MOCK_TOKEN })).resolves.toEqual({
+      pinned: true,
+    });
+    expect(getChat).toHaveBeenCalledTimes(2);
+    expect(pin.mock.calls.map((c) => c[0])).toEqual([6, -7001]);
+  });
+
+  it('maps 400 "Method is not available for dialogs" to pinned:false', async () => {
+    const { pinMaxMessage } = await import('./send.js');
+    const { MaxApiError } = await import('./api.js');
+    vi.spyOn(MaxApi.prototype, 'getChat').mockRejectedValue(new Error('network'));
+    vi.spyOn(MaxApi.prototype, 'pinMessage').mockRejectedValue(
+      new MaxApiError('MAX API 400', 400, {
+        code: 'proto.payload',
+        message: 'Method is not available for dialogs',
+      }),
+    );
+    await expect(pinMaxMessage('7', 'mid.d', { token: MOCK_TOKEN })).resolves.toMatchObject({
+      pinned: false,
+    });
+  });
+});

@@ -40,6 +40,8 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
     const account = resolveMaxAccount({ cfg, accountId: target.accountId });
     if (!account.token) throw new Error('MAX bot token not configured');
     assertDirectAdapterHandoff?.();
+    // Dialogs cannot pin: pinMaxMessage resolves { pinned: false } without an
+    // API call or error, so core logs no failed pin for a DM delivery.
     await pinMaxMessage(target.to, messageId, {
       token: account.token,
       pinNotify: pin.notify === true,
