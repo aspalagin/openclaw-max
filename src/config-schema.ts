@@ -92,6 +92,12 @@ export const MaxAccountSchemaBase = z
     responsePrefix: z.string().optional(),
     mediaMaxMb: z.number().positive().optional(),
     markSeen: z.boolean().optional(),
+    /**
+     * Chats message-tool actions may act in: "admitted" (default) — the current
+     * chat, owner requests and chats admitted by the DM/group policy;
+     * "current" — non-owner turns only in their own chat; "off" — no check.
+     */
+    actionScope: z.enum(['admitted', 'current', 'off']).optional(),
     actions: z
       .record(
         z.string(),

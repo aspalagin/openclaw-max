@@ -13,6 +13,7 @@ import { readStringParam } from 'openclaw/plugin-sdk/param-readers';
 import { jsonResult } from 'openclaw/plugin-sdk/tool-results';
 
 import { listMaxAccountIds, resolveMaxAccount } from './accounts.js';
+import { assertMaxActionInScope } from './action-scope.js';
 import { materializeMaxPresentation, MAX_TEXT_LIMIT, readMaxDeliveryPin } from './presentation.js';
 import { getMaxRuntime } from './runtime.js';
 import {
@@ -261,6 +262,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
 
     if (action === 'send') {
       const to = stripPrefix(readTargetParam(params))!;
+      await assertMaxActionInScope(ctx, account, { to });
       const presentation = normalizeMessagePresentation(params.presentation);
       const pin = readMaxDeliveryPin(params.delivery, params.pin);
       const content =
@@ -407,6 +409,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
 
     if (action === 'edit') {
       const messageId = readStringParam(params, 'messageId', { required: true });
+      await assertMaxActionInScope(ctx, account, { messageId });
       const text = readStringParam(params, 'message', {
         required: true,
         allowEmpty: true,
@@ -420,6 +423,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
 
     if (action === 'delete') {
       const messageId = readStringParam(params, 'messageId', { required: true });
+      await assertMaxActionInScope(ctx, account, { messageId });
       await deleteMaxMessage(messageId, {
         token: account.token,
       });
@@ -429,6 +433,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
     if (action === 'pin') {
       const to = stripPrefix(readTargetParam(params))!;
       const messageId = readStringParam(params, 'messageId', { required: true });
+      await assertMaxActionInScope(ctx, account, { to });
       const notifyParam = params.notify;
       const pinned = await pinMaxMessage(to, messageId, {
         token: account.token,
@@ -442,12 +447,14 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
 
     if (action === 'unpin') {
       const to = stripPrefix(readTargetParam(params))!;
+      await assertMaxActionInScope(ctx, account, { to });
       await unpinMaxMessage(to, { token: account.token });
       return jsonResult({ ok: true, to, pinned: false });
     }
 
     if (action === 'sticker') {
       const to = stripPrefix(readTargetParam(params))!;
+      await assertMaxActionInScope(ctx, account, { to });
       // stickerId may come as string or string[] from message tool schema
       const rawStickerId = params.stickerId;
       let stickerCode: string | undefined = Array.isArray(rawStickerId)
@@ -471,6 +478,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
 
     if (action === 'sendAttachment') {
       const to = stripPrefix(readTargetParam(params))!;
+      await assertMaxActionInScope(ctx, account, { to });
       const replyTo = readStringParam(params, 'replyTo');
       const caption =
         readStringParam(params, 'message') ?? readStringParam(params, 'caption') ?? '';

@@ -7,6 +7,7 @@ import { toInboundMediaFacts } from 'openclaw/plugin-sdk/channel-inbound';
 import { createReplyPrefixOptions } from 'openclaw/plugin-sdk/channel-outbound';
 import { getAgentScopedMediaLocalRoots } from 'openclaw/plugin-sdk/media-local-roots';
 
+import { admitMaxGroupChat, readMaxDmAllowFrom } from './access-policy.js';
 import type { MaxAttachment, MaxLinkedMessage, MaxMessage, MaxUser } from './api.js';
 import { deliverMaxReply } from './deliver.js';
 import { collectInboundAttachments } from './inbound-attachments.js';
@@ -110,11 +111,7 @@ export async function processIncomingMessage(
     }
 
     if (dmPolicy !== 'open') {
-      const configAllowFrom = (account.config.allowFrom ?? []).map(String);
-      const storeAllowFrom = await core.channel.pairing
-        .readAllowFromStore({ channel: 'max', accountId: account.accountId })
-        .catch(() => []);
-      const effectiveAllowFrom = [...configAllowFrom, ...storeAllowFrom];
+      const effectiveAllowFrom = await readMaxDmAllowFrom(account);
 
       const senderStr = String(senderId);
       const allowed = effectiveAllowFrom.includes(senderStr) || effectiveAllowFrom.includes('*');
@@ -149,28 +146,14 @@ export async function processIncomingMessage(
     }
   }
 
-  // Group policy
+  // Group policy (disabled / allowlist incl. "*" / open)
   if (isGroup) {
-    const defaultGroupPolicy = config.channels?.defaults?.groupPolicy;
-    const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? 'allowlist';
-
-    if (groupPolicy === 'disabled') {
-      log?.debug?.(`[${account.accountId}] Blocked group message (groupPolicy=disabled)`);
+    const admission = admitMaxGroupChat(account, config, chatId);
+    if (!admission.admitted) {
+      log?.debug?.(
+        `[${account.accountId}] Blocked group message (${admission.reason}, chat=${String(chatId)})`,
+      );
       return;
-    }
-
-    // For allowlist policy, check if chat is in the groups config
-    if (groupPolicy === 'allowlist') {
-      const groups = account.config.groups ?? {};
-      const chatIdStr = String(chatId);
-      const hasWildcard = '*' in groups;
-      const chatAllowed = chatIdStr in groups || hasWildcard;
-      if (!chatAllowed) {
-        log?.debug?.(
-          `[${account.accountId}] Blocked group message (not in allowlist, chat=${chatIdStr})`,
-        );
-        return;
-      }
     }
 
     // Require mention in groups

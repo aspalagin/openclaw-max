@@ -28,6 +28,8 @@ export interface MaxAccountConfig {
   streamMode?: 'off' | 'partial' | 'block';
   /** Send mark_seen read receipts on inbound messages (default true) */
   markSeen?: boolean;
+  /** Chats message-tool actions may act in (default "admitted"; see action-scope.ts) */
+  actionScope?: 'admitted' | 'current' | 'off';
 }
 
 export interface ResolvedMaxAccount {
@@ -137,6 +139,7 @@ export function resolveMaxAccount(params: {
       mediaMaxMb: section.mediaMaxMb as number | undefined,
       streamMode: section.streamMode as MaxAccountConfig['streamMode'],
       markSeen: section.markSeen as boolean | undefined,
+      actionScope: section.actionScope as MaxAccountConfig['actionScope'],
     };
 
     if (accountConfig.botToken?.trim()) {
@@ -171,6 +174,7 @@ export function resolveMaxAccount(params: {
       mediaMaxMb: raw.mediaMaxMb as number | undefined,
       streamMode: raw.streamMode as MaxAccountConfig['streamMode'],
       markSeen: raw.markSeen as boolean | undefined,
+      actionScope: raw.actionScope as MaxAccountConfig['actionScope'],
     };
 
     if (accountConfig.botToken?.trim()) {

@@ -189,6 +189,16 @@
               "markSeen": {
                 "type": "boolean"
               },
+              "actionScope": {
+                "type": "string",
+                "enum": [
+                  "admitted",
+                  "current",
+                  "off"
+                ],
+                "default": "admitted",
+                "description": "Chats message-tool actions (send, sendAttachment, sticker, edit, delete, pin, unpin) may act in. admitted: the current chat, owner requests and chats admitted by dmPolicy/allowFrom/pairing and groupPolicy/groups; current: non-owner turns only in their own chat; off: no plugin check."
+              },
               "actions": {
                 "type": "object",
                 "additionalProperties": {
