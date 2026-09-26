@@ -35,7 +35,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:api": "node --input-type=module ./scripts/test-api.mjs",
-    "check:cycles": "node scripts/check-cycles.mjs"
+    "check:cycles": "node scripts/check-cycles.mjs",
+    "schema:update": "node scripts/update-schema.mjs"
   },
   "files": [
     "dist/",
@@ -70,7 +71,8 @@
     "openclaw": "^2026.9.6",
     "prettier": "^3.8.4",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.8",
+    "yaml": "^2.9.1"
   },
   "peerDependencies": {
     "openclaw": "*"

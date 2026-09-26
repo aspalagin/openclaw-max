@@ -92,7 +92,8 @@ export async function resolveMaxTarget(_api: MaxApi, to: string): Promise<MaxSen
   throw new Error(`Invalid MAX target: ${to}`);
 }
 
-const MAX_SEND_BUTTON_TYPES = new Set([
+/** Button types the plugin builds (schema.yaml Button.discriminator). */
+export const MAX_SEND_BUTTON_TYPES: ReadonlySet<string> = new Set([
   "callback", "link", "message", "clipboard", "open_app", "request_contact", "request_geo_location",
 ]);
 
