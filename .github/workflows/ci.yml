@@ -17,8 +17,9 @@ jobs:
         with:
           node-version: 24
       - run: npm ci --ignore-scripts
-      - run: npm run format
+      - run: npm run format:check
       - run: npm run lint
+      - run: npm run check:cycles
       - run: npm run typecheck
       - run: npm test
 
