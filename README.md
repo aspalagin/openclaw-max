@@ -2,6 +2,8 @@
 
 Канал-плагин для подключения AI-ассистента [OpenClaw](https://openclaw.ai) к мессенджеру [MAX](https://max.ru) (ex-VK Teams / ICQ New).
 
+Версия 0.7.0, изменения — в [CHANGELOG.md](CHANGELOG.md). Проверено на OpenClaw 2026.9.6 и схеме MAX Bot API 0.0.33.
+
 ## Что это
 
 Плагин позволяет общаться с OpenClaw-ботом через мессенджер MAX — так же, как через Telegram. Поддерживает:
@@ -30,30 +32,51 @@ Russian Trusted Sub CA (Минцифры), которого нет в станд
 
 ```
 openclaw-max/
-├── index.ts                    # Точка входа плагина
+├── index.ts                    # Точка входа (defineChannelPluginEntry) → dist/index.js
+├── setup-entry.ts              # Точка входа setup-режима (defineSetupPluginEntry) → dist/setup-entry.js
 ├── openclaw.plugin.json        # Манифест плагина
 ├── package.json
 ├── tsconfig.json
 ├── README.md
 ├── src/
-│   ├── types.ts                # TypeScript-типы MAX Bot API
-│   ├── api.ts                  # HTTP-клиент MAX API (retry, TLS, upload)
-│   ├── russian-trusted-ca.ts   # Встроенные сертификаты Минцифры
-│   ├── send.ts                 # Send-хелперы (текст, медиа, кнопки, pin)
-│   ├── format.ts               # Конвертация markdown в MAX-диалект
-│   ├── monitor.ts              # Long polling / диспетчеризация update'ов
+│   ├── channel.ts              # maxPlugin: сборка адаптеров канала
+│   ├── channel-config.ts       # Аккаунты, включение/удаление, CLI setup
+│   ├── channel-policy.ts       # DM-политика, группы (requireMention, tools), pairing
+│   ├── channel-directory.ts    # Нормализация целей, directory (self/peers/groups)
+│   ├── channel-outbound.ts     # sendText/sendPayload/sendMedia, presentation, pin
+│   ├── channel-lifecycle.ts    # Старт/стоп аккаунта, статус, probe, аудит групп
+│   ├── channel-agent-prompt.ts # Подсказки агенту (стикеры, location, кнопки…)
+│   ├── monitor.ts              # Точка входа приёма: выбор транспорта
+│   ├── monitor-types.ts        # Опции монитора, статус, подписанные update_type
+│   ├── polling.ts              # Long polling (marker), снятие чужих подписок
+│   ├── webhook-runner.ts       # Webhook-режим: секрет, подписка, сверка, очередь
 │   ├── webhook.ts              # Webhook: роут gateway, secret, быстрый ACK, дедупликация
-│   ├── state.ts                # Персист: marker поллинга + реестр чатов
-│   ├── channel.ts              # OpenClaw channel adapter
-│   ├── accounts.ts             # Резолвинг аккаунтов из конфига
+│   ├── dispatch.ts             # Разбор update'ов по update_type
+│   ├── inbound.ts              # Gate DM/групп, контекст, запуск агента
+│   ├── inbound-attachments.ts  # Скачивание и описание входящих вложений
+│   ├── callbacks.ts            # Нажатия кнопок, approval/ask_user
+│   ├── deliver.ts              # Доставка ответа: чанки, альбомы, pin
+│   ├── stream-draft.ts         # Edit-стриминг (streamMode: partial)
+│   ├── send.ts                 # Send-хелперы (sendWithBody, кнопки, медиа, pin)
 │   ├── actions.ts              # message-tool actions (send/edit/delete/pin/…)
+│   ├── presentation.ts         # Рендер presentation и callback-конверты
+│   ├── api.ts                  # HTTP-клиент MAX API (retry, TLS, upload, лимитер)
+│   ├── types.ts                # TypeScript-типы MAX Bot API
+│   ├── russian-trusted-ca.ts   # Встроенные сертификаты Минцифры
+│   ├── format.ts               # Конвертация markdown в MAX-диалект
+│   ├── media-temp.ts           # Временные файлы медиа, очистка имён
+│   ├── state.ts                # Персист: marker, реестр чатов, секрет webhook
+│   ├── accounts.ts             # Резолвинг аккаунтов из конфига
 │   ├── config-schema.ts        # Zod-схема конфига
 │   ├── model-buttons.ts        # Кнопки выбора модели
 │   ├── onboarding.ts           # Setup wizard
-│   └── sticker-cache.ts        # Кэш кодов стикеров
+│   ├── sticker-cache.ts        # Кэш кодов стикеров
+│   └── __fixtures__/           # Снимок схемы MAX (max-schema-<версия>.yaml)
 └── scripts/
     ├── test-api.mjs            # Проверка токена и API
-    └── test-send.mjs           # Тест send + edit + delete
+    ├── test-send.mjs           # Тест send + edit + delete
+    ├── check-cycles.mjs        # Проверка циклических импортов src/
+    └── update-schema.mjs       # Обновление снимка схемы MAX
 ```
 
 ## Установка
@@ -205,6 +228,10 @@ head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9_-' | head -c 48 \
 3. Проверить: `GET /subscriptions` показывает ровно один URL, в логе
    `MAX webhook subscribed`, сообщение боту доходит до агента.
 
+Пошаговый runbook деплоя 0.7.0 на этой установке (бэкапы, проверки, откаты):
+`/root/.openclaw/workspace-arseniy/deliverables/max-plugin-upgrade-20260926/deploy-runbook.md`
+(рабочий каталог ассистента, вне репозитория).
+
 Откат: `transport: "polling"` (или убрать `webhookUrl`) и перезапуск — подписка
 удаляется при старте polling. Если плагин не стартует, снять подписку руками:
 `curl -X DELETE "https://platform-api2.max.ru/subscriptions?url=<webhookUrl>" -H "Authorization: <token>"`.
@@ -274,22 +301,46 @@ openclaw --account zaya send "Привет из второго бота"
 
 ### Требования
 
-- Node.js 18+ (встроенный fetch)
-- TypeScript 5+
+- Node.js 22+
+- OpenClaw 2026.9.6+ (devDependency, SDK-подпути `openclaw/plugin-sdk/*`)
 
 ### Сборка
 
 ```bash
 cd openclaw-max
-npm install
-npm run build          # npx tsc
+npm ci
+npm run build          # tsc → dist/index.js, dist/setup-entry.js, dist/src/*.js (без тестов)
 ```
 
-### Проверка типов
+`build` собирает и при ошибках типов (`--noEmitOnError false`), поэтому перед ним
+запускайте `npm run typecheck`.
+
+### Проверки (как в CI)
 
 ```bash
-npx tsc --noEmit
+npm run format:check   # prettier
+npm run lint           # eslint, 0 ошибок и 0 предупреждений
+npm run check:cycles   # циклические импорты между модулями src/
+npm run typecheck
+npm test               # vitest, включая сверку со схемой MAX
 ```
+
+### Схема MAX Bot API
+
+`src/schema-conformance.test.ts` сверяет подписку, типы update/кнопок/вложений и
+тела запросов со снимком `src/__fixtures__/max-schema-<версия>.yaml`
+([max-messenger/api-schema](https://github.com/max-messenger/api-schema)).
+Обновить снимок:
+
+```bash
+npm run schema:update               # последний коммит репозитория схемы
+npm run schema:update -- <commit>   # конкретный коммит, тег или ветка
+npm test
+```
+
+Скрипт заменяет старый снимок новым (имя по `info.version`) и пишет в заголовок
+файла коммит и дату. Упавший тест сверки означает, что плагин отправляет или ждёт
+то, чего в новой схеме нет: поправить код или тип, затем закоммитить снимок.
 
 ### Тест API (проверка что токен работает)
 
@@ -306,20 +357,6 @@ MAX_BOT_TOKEN=xxx node scripts/test-api.mjs <chat_id>
 ```bash
 # Полный цикл: отправить → подождать → отредактировать → подождать → удалить
 MAX_BOT_TOKEN=xxx node scripts/test-send.mjs <chat_id> "Текст сообщения"
-```
-
-### Запуск polling вручную
-
-```typescript
-import { startPolling } from "./polling.js";
-
-const stop = startPolling("мой_токен", async (update) => {
-  console.log("От:", update.message.sender?.user_id);
-  console.log("Текст:", update.message.body.text);
-});
-
-// Остановить через 60 сек:
-setTimeout(stop, 60_000);
 ```
 
 ## Поддержка
