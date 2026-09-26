@@ -238,6 +238,92 @@ describe("MAX Message Actions", () => {
     });
   });
 
+  describe("handleAction - send parsing", () => {
+    const cfg: OpenClawConfig = { channels: { max: { botToken: "test-token" } } };
+    const okResponse = () => ({
+      ok: true,
+      json: async () => ({
+        message: { body: { mid: "mid-1" }, timestamp: Date.now(), recipient: { chat_id: 123 } },
+      }),
+    });
+    const sentBody = (fetchMock: ReturnType<typeof vi.fn>) =>
+      JSON.parse(String(fetchMock.mock.calls[0][1].body));
+
+    it("parses tool buttons with the channelData parser (label, types, callback_data, web_app)", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(okResponse());
+      global.fetch = fetchMock;
+      await actions.handleAction({
+        action: "send",
+        params: {
+          target: "123",
+          message: "Выбор",
+          buttons: [
+            [{ label: "Да", callback_data: "yes" }, { text: "Сайт", url: "https://example.org" }],
+            { text: "Копия", type: "clipboard", callback_data: "code-1" },
+            [{ text: "App", type: "open_app", web_app: "mini_bot" }, null, { text: "" }],
+          ],
+        },
+        cfg,
+      } as never);
+      expect(sentBody(fetchMock).attachments[0].payload.buttons).toEqual([
+        [
+          { type: "callback", text: "Да", payload: "yes" },
+          { type: "link", text: "Сайт", url: "https://example.org" },
+        ],
+        [{ type: "clipboard", text: "Копия", payload: "code-1" }],
+        [{ type: "open_app", text: "App", web_app: "mini_bot" }],
+      ]);
+    });
+
+    it("sends a location from latitude/longitude or a LAT,LNG string", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(okResponse());
+      global.fetch = fetchMock;
+      await actions.handleAction({
+        action: "send",
+        params: { target: "123", message: "", location: "55.75, 37.62" },
+        cfg,
+      } as never);
+      await actions.handleAction({
+        action: "sendAttachment",
+        params: { target: "123", type: "location", latitude: "59.93", longitude: 30.31 },
+        cfg,
+      } as never);
+      const bodies = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1].body)));
+      expect(bodies[0].attachments).toEqual([{ type: "location", latitude: 55.75, longitude: 37.62 }]);
+      expect(bodies[1].attachments).toEqual([{ type: "location", latitude: 59.93, longitude: 30.31 }]);
+    });
+
+    it("rejects sendAttachment location without usable coordinates", async () => {
+      global.fetch = vi.fn().mockResolvedValue(okResponse());
+      await expect(actions.handleAction({
+        action: "sendAttachment",
+        params: { target: "123", type: "location", location: "north" },
+        cfg,
+      } as never)).rejects.toThrow("Invalid location");
+    });
+
+    it("sends a contact card from contactName with contactId or phone", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(okResponse());
+      global.fetch = fetchMock;
+      await actions.handleAction({
+        action: "send",
+        params: { target: "123", message: "", contactName: "Иван", contactId: "42", phone: "+70001234567" },
+        cfg,
+      } as never);
+      await actions.handleAction({
+        action: "sendAttachment",
+        params: { target: "123", type: "contact", name: "Пётр", vcfPhone: "+70007654321" },
+        cfg,
+      } as never);
+      const bodies = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1].body)));
+      expect(bodies[0].attachments[0].payload).toEqual({ name: "Иван", contact_id: 42, vcf_phone: "+70001234567" });
+      expect(bodies[1].attachments[0].payload).toEqual({
+        name: "Пётр",
+        vcf_info: "BEGIN:VCARD\nVERSION:3.0\nFN:Пётр\nTEL:+70007654321\nEND:VCARD",
+      });
+    });
+  });
+
   describe("handleAction - edit", () => {
     it("should edit message", async () => {
       const cfg: OpenClawConfig = {

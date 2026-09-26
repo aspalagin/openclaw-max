@@ -11,7 +11,7 @@ import { jsonResult } from "openclaw/plugin-sdk/tool-results";
 import { listMaxAccountIds, resolveMaxAccount } from "./accounts.js";
 import { materializeMaxPresentation, MAX_TEXT_LIMIT, readMaxDeliveryPin } from "./presentation.js";
 import { getMaxRuntime } from "./runtime.js";
-import { deleteMaxMessage, editMaxMessage, type MaxSendButton,pinMaxMessage, readMaxChannelButtons, sendMaxContact, sendMaxLocation, sendMaxMediaMessage, sendMaxMessage, sendMaxSticker, unpinMaxMessage } from "./send.js";
+import { deleteMaxMessage, editMaxMessage, pinMaxMessage, readMaxChannelButtons, readMaxSendButtons, sendMaxContact, sendMaxLocation, sendMaxMediaMessage, sendMaxMessage, sendMaxSticker, unpinMaxMessage } from "./send.js";
 import { getLastStickerCode } from "./sticker-cache.js";
 
 const providerId = "max";
@@ -48,6 +48,40 @@ function readMediaSource(params: Record<string, unknown>): string | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * Coordinates from `latitude`+`longitude` (both required) or a
+ * `location: "LAT,LNG"` / "LAT LNG" string; undefined when absent or not
+ * numeric.
+ */
+function readLocationParams(params: Record<string, unknown>): { latitude: number; longitude: number } | undefined {
+  let lat: number | undefined;
+  let lng: number | undefined;
+  if (params.latitude != null && params.longitude != null) {
+    lat = parseFloat(String(params.latitude));
+    lng = parseFloat(String(params.longitude));
+  } else {
+    const locationStr = readStringParam(params, "location");
+    const m = locationStr?.match(/(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)/);
+    if (m) {
+      lat = parseFloat(m[1]);
+      lng = parseFloat(m[2]);
+    }
+  }
+  if (lat == null || lng == null || isNaN(lat) || isNaN(lng)) return undefined;
+  return { latitude: lat, longitude: lng };
+}
+
+/** Contact card fields: contactId (MAX user id) and vcfPhone/phone next to the given name. */
+function readContactParams(params: Record<string, unknown>, name: string): { name: string; contactId?: number; vcfPhone?: string } {
+  const contactId = params.contactId != null ? Number(params.contactId) : undefined;
+  const vcfPhone = readStringParam(params, "vcfPhone") ?? readStringParam(params, "phone");
+  return {
+    name,
+    contactId: contactId && !isNaN(contactId) ? contactId : undefined,
+    vcfPhone: vcfPhone ?? undefined,
+  };
 }
 
 export const maxMessageActions: ChannelMessageActionAdapter = {
@@ -148,23 +182,9 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       const replyTo = readStringParam(params, "replyTo");
       const stickerId = readStringParam(params, "stickerId");
 
-      // Parse inline keyboard buttons: [[{text, type?, callback_data?, url?, webApp?}]]
+      // Inline keyboard buttons: [[{text, type?, payload?|callback_data?, url?, webApp?}]]
       // type: callback (default) | link | message | clipboard | open_app | request_contact | request_geo_location
-      const validButtonTypes = new Set([
-        "callback", "link", "message", "clipboard", "open_app", "request_contact", "request_geo_location",
-      ]);
-      let buttons: MaxSendButton[][] | undefined;
-      if (params.buttons && Array.isArray(params.buttons)) {
-        buttons = (params.buttons as Array<Array<Record<string, unknown>>>).map((row) =>
-          (Array.isArray(row) ? row : [row]).map((btn) => ({
-            text: String(btn.text ?? btn.label ?? ""),
-            type: validButtonTypes.has(String(btn.type)) ? (String(btn.type) as MaxSendButton["type"]) : undefined,
-            payload: btn.callback_data ? String(btn.callback_data) : btn.payload ? String(btn.payload) : undefined,
-            url: btn.url ? String(btn.url) : undefined,
-            webApp: btn.webApp ? String(btn.webApp) : btn.web_app ? String(btn.web_app) : undefined,
-          }))
-        );
-      }
+      const buttons = readMaxSendButtons(params.buttons);
 
       // Sticker sending (by sticker code)
       if (stickerId) {
@@ -182,44 +202,21 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
         }
       }
 
-      // Location sending: if location param contains coords or lat/lng params exist
-      const locationStr = readStringParam(params, "location");
-      const latStr = params.latitude != null ? String(params.latitude) : undefined;
-      const lngStr = params.longitude != null ? String(params.longitude) : undefined;
-      if (locationStr || (latStr && lngStr)) {
-        let lat: number | undefined;
-        let lng: number | undefined;
-        if (latStr && lngStr) {
-          lat = parseFloat(latStr);
-          lng = parseFloat(lngStr);
-        } else if (locationStr) {
-          // Try to parse "lat,lng" or "lat lng" format
-          const m = locationStr.match(/(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)/);
-          if (m) {
-            lat = parseFloat(m[1]);
-            lng = parseFloat(m[2]);
-          }
-        }
-        if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
-          const result = await sendMaxLocation(to, { latitude: lat, longitude: lng }, content || undefined, {
-            token: account.token,
-            replyToMessageId: replyTo ?? undefined,
-            format: "markdown",
-          });
-          return withPin(result.messageId);
-        }
+      // Location sending: coordinates from latitude/longitude or location="LAT,LNG"
+      const location = readLocationParams(params);
+      if (location) {
+        const result = await sendMaxLocation(to, location, content || undefined, {
+          token: account.token,
+          replyToMessageId: replyTo ?? undefined,
+          format: "markdown",
+        });
+        return withPin(result.messageId);
       }
 
       // Contact sending: if contactName param exists
       const contactName = readStringParam(params, "contactName");
       if (contactName) {
-        const contactId = params.contactId != null ? Number(params.contactId) : undefined;
-        const vcfPhone = readStringParam(params, "vcfPhone") ?? readStringParam(params, "phone");
-        const result = await sendMaxContact(to, {
-          name: contactName,
-          contactId: contactId && !isNaN(contactId) ? contactId : undefined,
-          vcfPhone: vcfPhone ?? undefined,
-        }, {
+        const result = await sendMaxContact(to, readContactParams(params, contactName), {
           token: account.token,
           replyToMessageId: replyTo ?? undefined,
         });
@@ -332,18 +329,9 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
 
       // Location attachment
       if (attachType === "location" || params.latitude != null || params.longitude != null || readStringParam(params, "location")) {
-        const locationStr = readStringParam(params, "location");
-        let lat: number | undefined;
-        let lng: number | undefined;
-        if (params.latitude != null && params.longitude != null) {
-          lat = parseFloat(String(params.latitude));
-          lng = parseFloat(String(params.longitude));
-        } else if (locationStr) {
-          const m = locationStr.match(/(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)/);
-          if (m) { lat = parseFloat(m[1]); lng = parseFloat(m[2]); }
-        }
-        if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
-          const result = await sendMaxLocation(to, { latitude: lat, longitude: lng }, caption || undefined, {
+        const location = readLocationParams(params);
+        if (location) {
+          const result = await sendMaxLocation(to, location, caption || undefined, {
             token: account.token,
             replyToMessageId: replyTo ?? undefined,
           });
@@ -355,13 +343,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       // Contact attachment
       if (attachType === "contact" || readStringParam(params, "contactName")) {
         const contactName = readStringParam(params, "contactName") ?? readStringParam(params, "name") ?? "Unknown";
-        const contactId = params.contactId != null ? Number(params.contactId) : undefined;
-        const vcfPhone = readStringParam(params, "vcfPhone") ?? readStringParam(params, "phone");
-        const result = await sendMaxContact(to, {
-          name: contactName,
-          contactId: contactId && !isNaN(contactId) ? contactId : undefined,
-          vcfPhone: vcfPhone ?? undefined,
-        }, {
+        const result = await sendMaxContact(to, readContactParams(params, contactName), {
           token: account.token,
           replyToMessageId: replyTo ?? undefined,
         });

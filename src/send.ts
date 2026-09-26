@@ -92,16 +92,18 @@ export async function resolveMaxTarget(_api: MaxApi, to: string): Promise<MaxSen
   throw new Error(`Invalid MAX target: ${to}`);
 }
 
-export function readMaxChannelButtons(channelData: unknown): MaxSendButton[][] | undefined {
-  if (!channelData || typeof channelData !== "object" || Array.isArray(channelData)) return undefined;
-  const maxData = (channelData as Record<string, unknown>).max;
-  if (!maxData || typeof maxData !== "object" || Array.isArray(maxData)) return undefined;
-  const rawButtons = (maxData as Record<string, unknown>).buttons;
-  if (!Array.isArray(rawButtons)) return undefined;
+const MAX_SEND_BUTTON_TYPES = new Set([
+  "callback", "link", "message", "clipboard", "open_app", "request_contact", "request_geo_location",
+]);
 
-  const validTypes = new Set([
-    "callback", "link", "message", "clipboard", "open_app", "request_contact", "request_geo_location",
-  ]);
+/**
+ * Parse loosely typed button rows (`channelData.max.buttons`, the message
+ * tool's `buttons` param): [[{text|label, type?, payload?, callback_data?,
+ * url?, webApp|web_app?}]]. A bare button in place of a row is one row;
+ * non-object items and buttons without text are dropped.
+ */
+export function readMaxSendButtons(rawButtons: unknown): MaxSendButton[][] | undefined {
+  if (!Array.isArray(rawButtons)) return undefined;
 
   const rows = rawButtons
     .map((row) => {
@@ -110,7 +112,7 @@ export function readMaxChannelButtons(channelData: unknown): MaxSendButton[][] |
         .filter((button): button is Record<string, unknown> => Boolean(button) && typeof button === "object" && !Array.isArray(button))
         .map((button) => ({
           text: String(button.text ?? button.label ?? ""),
-          type: validTypes.has(String(button.type)) ? (String(button.type) as MaxSendButton["type"]) : undefined,
+          type: MAX_SEND_BUTTON_TYPES.has(String(button.type)) ? (String(button.type) as MaxSendButton["type"]) : undefined,
           payload: button.payload != null ? String(button.payload) : undefined,
           callback_data: button.callback_data != null ? String(button.callback_data) : undefined,
           url: button.url != null ? String(button.url) : undefined,
@@ -121,6 +123,13 @@ export function readMaxChannelButtons(channelData: unknown): MaxSendButton[][] |
     .filter((row) => row.length > 0);
 
   return rows.length > 0 ? rows : undefined;
+}
+
+export function readMaxChannelButtons(channelData: unknown): MaxSendButton[][] | undefined {
+  if (!channelData || typeof channelData !== "object" || Array.isArray(channelData)) return undefined;
+  const maxData = (channelData as Record<string, unknown>).max;
+  if (!maxData || typeof maxData !== "object" || Array.isArray(maxData)) return undefined;
+  return readMaxSendButtons((maxData as Record<string, unknown>).buttons);
 }
 
 /** Extra per-message options passed via channelData.max (notify, link preview). */
@@ -138,13 +147,14 @@ export function readMaxChannelSendOptions(channelData: unknown): { notify?: bool
 
 function buildMaxButton(btn: MaxSendButton): MaxInlineKeyboardButton {
   const type = btn.type ?? (btn.url ? "link" : "callback");
+  const payload = btn.payload ?? btn.callback_data;
   switch (type) {
     case "link":
       return { type: "link", text: btn.text, url: btn.url ?? "" };
     case "message":
-      return { type: "message", text: btn.text, ...(btn.payload ? { payload: btn.payload } : {}) };
+      return { type: "message", text: btn.text, ...(payload ? { payload } : {}) };
     case "clipboard":
-      return { type: "clipboard", text: btn.text, payload: btn.payload ?? btn.text };
+      return { type: "clipboard", text: btn.text, payload: payload ?? btn.text };
     case "open_app": {
       // OpenAppButton has no `url`: the mini app is addressed by `web_app`
       // (the wired bot's public name). A legacy `url` is carried over there.
@@ -153,7 +163,7 @@ function buildMaxButton(btn: MaxSendButton): MaxInlineKeyboardButton {
         type: "open_app",
         text: btn.text,
         ...(webApp ? { web_app: webApp } : {}),
-        ...(btn.payload ? { payload: btn.payload } : {}),
+        ...(payload ? { payload } : {}),
       };
     }
     case "request_contact":
@@ -165,7 +175,7 @@ function buildMaxButton(btn: MaxSendButton): MaxInlineKeyboardButton {
       return {
         type: "callback",
         text: btn.text,
-        payload: btn.payload ?? btn.callback_data ?? btn.text,
+        payload: payload ?? btn.text,
       };
   }
 }
@@ -185,25 +195,31 @@ function formatOutboundText(text: string, format?: "markdown" | "html"): string 
   return text;
 }
 
-function buildMaxTextBody(text: string, opts: MaxSendOptions = {}): MaxNewMessageBody {
-  const formatted = formatOutboundText(text, opts.format);
-  const body: MaxNewMessageBody = {
-    text: formatted || undefined,
-    format: opts.format ?? undefined,
-    notify: opts.notify,
-  };
+type MaxBodyAttachments = NonNullable<MaxNewMessageBody["attachments"]>;
 
-  // Reply context
+/**
+ * NewMessageBody: text (MAX markdown dialect) with its format when `text` is
+ * given (attachment-only bodies carry neither), notify, attachments and the
+ * reply link.
+ */
+function buildMaxBody(opts: MaxSendOptions, text: string | undefined, attachments?: MaxBodyAttachments): MaxNewMessageBody {
+  const body: MaxNewMessageBody = text === undefined
+    ? { notify: opts.notify }
+    : {
+      text: formatOutboundText(text, opts.format) || undefined,
+      format: opts.format ?? undefined,
+      notify: opts.notify,
+    };
+  if (attachments?.length) body.attachments = attachments;
   if (opts.replyToMessageId) {
     body.link = { type: "reply", mid: opts.replyToMessageId };
   }
-
-  // Inline keyboard from buttons
-  if (opts.buttons?.length) {
-    body.attachments = [buildInlineKeyboard(opts.buttons)];
-  }
-
   return body;
+}
+
+/** Text body with the inline keyboard from `opts.buttons`. */
+function buildMaxTextBody(text: string, opts: MaxSendOptions = {}): MaxNewMessageBody {
+  return buildMaxBody(opts, text, opts.buttons?.length ? [buildInlineKeyboard(opts.buttons)] : undefined);
 }
 
 function buildSendParams(
@@ -217,6 +233,62 @@ function buildSendParams(
   return params;
 }
 
+export type MaxSendOutcome = { messageId: string; raw: MaxSendResult };
+
+/**
+ * The one POST /messages path of every send* helper: resolve the target, build
+ * the body (after the target, so a bad target fails before any upload), send —
+ * the per-chat limiter lives in MaxApi.sendMessage — through the caller's retry
+ * policy, and report the sent mid. typing_on is not sent here: the inbound
+ * pipeline sends it once per handled message.
+ */
+async function sendWithBody(params: {
+  api: MaxApi;
+  to: string;
+  opts: MaxSendOptions;
+  body: MaxNewMessageBody | (() => Promise<MaxNewMessageBody>);
+  retry?: (send: () => Promise<MaxSendResult>) => Promise<MaxSendResult>;
+}): Promise<MaxSendOutcome> {
+  const { api, to, opts, retry } = params;
+  const target = await resolveMaxTarget(api, to);
+  const body = typeof params.body === "function" ? await params.body() : params.body;
+  const sendParams = buildSendParams(target, opts);
+  const send = () => api.sendMessage(body, sendParams);
+  const result = await (retry ? retry(send) : send());
+  return {
+    messageId: result.message?.body?.mid ?? "",
+    raw: result,
+  };
+}
+
+/**
+ * A client-side timeout aborts before the request reaches MAX: aborted sends
+ * never appear in the chat and never duplicate (verified against the live chat
+ * history). So one retry on a fresh connection is duplicate-safe and recovers
+ * the intermittent in-process send stall. Scoped to text sends on purpose —
+ * media is not retried here to avoid re-uploading the file.
+ */
+async function retryOnceOnTimeout(send: () => Promise<MaxSendResult>): Promise<MaxSendResult> {
+  try {
+    return await send();
+  } catch (err) {
+    if (!(err instanceof MaxRequestTimeoutError)) throw err;
+    console.error(`[MAX] send timed out after ${err.elapsedMs}ms (phase=${err.phase}); retrying once`);
+    return send();
+  }
+}
+
+/** MAX processes video/file uploads asynchronously: retry the send (not the upload) while attachment.not.ready. */
+function retryWhileAttachmentNotReady(send: () => Promise<MaxSendResult>): Promise<MaxSendResult> {
+  return retryAsync(send, {
+    attempts: 6,
+    minDelayMs: 1_500,
+    maxDelayMs: 4_000,
+    label: "MAX send media (attachment.not.ready)",
+    shouldRetry: (err) => isAttachmentNotReady(err),
+  });
+}
+
 /**
  * Send a text message to a MAX chat or user.
  */
@@ -224,32 +296,15 @@ export async function sendMaxMessage(
   to: string,
   text: string,
   opts: MaxSendOptions = {},
-): Promise<{ messageId: string; raw: MaxSendResult }> {
-  const token = resolveToken(opts);
-  const api = new MaxApi({ token });
-
-  const target = await resolveMaxTarget(api, to);
-  const body = buildMaxTextBody(text, opts);
-  const params = buildSendParams(target, opts);
-
-  let result: MaxSendResult;
-  try {
-    result = await api.sendMessage(body, params);
-  } catch (err) {
-    // A client-side timeout aborts before the request reaches MAX: aborted
-    // sends never appear in the chat and never duplicate (verified against the
-    // live chat history). So one retry on a fresh connection is duplicate-safe
-    // and recovers the intermittent in-process send stall. Scoped to text sends
-    // on purpose — media is not retried here to avoid re-uploading the file.
-    if (!(err instanceof MaxRequestTimeoutError)) throw err;
-    console.error(`[MAX] send timed out after ${err.elapsedMs}ms (phase=${err.phase}); retrying once`);
-    result = await api.sendMessage(body, params);
-  }
-
-  return {
-    messageId: result.message?.body?.mid ?? "",
-    raw: result,
-  };
+): Promise<MaxSendOutcome> {
+  const api = new MaxApi({ token: resolveToken(opts) });
+  return sendWithBody({
+    api,
+    to,
+    opts,
+    body: buildMaxTextBody(text, opts),
+    retry: retryOnceOnTimeout,
+  });
 }
 
 /**
@@ -424,10 +479,7 @@ async function sendMaxAttachmentsMessage(
   caption: string,
   sources: string[],
   opts: MaxMediaSendOptions,
-): Promise<{ messageId: string; raw: MaxSendResult }> {
-  const target = await resolveMaxTarget(api, to);
-  const params = buildSendParams(target, opts);
-
+): Promise<MaxSendOutcome> {
   const build = async (allowLinks: boolean): Promise<MaxNewMessageBody> => {
     const attachments: MaxAttachment[] = [];
     for (const source of sources) {
@@ -438,43 +490,24 @@ async function sendMaxAttachmentsMessage(
     if (opts.buttons?.length) {
       attachments.push(buildInlineKeyboard(opts.buttons) as unknown as MaxAttachment);
     }
-    const body: MaxNewMessageBody = {
-      text: formatOutboundText(caption, opts.format) || undefined,
-      format: opts.format ?? undefined,
-      notify: opts.notify,
-      attachments,
-    };
-    if (opts.replyToMessageId) {
-      body.link = { type: "reply", mid: opts.replyToMessageId };
-    }
-    return body;
+    return buildMaxBody(opts, caption, attachments);
   };
-
-  const send = (body: MaxNewMessageBody) => retryAsync(() => api.sendMessage(body, params), {
-    attempts: 6,
-    minDelayMs: 1_500,
-    maxDelayMs: 4_000,
-    label: "MAX send media (attachment.not.ready)",
-    shouldRetry: (err) => isAttachmentNotReady(err),
+  const send = (allowLinks: boolean) => sendWithBody({
+    api,
+    to,
+    opts,
+    body: () => build(allowLinks),
+    retry: retryWhileAttachmentNotReady,
   });
 
-  let result: MaxSendResult;
-  if (sources.some(isImageLink)) {
-    try {
-      result = await send(await build(true));
-    } catch (err) {
-      if (!(err instanceof MaxApiError)) throw err;
-      console.warn(`[MAX] image by URL refused (${err.code ?? err.status}); uploading instead`);
-      result = await send(await build(false));
-    }
-  } else {
-    result = await send(await build(false));
+  if (!sources.some(isImageLink)) return send(false);
+  try {
+    return await send(true);
+  } catch (err) {
+    if (!(err instanceof MaxApiError)) throw err;
+    console.warn(`[MAX] image by URL refused (${err.code ?? err.status}); uploading instead`);
+    return send(false);
   }
-
-  return {
-    messageId: result.message?.body?.mid ?? "",
-    raw: result,
-  };
 }
 
 /**
@@ -489,7 +522,7 @@ export async function sendMaxMediaMessage(
   caption: string,
   mediaPath: string,
   opts: MaxMediaSendOptions = {},
-): Promise<{ messageId: string; raw: MaxSendResult }> {
+): Promise<MaxSendOutcome> {
   const token = resolveToken(opts);
   const api = new MaxApi({ token });
   return sendMaxAttachmentsMessage(api, to, caption, [mediaPath], opts);
@@ -563,9 +596,8 @@ export async function sendMaxContact(
   to: string,
   contact: { name: string; contactId?: number; vcfPhone?: string; vcfInfo?: string },
   opts: MaxSendOptions = {},
-): Promise<{ messageId: string; raw: MaxSendResult }> {
-  const token = resolveToken(opts);
-  const api = new MaxApi({ token });
+): Promise<MaxSendOutcome> {
+  const api = new MaxApi({ token: resolveToken(opts) });
 
   // MAX API requires either contact_id (MAX user_id) or vcf_info (VCard string)
   // Without either, returns 400 "Missing info for contact attachment".
@@ -585,27 +617,12 @@ export async function sendMaxContact(
     payload.vcf_info = vcfParts.join("\n");
   }
 
-  const attachment: MaxAttachment = {
-    type: "contact",
-    payload,
-  };
-
-  const body: MaxNewMessageBody = {
-    attachments: [attachment],
-    notify: opts.notify,
-  };
-
-  if (opts.replyToMessageId) {
-    body.link = { type: "reply", mid: opts.replyToMessageId };
-  }
-
-  const target = await resolveMaxTarget(api, to);
-  const result = await api.sendMessage(body, buildSendParams(target, opts));
-
-  return {
-    messageId: result.message?.body?.mid ?? "",
-    raw: result,
-  };
+  return sendWithBody({
+    api,
+    to,
+    opts,
+    body: buildMaxBody(opts, undefined, [{ type: "contact", payload }]),
+  });
 }
 
 /**
@@ -616,34 +633,19 @@ export async function sendMaxLocation(
   location: { latitude: number; longitude: number },
   text?: string,
   opts: MaxSendOptions = {},
-): Promise<{ messageId: string; raw: MaxSendResult }> {
-  const token = resolveToken(opts);
-  const api = new MaxApi({ token });
-
+): Promise<MaxSendOutcome> {
+  const api = new MaxApi({ token: resolveToken(opts) });
   const attachment: MaxAttachment = {
     type: "location",
     latitude: location.latitude,
     longitude: location.longitude,
   };
-
-  const body: MaxNewMessageBody = {
-    text: formatOutboundText(text ?? "", opts.format) || undefined,
-    attachments: [attachment],
-    format: opts.format ?? undefined,
-    notify: opts.notify,
-  };
-
-  if (opts.replyToMessageId) {
-    body.link = { type: "reply", mid: opts.replyToMessageId };
-  }
-
-  const target = await resolveMaxTarget(api, to);
-  const result = await api.sendMessage(body, buildSendParams(target, opts));
-
-  return {
-    messageId: result.message?.body?.mid ?? "",
-    raw: result,
-  };
+  return sendWithBody({
+    api,
+    to,
+    opts,
+    body: buildMaxBody(opts, text ?? "", [attachment]),
+  });
 }
 
 /**
@@ -654,29 +656,16 @@ export async function sendMaxSticker(
   to: string,
   stickerCode: string,
   opts: MaxSendOptions = {},
-): Promise<{ messageId: string; raw: MaxSendResult }> {
-  const token = resolveToken(opts);
-  const api = new MaxApi({ token });
-
+): Promise<MaxSendOutcome> {
+  const api = new MaxApi({ token: resolveToken(opts) });
   const stickerAttachment: MaxStickerAttachment = {
     type: "sticker",
     payload: { code: stickerCode },
   };
-
-  const body: MaxNewMessageBody = {
-    attachments: [stickerAttachment],
-    notify: opts.notify,
-  };
-
-  if (opts.replyToMessageId) {
-    body.link = { type: "reply", mid: opts.replyToMessageId };
-  }
-
-  const target = await resolveMaxTarget(api, to);
-  const result = await api.sendMessage(body, buildSendParams(target, opts));
-
-  return {
-    messageId: result.message?.body?.mid ?? "",
-    raw: result,
-  };
+  return sendWithBody({
+    api,
+    to,
+    opts,
+    body: buildMaxBody(opts, undefined, [stickerAttachment]),
+  });
 }
