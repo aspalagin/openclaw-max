@@ -25,7 +25,7 @@
     "url": "https://github.com/aspalagin/openclaw-max/issues"
   },
   "scripts": {
-    "build": "rm -rf dist-ts dist/src && tsc --noEmit false --noEmitOnError false --outDir dist-ts && mkdir -p dist/src && cp dist-ts/index.js dist/index.js && cp dist-ts/src/*.js dist/src/",
+    "build": "rm -rf dist-ts dist/src && tsc --noEmit false --noEmitOnError false --outDir dist-ts && mkdir -p dist/src && cp dist-ts/index.js dist-ts/setup-entry.js dist/ && cp dist-ts/src/*.js dist/src/ && rm -f dist/src/*.test.js dist/src/test-setup.js",
     "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
@@ -50,6 +50,7 @@
     "extensions": [
       "./dist/index.js"
     ],
+    "setupEntry": "./dist/setup-entry.js",
     "channel": {
       "id": "max",
       "label": "MAX",
