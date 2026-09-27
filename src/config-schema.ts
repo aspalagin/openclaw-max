@@ -2,7 +2,11 @@
  * MAX channel config Zod schema
  */
 
-import { MarkdownConfigSchema, ToolPolicySchema } from 'openclaw/plugin-sdk/channel-config-schema';
+import {
+  ChannelPreviewStreamingConfigSchema,
+  MarkdownConfigSchema,
+  ToolPolicySchema,
+} from 'openclaw/plugin-sdk/channel-config-schema';
 import { buildOptionalSecretInputSchema } from 'openclaw/plugin-sdk/secret-input';
 import { z } from 'zod';
 
@@ -99,6 +103,12 @@ export const MaxAccountSchemaBase = z
     textChunkLimit: z.number().int().positive().optional(),
     blockStreaming: z.boolean().optional(),
     streamMode: z.enum(['off', 'partial', 'block']).optional(),
+    /**
+     * Core streaming settings; streaming.mode wins over streamMode. "progress"
+     * shows one turn-status message (streaming.progress: label, toolProgress,
+     * maxLines, …) that is deleted once the answer landed. Default off.
+     */
+    streaming: ChannelPreviewStreamingConfigSchema.optional(),
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
     responsePrefix: z.string().optional(),
     mediaMaxMb: z.number().positive().optional(),

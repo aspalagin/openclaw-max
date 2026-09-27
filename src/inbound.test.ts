@@ -587,3 +587,58 @@ describe('inbound voice messages', () => {
     expect(runtime.dispatched[0].media).toEqual([expect.objectContaining({ kind: 'audio' })]);
   });
 });
+
+describe('turn status mode (streaming.mode "progress")', () => {
+  type Captured = {
+    replyOptions: Record<string, unknown>;
+    dispatcherOptions: { deliver: (payload: unknown, info: unknown) => Promise<void> };
+  };
+  let runtime: ReturnType<typeof makeRuntime>;
+  let captured: Captured | undefined;
+
+  beforeEach(() => {
+    runtime = makeRuntime();
+    captured = undefined;
+    runtime.core.channel.reply.dispatchReplyWithBufferedBlockDispatcher = vi.fn(
+      async (params: unknown) => {
+        captured = params as Captured;
+        await captured.dispatcherOptions.deliver({ text: 'Answer' }, { kind: 'final' });
+      },
+    ) as never;
+    setMaxRuntime(runtime.core as never);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ message: { body: { mid: 'mid.answer' }, recipient: DIALOG } }),
+    });
+  });
+
+  const hello = () => created({ body: { mid: 'mid.q', seq: 1, text: 'hello' } });
+
+  it('hands the progress callbacks to core and still delivers the final answer', async () => {
+    await dispatchUpdate(hello(), makeOpts({ streaming: { mode: 'progress' } }) as never);
+    expect(captured?.replyOptions).toMatchObject({
+      suppressDefaultToolProgressMessages: true,
+      preserveProgressCallbackStartOrder: true,
+    });
+    expect(typeof captured?.replyOptions.onItemEvent).toBe('function');
+    expect(captured?.replyOptions.onPartialReply).toBeUndefined();
+    const posts = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([url, init]) => String(url).includes('/messages') && init.method === 'POST',
+    );
+    expect(posts).toHaveLength(1);
+    expect(JSON.parse(posts[0]![1].body).text).toBe('Answer');
+  });
+
+  it('stays off by default; streaming.mode wins over the older streamMode', async () => {
+    await dispatchUpdate(hello(), makeOpts() as never);
+    expect(captured?.replyOptions.onItemEvent).toBeUndefined();
+    expect(captured?.replyOptions.suppressDefaultToolProgressMessages).toBeUndefined();
+
+    await dispatchUpdate(
+      created({ body: { mid: 'mid.q2', seq: 2, text: 'again' } }),
+      makeOpts({ streamMode: 'off', streaming: { mode: 'partial' } }) as never,
+    );
+    expect(typeof captured?.replyOptions.onPartialReply).toBe('function');
+    expect(captured?.replyOptions.onItemEvent).toBeUndefined();
+  });
+});

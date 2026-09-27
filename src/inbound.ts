@@ -4,7 +4,10 @@
  */
 
 import { toInboundMediaFacts } from 'openclaw/plugin-sdk/channel-inbound';
-import { createReplyPrefixOptions } from 'openclaw/plugin-sdk/channel-outbound';
+import {
+  createReplyPrefixOptions,
+  resolveChannelPreviewStreamMode,
+} from 'openclaw/plugin-sdk/channel-outbound';
 import { getAgentScopedMediaLocalRoots } from 'openclaw/plugin-sdk/media-local-roots';
 
 import { admitMaxGroupChat, readMaxDmAllowFrom } from './access-policy.js';
@@ -13,6 +16,7 @@ import { deliverMaxReply } from './deliver.js';
 import { collectInboundAttachments, resolveInboundMediaMaxCount } from './inbound-attachments.js';
 import type { MaxMonitorOptions } from './monitor-types.js';
 import { materializeMaxPresentation } from './presentation.js';
+import { createMaxProgressDraft } from './progress-draft.js';
 import { getMaxRuntime } from './runtime.js';
 import { sendMaxMessage } from './send.js';
 import { createMaxDraftStream } from './stream-draft.js';
@@ -343,8 +347,13 @@ export async function processIncomingMessage(
         })
       : undefined;
 
-  // Streaming modes: "partial" = edit single message, "block" = each block as separate message
-  const streamMode = account.config.streamMode ?? 'off';
+  // Streaming modes: "partial" = edit single message, "block" = each block as
+  // separate message, "progress" = one turn-status message (progress-draft.ts).
+  // Core's streaming.mode wins over the older streamMode; default off.
+  const streamMode = resolveChannelPreviewStreamMode(
+    account.config as Parameters<typeof resolveChannelPreviewStreamMode>[0],
+    account.config.streamMode ?? 'off',
+  );
   const useEditStreaming = streamMode === 'partial';
   const useBlockStreaming = streamMode === 'block';
   const replyMid =
@@ -367,47 +376,69 @@ export async function processIncomingMessage(
     statusSink,
   });
 
-  await core.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
-    ctx: ctxPayload,
-    cfg: config,
-    dispatcherOptions: {
-      ...prefixOptions,
-      typingCallbacks,
-      deliver: async (rawPayload) => {
-        // This funnel consumes ReplyPayload directly, so it must apply the same
-        // presentation fallback/render policy as core's outbound path.
-        const payload = await materializeMaxPresentation(rawPayload);
-        // With a live stream draft the first text chunk replaces it; longer
-        // answers continue as new messages, the keyboard on the last chunk.
-        await deliverMaxReply({
-          payload,
-          account,
-          chatId: chatIdStr,
-          replyToId: replyMid,
-          callbackId,
-          config,
-          log,
-          statusSink,
-          draft: useEditStreaming ? draft : undefined,
-          localMedia: replyLocalMedia,
-        });
-      },
-      onError: (err, info) => {
-        log?.error(`[${account.accountId}] MAX ${info.kind} reply failed: ${String(err)}`);
-      },
-    },
-    replyOptions: {
-      onModelSelected,
-      ...(useEditStreaming
-        ? {
-            onPartialReply: (payload: { text?: string }) => {
-              if (payload.text) draft.update(payload.text);
-            },
+  // Turn status: one message edited while the agent works, deleted once the
+  // final answer landed; its failures never fail the turn.
+  const progress =
+    streamMode === 'progress'
+      ? createMaxProgressDraft({ account, chatId: chatIdStr, replyToId: replyMid, log, statusSink })
+      : undefined;
+
+  let dispatchFailed = false;
+  try {
+    await core.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+      ctx: ctxPayload,
+      cfg: config,
+      dispatcherOptions: {
+        ...prefixOptions,
+        typingCallbacks,
+        deliver: async (rawPayload, info) => {
+          // This funnel consumes ReplyPayload directly, so it must apply the same
+          // presentation fallback/render policy as core's outbound path.
+          const payload = await materializeMaxPresentation(rawPayload);
+          // With a live stream draft the first text chunk replaces it; longer
+          // answers continue as new messages, the keyboard on the last chunk.
+          const send = () =>
+            deliverMaxReply({
+              payload,
+              account,
+              chatId: chatIdStr,
+              replyToId: replyMid,
+              callbackId,
+              config,
+              log,
+              statusSink,
+              draft: useEditStreaming ? draft : undefined,
+              localMedia: replyLocalMedia,
+            });
+          if (progress && info.kind === 'final') {
+            await progress.deliverFinal({ isError: payload.isError === true, send });
+          } else {
+            await send();
           }
-        : {}),
-      ...(useBlockStreaming ? { disableBlockStreaming: false } : {}),
-    },
-  });
+        },
+        onError: (err, info) => {
+          log?.error(`[${account.accountId}] MAX ${info.kind} reply failed: ${String(err)}`);
+        },
+      },
+      replyOptions: {
+        onModelSelected,
+        ...(useEditStreaming
+          ? {
+              onPartialReply: (payload: { text?: string }) => {
+                if (payload.text) draft.update(payload.text);
+              },
+            }
+          : {}),
+        ...(useBlockStreaming ? { disableBlockStreaming: false } : {}),
+        ...(progress ? progress.replyOptions : {}),
+      },
+    });
+  } catch (err) {
+    dispatchFailed = true;
+    throw err;
+  } finally {
+    await progress?.close({ failed: dispatchFailed });
+  }
 
   // Cleanup draft stream
   await draft.clear();

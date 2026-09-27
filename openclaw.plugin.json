@@ -361,6 +361,156 @@
                   "block"
                 ]
               },
+              "streaming": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "partial",
+                      "block",
+                      "progress"
+                    ]
+                  },
+                  "chunkMode": {
+                    "type": "string",
+                    "enum": [
+                      "length",
+                      "newline"
+                    ]
+                  },
+                  "preview": {
+                    "type": "object",
+                    "properties": {
+                      "chunk": {
+                        "type": "object",
+                        "properties": {
+                          "minChars": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "maxChars": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "breakPreference": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "paragraph"
+                              },
+                              {
+                                "type": "string",
+                                "const": "newline"
+                              },
+                              {
+                                "type": "string",
+                                "const": "sentence"
+                              }
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "toolProgress": {
+                        "type": "boolean"
+                      },
+                      "commandText": {
+                        "type": "string",
+                        "enum": [
+                          "raw",
+                          "status"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "progress": {
+                    "type": "object",
+                    "properties": {
+                      "label": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "boolean",
+                            "const": false
+                          }
+                        ]
+                      },
+                      "labels": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "maxLines": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "maxLineChars": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "toolProgress": {
+                        "type": "boolean"
+                      },
+                      "commandText": {
+                        "type": "string",
+                        "enum": [
+                          "raw",
+                          "status"
+                        ]
+                      },
+                      "commentary": {
+                        "type": "boolean"
+                      },
+                      "narration": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "block": {
+                    "type": "object",
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "coalesce": {
+                        "type": "object",
+                        "properties": {
+                          "minChars": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "maxChars": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "idleMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false,
+                "description": "Core streaming settings; streaming.mode wins over streamMode. \"progress\" shows one turn-status message edited while the agent works (streaming.progress: label, labels, toolProgress, commandText, maxLines, maxLineChars) and deleted once the answer landed; \"partial\"/\"block\" as streamMode. Default off."
+              },
               "blockStreamingCoalesce": {
                 "type": "object",
                 "properties": {
