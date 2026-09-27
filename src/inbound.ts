@@ -12,6 +12,7 @@ import { getAgentScopedMediaLocalRoots } from 'openclaw/plugin-sdk/media-local-r
 
 import { admitMaxGroupChat, readMaxDmAllowFrom } from './access-policy.js';
 import type { MaxAttachment, MaxLinkedMessage, MaxMessage, MaxUser } from './api.js';
+import { resolveMaxCommandMenu } from './command-menu.js';
 import { deliverMaxReply } from './deliver.js';
 import { collectInboundAttachments, resolveInboundMediaMaxCount } from './inbound-attachments.js';
 import type { MaxMonitorOptions } from './monitor-types.js';
@@ -57,6 +58,9 @@ export async function processIncomingMessage(
     `link_${chatId ?? senderId}_${message.timestamp}_${message.link?.message?.mid ?? ''}`;
   const isCallbackCommand =
     (message as MaxMessage & { __maxCallback?: boolean }).__maxCallback === true;
+  const isCommandMenuPress =
+    isCallbackCommand &&
+    (message as MaxMessage & { __maxCommandMenu?: boolean }).__maxCommandMenu === true;
   const attachments = messageBody?.attachments ?? [];
   const forward = readForwardedMessage(message.link);
 
@@ -315,6 +319,52 @@ export async function processIncomingMessage(
       : {}),
   });
 
+  const replyMid =
+    isCallbackCommand || !messageBody ? undefined : messageId.replace(/_edited_\d+$/, '');
+  const callbackId = isCallbackCommand ? messageId : undefined;
+
+  // A bare command with a core argument menu (/think, /fast, …) opens it as
+  // buttons. A menu press is answered here when the sender has no command
+  // rights or core no longer offers the choice; otherwise it goes to core as
+  // the typed command would.
+  if (isTextSlashCommand) {
+    const menu = resolveMaxCommandMenu({
+      text: rawTextTrimmed,
+      press: isCommandMenuPress,
+      ctx: ctxPayload,
+      cfg: config,
+      agentId: route.agentId,
+      sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+      botUsername: opts.botUsername,
+    });
+    if (menu.kind === 'menu') {
+      await deliverMaxReply({
+        payload: { text: menu.text, channelData: { max: { buttons: menu.buttons } } },
+        account,
+        chatId: chatIdStr,
+        replyToId: replyMid,
+        callbackId,
+        config,
+        log,
+        statusSink,
+      });
+      return;
+    }
+    if (menu.kind !== 'dispatch') {
+      if (callbackId) {
+        const notification =
+          menu.kind === 'denied'
+            ? 'You are not allowed to use this command.'
+            : 'This menu is out of date. Send the command again.';
+        await opts.api.answerCallback(callbackId, { notification }).catch((err: unknown) => {
+          log?.debug?.(`[${account.accountId}] MAX callback answer failed: ${String(err)}`);
+        });
+      }
+      log?.debug?.(`[${account.accountId}] Command menu press refused (${menu.kind})`);
+      return;
+    }
+  }
+
   // Record session meta
   void core.channel.session
     .recordSessionMetaFromInbound({
@@ -356,9 +406,6 @@ export async function processIncomingMessage(
   );
   const useEditStreaming = streamMode === 'partial';
   const useBlockStreaming = streamMode === 'block';
-  const replyMid =
-    isCallbackCommand || !messageBody ? undefined : messageId.replace(/_edited_\d+$/, '');
-  const callbackId = isCallbackCommand ? messageId : undefined;
 
   // Local reply media is read only under the agent's scoped media roots: core
   // persists reply files into its media store, and the agent's own workspace

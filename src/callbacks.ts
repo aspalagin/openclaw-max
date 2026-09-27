@@ -9,6 +9,7 @@ import { questionGatewayRuntime } from 'openclaw/plugin-sdk/question-gateway-run
 
 import type { ResolvedMaxAccount } from './accounts.js';
 import type { MaxCallback, MaxMessage } from './api.js';
+import { decodeMaxCommandMenuPayload } from './command-menu.js';
 import { processIncomingMessage } from './inbound.js';
 import type { MaxMonitorOptions } from './monitor-types.js';
 import { decodeMaxPresentationCallback, type MaxPresentationCallback } from './presentation.js';
@@ -54,6 +55,16 @@ export async function processCallback(
   const presentationCallback = decodeMaxPresentationCallback(payload);
   if (presentationCallback?.kind === 'approval' || presentationCallback?.kind === 'question') {
     await resolveMaxRuntimeControlCallback(presentationCallback, callback, opts);
+    return;
+  }
+  // Command menu choices re-enter as that command's text; inbound checks the
+  // sender's command rights and whether core still offers the choice.
+  const menuCommand = decodeMaxCommandMenuPayload(payload);
+  if (menuCommand) {
+    const menuMessage = Object.assign(buildCallbackMessage(callback, message, menuCommand), {
+      __maxCommandMenu: true as const,
+    });
+    await processIncomingMessage(menuMessage, userLocale, opts);
     return;
   }
   // Opaque callback data goes to the agent labelled, never as a slash command.
