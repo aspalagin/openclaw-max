@@ -161,7 +161,7 @@ All options live under `channels.max`; the same keys (except `accounts` and `com
 | `mentionPatterns` | `{ mode: "allow" \| "deny", allowIn, denyIn }` | allow | Where core mention patterns apply in MAX groups |
 | `actionScope` | `admitted` \| `current` \| `off` | `admitted` | Chats the `message` tool may act in |
 | `notify` | boolean | MAX default (notify) | Push notifications for sends; `false` — silent (not possible in channels) |
-| `disableLinkPreview` | boolean | MAX default (previews on) | Link previews for sends |
+| `disableLinkPreview` | boolean | MAX default (previews on), off for tool summaries | Link previews for sends; a set value applies to tool summaries too |
 | `markSeen` | boolean | `true` | Mark incoming messages as read |
 | `mediaMaxMb` | number | `20` | Size limit for downloaded and uploaded media, MB |
 | `mediaMaxCount` | integer | `12` | Media attachments downloaded per incoming message, forwards included |
@@ -434,6 +434,7 @@ A 0.7 config works without changes. Behaviour that changes and how to get the 0.
 | A non-empty `groupAllowFrom` or `groups.<id>.allowFrom` limits who can talk to the bot in an admitted group | Remove the lists or add `"*"` |
 | At most 12 media are downloaded from one incoming message | Raise `mediaMaxCount` |
 | Forwarded messages start an agent turn (they were dropped) | — |
+| Tool summaries (verbose mode) come without link previews | `disableLinkPreview: false` |
 | `/think`, `/fast`, `/reasoning` and the other menu commands without an argument answer with buttons | — (with an argument they work as before) |
 | Core `messages.groupChat.mentionPatterns`, if configured, now apply in MAX groups | `mentionPatterns: { "mode": "deny" }` |
 | Core `silent` is honoured; the typing indicator follows core `typingMode` and lasts the whole turn | Core settings |

@@ -105,12 +105,19 @@ export async function deliverMaxReply(params: {
   draft?: MaxDraftStream;
   /** Allowed roots for local reply media (the agent's scoped media roots). */
   localMedia?: MaxLocalMediaAccess;
+  /** Reply dispatcher kind of the payload: tool summaries go without link previews by default. */
+  kind?: 'tool' | 'block' | 'final';
 }): Promise<void> {
   const { payload, account, chatId, config, log, statusSink } = params;
   const core = getMaxRuntime();
   const buttons = readMaxChannelButtons(payload.channelData);
   // channelData.max (notify, silent, disableLinkPreview) beats the account defaults.
   const sendOptions = resolveMaxSendFlags(account.config, { channelData: payload.channelData });
+  // Tool summaries (verbose mode) quote paths and file names MAX would preview
+  // as links (`notes.md` reads as a domain); an explicit disableLinkPreview wins.
+  if (params.kind === 'tool' && sendOptions.disableLinkPreview === undefined) {
+    sendOptions.disableLinkPreview = true;
+  }
   // A draft send still in flight settles first, so it is replaced, not orphaned.
   if (params.draft) await params.draft.settle();
   // Only the first text final replaces the draft: once it carries a final

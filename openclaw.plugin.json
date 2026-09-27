@@ -620,7 +620,7 @@
               },
               "disableLinkPreview": {
                 "type": "boolean",
-                "description": "Default: send messages without link previews (MAX disable_link_preview, default false); channelData.max.disableLinkPreview overrides it per message. Named accounts inherit the channel-level value."
+                "description": "Default: send messages without link previews (MAX disable_link_preview). Unset: previews on, except tool summaries (verbose mode), which go without them; a set value applies to all sends. channelData.max.disableLinkPreview overrides it per message. Named accounts inherit the channel-level value."
               },
               "apiBaseUrl": {
                 "type": "string",

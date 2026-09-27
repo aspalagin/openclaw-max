@@ -227,6 +227,36 @@ describe('delivery errors follow the SDK contract', () => {
   });
 });
 
+describe('link previews of tool summaries', () => {
+  const previewOff = () => posts().map((c) => c.url.includes('disable_link_preview=true'));
+
+  it('sends tool payloads without a link preview, other kinds as configured', async () => {
+    mockFetch(sent('mid.1'));
+    await deliver({ text: 'Read: notes/2026-09-27.md' }, { kind: 'tool' });
+    await deliver({ text: 'block' }, { kind: 'block' });
+    await deliver({ text: 'final' }, { kind: 'final' });
+    await deliver({ text: 'no kind' });
+    expect(previewOff()).toEqual([true, false, false, false]);
+  });
+
+  it('keeps an explicit disableLinkPreview of the config or channelData', async () => {
+    mockFetch(sent('mid.1'));
+    await deliver(
+      { text: 'Read: notes.md' },
+      { kind: 'tool', account: { ...ACCOUNT, config: { disableLinkPreview: false } } },
+    );
+    await deliver(
+      { text: 'Read: notes.md', channelData: { max: { disableLinkPreview: false } } },
+      { kind: 'tool' },
+    );
+    await deliver(
+      { text: 'final' },
+      { account: { ...ACCOUNT, config: { disableLinkPreview: true } } },
+    );
+    expect(previewOff()).toEqual([false, false, true]);
+  });
+});
+
 describe('edit streaming: long and refused finals', () => {
   async function startDraft() {
     const draft = createMaxDraftStream({ account: ACCOUNT, chatId: '70', log: LOG });

@@ -544,6 +544,7 @@ export async function processIncomingMessage(
               // draft keeps streaming until the final answer replaces it.
               draft: useEditStreaming && info.kind === 'final' ? draft : undefined,
               localMedia: replyLocalMedia,
+              kind: info.kind,
             });
           if (progress && info.kind === 'final') {
             await progress.deliverFinal({ isError: payload.isError === true, send });
