@@ -9,14 +9,23 @@
  * (Минцифры) CA, which is not in the default Node trust store. Requests go
  * through a dedicated undici dispatcher whose CA set = system roots + Russian
  * Trusted Root/Sub CA. Trust is scoped to this client only, never process-wide.
+ * With an account proxy (httpProxy) the same CA set verifies MAX inside the
+ * CONNECT tunnel; the base URL and proxy come from network.ts.
  */
 
 import { createHash, randomBytes } from 'node:crypto';
 import * as tls from 'node:tls';
 
 import { retryAsync } from 'openclaw/plugin-sdk/runtime-env';
-import { Agent, buildConnector, fetch as undiciFetch } from 'undici';
+import { Agent, buildConnector, fetch as undiciFetch, ProxyAgent } from 'undici';
 
+import {
+  bypassesProxy,
+  lookupMaxNetwork,
+  type MaxNetwork,
+  MaxNetworkConfigError,
+  scrubProxyCredentials,
+} from './network.js';
 import { RUSSIAN_TRUSTED_ROOT_CA, RUSSIAN_TRUSTED_SUB_CA } from './russian-trusted-ca.js';
 import type {
   MaxBotCommand,
@@ -66,12 +75,6 @@ export type {
 } from './types.js';
 
 /**
- * platform-api.max.ru is shut down on 2026-07-19; platform-api2.max.ru is the
- * canonical endpoint since June 2026.
- */
-const BASE_URL = 'https://platform-api2.max.ru';
-
-/**
  * Default per-request deadline. Raised from 10s after an intermittent in-process
  * stall aborted sends at exactly 10s ("This operation was aborted") while the
  * same request from a fresh process completed in <300ms. The long poll sets its
@@ -109,15 +112,39 @@ export function setMaxFetchForTests(fetchImpl: FetchLike | undefined): void {
 }
 
 let cachedDispatcher: Agent | undefined;
+const proxyDispatchers = new Map<string, ProxyAgent>();
 
-function getMaxDispatcher(): Agent {
+/** CA set for MAX hosts: system roots (with NODE_EXTRA_CA_CERTS) + Russian Trusted CA. */
+function maxCaList(): string[] {
+  const tlsWithCaList = tls as unknown as {
+    getCACertificates?: (type: string) => readonly string[];
+  };
+  // getCACertificates("default") includes NODE_EXTRA_CA_CERTS additions when available
+  const systemCas = tlsWithCaList.getCACertificates?.('default') ?? tls.rootCertificates;
+  return [...systemCas, RUSSIAN_TRUSTED_ROOT_CA, RUSSIAN_TRUSTED_SUB_CA];
+}
+
+/**
+ * Dispatcher for one MAX request: through the account proxy (one ProxyAgent
+ * per proxy URL; the MAX CA set goes to requestTls — the TLS session with MAX
+ * runs inside the tunnel), or direct. Loopback targets (a local test stand)
+ * never use the proxy: over plain http the proxy would see the bot token.
+ */
+export function getMaxDispatcher(url: string, proxyUrl?: string): Agent | ProxyAgent {
+  if (proxyUrl && !bypassesProxy(url)) {
+    let proxied = proxyDispatchers.get(proxyUrl);
+    if (!proxied) {
+      proxied = new ProxyAgent({ uri: proxyUrl, requestTls: { ca: maxCaList() } });
+      proxyDispatchers.set(proxyUrl, proxied);
+    }
+    return proxied;
+  }
+  return getDirectMaxDispatcher();
+}
+
+function getDirectMaxDispatcher(): Agent {
   if (!cachedDispatcher) {
-    const tlsWithCaList = tls as unknown as {
-      getCACertificates?: (type: string) => readonly string[];
-    };
-    // getCACertificates("default") includes NODE_EXTRA_CA_CERTS additions when available
-    const systemCas = tlsWithCaList.getCACertificates?.('default') ?? tls.rootCertificates;
-    const ca = [...systemCas, RUSSIAN_TRUSTED_ROOT_CA, RUSSIAN_TRUSTED_SUB_CA];
+    const ca = maxCaList();
     // Wrap the TLS connector to time the DNS+TCP+TLS phase, scoped to this
     // dispatcher only (never process-wide). Diagnosing the intermittent
     // "This operation was aborted" needs to separate a connect stall from a
@@ -143,12 +170,21 @@ function getMaxDispatcher(): Agent {
   return cachedDispatcher;
 }
 
-function maxFetch(url: string, init: Record<string, unknown>): ReturnType<FetchLike> {
-  if (testFetchOverride) return testFetchOverride(url, init);
-  return undiciFetch(url, {
-    ...init,
-    dispatcher: getMaxDispatcher(),
-  } as Parameters<typeof undiciFetch>[1]) as unknown as ReturnType<FetchLike>;
+async function maxFetch(
+  url: string,
+  init: Record<string, unknown>,
+  proxyUrl?: string,
+): ReturnType<FetchLike> {
+  try {
+    if (testFetchOverride) return await testFetchOverride(url, init);
+    return (await undiciFetch(url, {
+      ...init,
+      dispatcher: getMaxDispatcher(url, proxyUrl),
+    } as Parameters<typeof undiciFetch>[1])) as unknown as Awaited<ReturnType<FetchLike>>;
+  } catch (err) {
+    // Proxy failures may quote the proxy URL; its credentials never leave here.
+    throw scrubProxyCredentials(err, proxyUrl);
+  }
 }
 
 function escapeMultipartHeaderValue(value: string): string {
@@ -184,7 +220,13 @@ function buildMultipartFileBody(
 
 export interface MaxApiOptions {
   token: string;
+  /** Overrides the API base URL of the network settings (tests). */
   baseUrl?: string;
+  /**
+   * Network settings for this client; default: those bound to the token by
+   * resolveMaxAccount (network.ts), else the public endpoint, direct.
+   */
+  network?: MaxNetwork;
   timeoutMs?: number;
   /** Retry attempts for transient errors (429 / 502-504 / network). 0 disables. Default 3. */
   retryAttempts?: number;
@@ -293,6 +335,7 @@ export class MaxRequestTimeoutError extends Error {
  * duplicate the message — only a definite 429 (never applied) is retried.
  */
 function isRetryableError(err: unknown, idempotent: boolean): boolean {
+  if (err instanceof MaxNetworkConfigError) return false;
   // A client-side timeout is safe to retry only for idempotent methods here; the
   // send path handles its own single, duplicate-safe retry for POST /messages.
   if (err instanceof MaxRequestTimeoutError) return idempotent;
@@ -312,7 +355,8 @@ const IDEMPOTENT_METHODS = new Set(['GET', 'PUT', 'DELETE']);
 
 export class MaxApi {
   private token: string;
-  private baseUrl: string;
+  private baseUrl: string | undefined;
+  private explicitNetwork: MaxNetwork | undefined;
   private timeoutMs: number;
   private retryAttempts: number;
   private sendLimiter: MaxChatSendLimiter | null;
@@ -323,7 +367,8 @@ export class MaxApi {
     this.token = opts.token;
     this.sendLimiter = opts.sendLimiter === undefined ? sharedSendLimiter : opts.sendLimiter;
     this.tokenKey = createHash('sha256').update(opts.token).digest('hex').slice(0, 12);
-    this.baseUrl = opts.baseUrl ?? BASE_URL;
+    this.baseUrl = opts.baseUrl?.replace(/\/+$/, '');
+    this.explicitNetwork = opts.network;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const envAttempts = Number(process.env.OPENCLAW_MAX_RETRY_ATTEMPTS);
     this.retryAttempts =
@@ -331,6 +376,20 @@ export class MaxApi {
   }
 
   // ── HTTP helpers ──
+
+  /**
+   * Current network settings, read per request so a config reload applies to
+   * long-lived clients too. Throws MaxNetworkConfigError for a bad config.
+   */
+  private network(): MaxNetwork {
+    const network = this.explicitNetwork ?? lookupMaxNetwork(this.token);
+    return this.baseUrl ? { ...network, apiBaseUrl: this.baseUrl } : network;
+  }
+
+  /** Proxy for media downloads of this account (runtime media fetch), if any. */
+  mediaProxyUrl(): string | undefined {
+    return this.network().proxyUrl;
+  }
 
   private async requestOnce<T>(
     method: string,
@@ -340,7 +399,9 @@ export class MaxApi {
     timeoutMs?: number,
     externalSignal?: AbortSignal,
   ): Promise<T> {
-    const url = new URL(path, this.baseUrl);
+    const network = this.network();
+    // Appended, not resolved: a base URL may carry a path prefix.
+    const url = new URL(`${network.apiBaseUrl}${path}`);
     if (params) {
       for (const [k, v] of Object.entries(params)) {
         if (v != null) url.searchParams.set(k, String(v));
@@ -363,15 +424,19 @@ export class MaxApi {
       : controller.signal;
 
     try {
-      const res = await maxFetch(url.toString(), {
-        method,
-        headers: {
-          Authorization: this.token,
-          ...(body ? { 'Content-Type': 'application/json' } : {}),
+      const res = await maxFetch(
+        url.toString(),
+        {
+          method,
+          headers: {
+            Authorization: this.token,
+            ...(body ? { 'Content-Type': 'application/json' } : {}),
+          },
+          body: body ? JSON.stringify(body) : undefined,
+          signal,
         },
-        body: body ? JSON.stringify(body) : undefined,
-        signal,
-      });
+        network.proxyUrl,
+      );
       gotResponse = true;
 
       const json = (await res.json().catch(() => null)) as T;
@@ -672,14 +737,18 @@ export class MaxApi {
     // multipart with a known Content-Length is accepted.
     const multipart = buildMultipartFileBody('data', fileName, mimeType, fileBuffer);
 
-    const uploadRes = await maxFetch(uploadUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': multipart.contentType,
-        'Content-Length': String(multipart.body.byteLength),
+    const uploadRes = await maxFetch(
+      uploadUrl,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': multipart.contentType,
+          'Content-Length': String(multipart.body.byteLength),
+        },
+        body: multipart.body,
       },
-      body: multipart.body,
-    });
+      this.network().proxyUrl,
+    );
 
     if (!uploadRes.ok) {
       throw new MaxApiError(

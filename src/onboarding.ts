@@ -8,7 +8,7 @@ import { DEFAULT_ACCOUNT_ID } from 'openclaw/plugin-sdk/core';
 import type { ChannelSetupDmPolicy, ChannelSetupWizard } from 'openclaw/plugin-sdk/setup';
 import { formatDocsLink } from 'openclaw/plugin-sdk/setup';
 
-import { listMaxAccountIds, resolveMaxAccount } from './accounts.js';
+import { listMaxAccountIds, resolveMaxAccount, resolveMaxAccountNetwork } from './accounts.js';
 import { MaxApi } from './api.js';
 
 const channel = 'max' as const;
@@ -150,7 +150,9 @@ export const maxSetupWizard: ChannelSetupWizard = {
 
         // Verify token by calling GET /me
         try {
-          const api = new MaxApi({ token: tokenValue, timeoutMs: 5000 });
+          // Probe over the account's apiBaseUrl/httpProxy: the new token is not bound yet.
+          const network = resolveMaxAccountNetwork(resolveMaxAccount({ cfg, accountId }));
+          const api = new MaxApi({ token: tokenValue, timeoutMs: 5000, network });
           const me = await api.getMe();
           console.log(
             `✓ Token verified! Bot: ${me.first_name}${me.username ? ` (@${me.username})` : ''} (ID: ${me.user_id})`,

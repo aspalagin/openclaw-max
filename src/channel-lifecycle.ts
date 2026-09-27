@@ -7,9 +7,10 @@ import type { ChannelPlugin } from 'openclaw/plugin-sdk/channel-core';
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
 import { DEFAULT_ACCOUNT_ID } from 'openclaw/plugin-sdk/core';
 
-import type { ResolvedMaxAccount } from './accounts.js';
+import { type ResolvedMaxAccount, resolveMaxAccountNetwork } from './accounts.js';
 import { MaxApi } from './api.js';
 import { startMaxPolling } from './monitor.js';
+import { DEFAULT_MAX_API_BASE_URL, redactProxyUrl } from './network.js';
 import { writeMaxConfig } from './runtime.js';
 
 type MaxChannelPlugin = ChannelPlugin<ResolvedMaxAccount>;
@@ -178,12 +179,18 @@ export const maxGatewayAdapter: NonNullable<MaxChannelPlugin['gateway']> = {
   startAccount: async (ctx) => {
     const account = ctx.account;
     const token = account.token.trim();
+    // A bad apiBaseUrl/httpProxy stops the account with a clear error rather
+    // than letting it connect directly or to the wrong host.
+    const network = resolveMaxAccountNetwork(account);
+    const route =
+      (network.apiBaseUrl !== DEFAULT_MAX_API_BASE_URL ? ` api=${network.apiBaseUrl}` : '') +
+      (network.proxyUrl ? ` proxy=${redactProxyUrl(network.proxyUrl)}` : '');
 
     let botLabel = '';
     let botUserId: number | undefined;
     let botUsername: string | undefined;
     try {
-      const probeApi = new MaxApi({ token, timeoutMs: 3000 });
+      const probeApi = new MaxApi({ token, timeoutMs: 3000, network });
       const me = await probeApi.getMe();
       if (me.username) {
         botLabel = ` (@${me.username})`;
@@ -194,9 +201,9 @@ export const maxGatewayAdapter: NonNullable<MaxChannelPlugin['gateway']> = {
       // probe failed, continue anyway
     }
 
-    ctx.log?.info(`[${account.accountId}] Starting MAX provider${botLabel}`);
+    ctx.log?.info(`[${account.accountId}] Starting MAX provider${botLabel}${route}`);
 
-    const api = new MaxApi({ token });
+    const api = new MaxApi({ token, network });
 
     // Register bot commands if configured
     const commands = ctx.cfg.channels?.max?.commands as

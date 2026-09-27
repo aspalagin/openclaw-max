@@ -716,7 +716,11 @@ async function uploadMaxAttachment(
   opts: MaxMediaSendOptions,
 ): Promise<MaxAttachment> {
   const media = isRemoteUrl(source)
-    ? await downloadMaxRemoteMedia(source, opts.mediaMaxBytes ?? DEFAULT_MEDIA_MAX_BYTES)
+    ? await downloadMaxRemoteMedia(
+        source,
+        opts.mediaMaxBytes ?? DEFAULT_MEDIA_MAX_BYTES,
+        api.mediaProxyUrl(),
+      )
     : await loadLocalMaxMedia(source, opts);
   const type = detectMaxMediaType(media.fileName);
   const uploaded = await api.uploadMedia(type, media.buffer, media.contentType, media.fileName);

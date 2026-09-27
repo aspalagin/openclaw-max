@@ -8,6 +8,13 @@ import { mergeAccountConfig } from 'openclaw/plugin-sdk/account-core';
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from 'openclaw/plugin-sdk/core';
 
+import {
+  bindMaxNetwork,
+  type MaxNetwork,
+  MaxNetworkConfigError,
+  resolveMaxNetwork,
+} from './network.js';
+
 export interface MaxAccountConfig {
   enabled?: boolean;
   botToken?: string;
@@ -37,6 +44,10 @@ export interface MaxAccountConfig {
   disableLinkPreview?: boolean;
   /** Most media attachments downloaded per inbound message (default 12) */
   mediaMaxCount?: number;
+  /** MAX Bot API base URL (default https://platform-api2.max.ru); see network.ts */
+  apiBaseUrl?: string;
+  /** HTTP(S) proxy for all MAX traffic of the account; may carry credentials */
+  httpProxy?: string;
 }
 
 export interface ResolvedMaxAccount {
@@ -134,6 +145,31 @@ export function resolveDefaultMaxAccountId(_cfg: OpenClawConfig): string {
   return DEFAULT_ACCOUNT_ID;
 }
 
+/** Config path of an account's own settings, for error messages. */
+export function maxAccountConfigPath(accountId: string): string {
+  return accountId === DEFAULT_ACCOUNT_ID ? 'channels.max' : `channels.max.accounts.${accountId}`;
+}
+
+/**
+ * The account's validated network settings (API base URL, proxy). Throws
+ * MaxNetworkConfigError with the config path; never echoes proxy credentials.
+ */
+export function resolveMaxAccountNetwork(account: ResolvedMaxAccount): MaxNetwork {
+  return resolveMaxNetwork(account.config, maxAccountConfigPath(account.accountId));
+}
+
+function resolveAccountNetwork(
+  accountId: string,
+  config: MaxAccountConfig,
+): MaxNetwork | { error: MaxNetworkConfigError } {
+  try {
+    return resolveMaxNetwork(config, maxAccountConfigPath(accountId));
+  } catch (err) {
+    if (err instanceof MaxNetworkConfigError) return { error: err };
+    throw err;
+  }
+}
+
 /**
  * Resolve a single MAX account from config.
  */
@@ -174,6 +210,8 @@ export function resolveMaxAccount(params: {
       notify: section.notify as boolean | undefined,
       disableLinkPreview: section.disableLinkPreview as boolean | undefined,
       mediaMaxCount: section.mediaMaxCount as number | undefined,
+      apiBaseUrl: section.apiBaseUrl as string | undefined,
+      httpProxy: section.httpProxy as string | undefined,
     };
 
     if (accountConfig.botToken?.trim()) {
@@ -209,6 +247,10 @@ export function resolveMaxAccount(params: {
       tokenSource = token ? 'file' : 'none';
     }
   }
+
+  // Every MaxApi built for this token (any send/action/lifecycle path) uses
+  // the account's API base URL and proxy — or fails with their config error.
+  bindMaxNetwork(token, resolveAccountNetwork(accountId, accountConfig));
 
   return {
     accountId,

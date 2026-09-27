@@ -4,7 +4,24 @@
  * SSRF-guarded reader); bytes stay in memory, no temporary file.
  */
 
+import { proxiedMediaFetchOptions, scrubProxyCredentials } from './network.js';
 import { getMaxRuntime } from './runtime.js';
+
+/**
+ * runtime.channel.media.fetchRemoteMedia, routed through the account proxy
+ * when one is set; errors never carry the proxy credentials.
+ */
+export async function fetchMaxRemoteMedia(url: string, maxBytes: number, proxyUrl?: string) {
+  try {
+    return await getMaxRuntime().channel.media.fetchRemoteMedia({
+      url,
+      maxBytes,
+      ...proxiedMediaFetchOptions(proxyUrl),
+    });
+  } catch (err) {
+    throw scrubProxyCredentials(err, proxyUrl);
+  }
+}
 
 /** Upper bound for a sanitized file name (bytes of UTF-8 stay well under 255). */
 export const MAX_TEMP_FILE_NAME_LENGTH = 120;
@@ -73,13 +90,15 @@ export type MaxLoadedMedia = { buffer: Buffer; contentType?: string; fileName: s
 /**
  * Download `url` through the runtime media fetcher: core's readRemoteMediaBuffer
  * (fetchWithSsrFGuard, strict mode: private, loopback and metadata hosts are
- * refused), size-capped. The file name is sanitized to one safe segment.
+ * refused), size-capped, through the account proxy when one is set. The file
+ * name is sanitized to one safe segment.
  */
 export async function downloadMaxRemoteMedia(
   url: string,
   maxBytes: number,
+  proxyUrl?: string,
 ): Promise<MaxLoadedMedia> {
-  const loaded = await getMaxRuntime().channel.media.fetchRemoteMedia({ url, maxBytes });
+  const loaded = await fetchMaxRemoteMedia(url, maxBytes, proxyUrl);
   return {
     buffer: Buffer.from(loaded.buffer),
     contentType: loaded.contentType,

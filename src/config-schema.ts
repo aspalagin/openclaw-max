@@ -3,6 +3,7 @@
  */
 
 import { MarkdownConfigSchema, ToolPolicySchema } from 'openclaw/plugin-sdk/channel-config-schema';
+import { registerSensitiveConfigSchema } from 'openclaw/plugin-sdk/secret-input';
 import { z } from 'zod';
 
 // Policy fields are built with this package's own zod: wrapping the SDK's enum
@@ -116,6 +117,17 @@ export const MaxAccountSchemaBase = z
      */
     notify: z.boolean().optional(),
     disableLinkPreview: z.boolean().optional(),
+    /**
+     * MAX Bot API base URL (default https://platform-api2.max.ru), e.g. a test
+     * stand; https only, http just for loopback hosts. Checked at start.
+     */
+    apiBaseUrl: z.string().optional(),
+    /**
+     * HTTP(S) proxy for all MAX traffic of the account (API, uploads, media
+     * downloads), e.g. http://user:pass@host:3128; "" turns an inherited one
+     * off. Sensitive: credentials are never logged.
+     */
+    httpProxy: registerSensitiveConfigSchema(z.string()).optional(),
     actions: z
       .record(
         z.string(),

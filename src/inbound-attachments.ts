@@ -6,9 +6,9 @@
 import type { ChannelLogSink } from 'openclaw/plugin-sdk/channel-contract';
 import type { ChannelInboundMediaInput } from 'openclaw/plugin-sdk/channel-inbound';
 
-import type { ResolvedMaxAccount } from './accounts.js';
+import { type ResolvedMaxAccount, resolveMaxAccountNetwork } from './accounts.js';
 import type { MaxApi, MaxAttachment } from './api.js';
-import { sanitizeMaxFileName } from './media-temp.js';
+import { fetchMaxRemoteMedia, sanitizeMaxFileName } from './media-temp.js';
 import { getMaxRuntime } from './runtime.js';
 import { rememberStickerCode } from './sticker-cache.js';
 
@@ -112,7 +112,8 @@ export async function collectInboundAttachments(params: {
       if (url && typeof url === 'string' && url.startsWith('http')) {
         try {
           const maxBytes = (account.config.mediaMaxMb ?? 20) * 1024 * 1024;
-          const fetched = await core.channel.media.fetchRemoteMedia({ url, maxBytes });
+          const { proxyUrl } = resolveMaxAccountNetwork(account);
+          const fetched = await fetchMaxRemoteMedia(url, maxBytes, proxyUrl);
           const inboundFileName = fetched.fileName
             ? sanitizeMaxFileName(fetched.fileName, fetched.contentType)
             : undefined;

@@ -211,6 +211,14 @@
                 "type": "boolean",
                 "description": "Default: send messages without link previews (MAX disable_link_preview, default false); channelData.max.disableLinkPreview overrides it per message. Named accounts inherit the channel-level value."
               },
+              "apiBaseUrl": {
+                "type": "string",
+                "description": "MAX Bot API base URL (default https://platform-api2.max.ru), e.g. a test stand; a path prefix is kept. https only; http is accepted just for loopback hosts, so the bot token never travels unencrypted. A bad value stops the account at start with an error. Named accounts inherit the channel-level value."
+              },
+              "httpProxy": {
+                "type": "string",
+                "description": "HTTP(S) proxy for all outbound MAX traffic of the account: Bot API calls, file uploads and media downloads, e.g. http://user:pass@proxy.example:3128. MAX TLS (Russian Trusted CA included) is verified inside the tunnel; loopback targets bypass the proxy. Credentials are never logged. Named accounts inherit the channel-level value; \"\" turns an inherited proxy off."
+              },
               "actions": {
                 "type": "object",
                 "additionalProperties": {
@@ -269,6 +277,30 @@
           "defaultAccount": {
             "type": "string"
           }
+        }
+      },
+      "uiHints": {
+        "apiBaseUrl": {
+          "label": "API base URL",
+          "placeholder": "https://platform-api2.max.ru",
+          "advanced": true
+        },
+        "httpProxy": {
+          "label": "HTTP proxy",
+          "placeholder": "http://user:pass@proxy.example:3128",
+          "sensitive": true,
+          "advanced": true
+        },
+        "accounts.*.apiBaseUrl": {
+          "label": "API base URL",
+          "placeholder": "https://platform-api2.max.ru",
+          "advanced": true
+        },
+        "accounts.*.httpProxy": {
+          "label": "HTTP proxy",
+          "placeholder": "http://user:pass@proxy.example:3128",
+          "sensitive": true,
+          "advanced": true
         }
       },
       "label": "MAX",

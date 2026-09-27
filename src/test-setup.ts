@@ -11,6 +11,7 @@ import type * as SsrfRuntime from 'openclaw/plugin-sdk/ssrf-runtime';
 import { beforeEach, vi } from 'vitest';
 
 import { resetMaxSendLimiterForTests, setMaxFetchForTests } from './api.js';
+import { resetMaxNetworkBindingsForTests } from './network.js';
 
 process.env.OPENCLAW_STATE_DIR = mkdtempSync(join(tmpdir(), 'openclaw-max-test-'));
 
@@ -34,4 +35,6 @@ beforeEach(() => {
   setMaxFetchForTests((url, init) => (globalThis.fetch as unknown as AnyFetch)(url, init));
   // The 2 msg/s per-chat budget must not leak waits from one test into the next.
   resetMaxSendLimiterForTests();
+  // Account resolution binds apiBaseUrl/httpProxy to tokens; start clean.
+  resetMaxNetworkBindingsForTests();
 });
