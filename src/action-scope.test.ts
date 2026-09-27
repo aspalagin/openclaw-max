@@ -323,3 +323,48 @@ describe('the current chat belongs to the account of the turn', () => {
     expect(spies.send).toHaveBeenCalledTimes(1);
   });
 });
+
+// Core delivers message(action=send) with a presentation through the outbound
+// adapter (message-action-runner: corePayload when prepareSendPayload is
+// missing and the adapter has sendPayload), so handleAction never sees it.
+describe('sends core delivers itself (presentation) are scoped before delivery', () => {
+  const presentation = { blocks: [{ type: 'text', text: 'Deploy?' }] };
+  async function prepare(to: number, context: Record<string, unknown>, cfg = makeCfg()) {
+    return await actions.prepareSendPayload!({
+      ctx: { action: 'send', cfg, params: {}, ...context } as never,
+      to: String(to),
+      payload: { text: 'hi', presentation } as never,
+    });
+  }
+
+  it('refuses a chat outside the policy before core delivers', async () => {
+    const err = await refusal(prepare(OTHER_GROUP, turn(ADMITTED_GROUP)));
+
+    expect(err).toBeInstanceOf(ToolAuthorizationError);
+  });
+
+  it('hands the payload back unchanged for an allowed chat and an owner', async () => {
+    await expect(prepare(ADMITTED_GROUP, turn(801))).resolves.toMatchObject({ presentation });
+    await expect(
+      prepare(OTHER_GROUP, { ...turn(ADMITTED_GROUP), senderIsOwner: true }),
+    ).resolves.toMatchObject({ presentation });
+  });
+
+  it('keeps plain sends on the handleAction path (null)', async () => {
+    const result = await actions.prepareSendPayload!({
+      ctx: { action: 'send', cfg: makeCfg(), params: {}, ...turn(ADMITTED_GROUP) } as never,
+      to: String(OTHER_GROUP),
+      payload: { text: 'hi' } as never,
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('refuses a presentation send when channels.max.actions.send is false', async () => {
+    const err = await refusal(
+      prepare(ADMITTED_GROUP, { senderIsOwner: true }, makeCfg({ actions: { send: false } })),
+    );
+
+    expect(err.message).toContain('disabled by channels.max.actions');
+  });
+});

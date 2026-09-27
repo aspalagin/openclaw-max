@@ -286,6 +286,20 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
     };
   },
 
+  // A send with a presentation is delivered by core itself (outbound adapter
+  // sendPayload), never reaching handleAction: the action gate and scope are
+  // checked here first, then core delivers the payload unchanged. Any other
+  // send declines (null) and keeps the handleAction path, which checks them.
+  prepareSendPayload: async ({ ctx, to, payload }) => {
+    if (!payload.presentation) return null;
+    const account = resolveMaxAccount({ cfg: ctx.cfg, accountId: ctx.accountId });
+    if (!createActionGate(account.config.actions)('send')) {
+      throw new Error('MAX action "send" is disabled by channels.max.actions');
+    }
+    await assertMaxActionInScope(ctx, account, { to });
+    return payload;
+  },
+
   extractToolSend: ({ args }: { args: Record<string, unknown> }) => {
     // Extract routing info for ALL actions (send, edit, delete, sticker)
     // Core uses extractToolSend for routing all message tool actions to plugin
