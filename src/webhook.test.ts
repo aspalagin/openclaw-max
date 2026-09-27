@@ -603,6 +603,23 @@ describe('MAX Webhook Handler', () => {
         } as never),
       ).toBe('message_created:6:mid.6');
     });
+
+    it('tells apart registry updates of different chats or users in the same millisecond', () => {
+      const started = (userId: number, chatId: number) =>
+        maxUpdateDedupeKey({
+          update_type: 'bot_started',
+          timestamp: 7,
+          chat_id: chatId,
+          user: { user_id: userId, first_name: 'u' },
+        } as never);
+      const added = (chatId: number) =>
+        maxUpdateDedupeKey({ update_type: 'bot_added', timestamp: 7, chat_id: chatId } as never);
+
+      expect(started(1, 10)).not.toBe(started(2, 20));
+      expect(added(10)).not.toBe(added(20));
+      // A redelivery of the same update keeps its key.
+      expect(started(1, 10)).toBe(started(1, 10));
+    });
   });
 
   describe('registerMaxWebhookRoute', () => {

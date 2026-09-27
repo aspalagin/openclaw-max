@@ -122,9 +122,18 @@ export function maxUpdateDedupeKey(update: MaxUpdate): string | undefined {
     update.message?.body?.mid ??
     // A forward-only message has no body; its link carries the original mid.
     update.message?.link?.message?.mid ??
-    (typeof update.message_id === 'string' ? update.message_id : undefined);
+    (typeof update.message_id === 'string' ? update.message_id : undefined) ??
+    // Registry updates (bot_started, bot_added, …) carry no message: their chat
+    // and user tell apart two of them in the same millisecond.
+    registryUpdateId(update);
   if (!id && update.timestamp == null) return undefined;
   return `${update.update_type}:${update.timestamp ?? ''}:${id ?? ''}`;
+}
+
+function registryUpdateId(update: MaxUpdate): string | undefined {
+  const userId = update.user?.user_id ?? update.user_id;
+  const parts = [update.chat_id, userId].filter((part) => part != null);
+  return parts.length > 0 ? parts.join('/') : undefined;
 }
 
 /** Returns true when the key was already seen (LRU bounded by DEDUPE_CAPACITY). */
