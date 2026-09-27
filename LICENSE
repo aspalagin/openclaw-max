@@ -1,6 +1,8 @@
 MIT License
 
 Copyright (c) 2026 Arseniy Palagin
+Copyright (c) 2026 Evgeniy Bystrov (portions derived from the openclaw-max 0.5.0
+npm package, https://github.com/evgeniyvbystrov/openclaw-max)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
