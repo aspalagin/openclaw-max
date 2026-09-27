@@ -5,7 +5,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -476,6 +476,171 @@ describe('durable webhook queue', () => {
     expect(await second.recover()).toEqual({ recovered: 0, stale: 0, unreadable: 0 });
     gate.resolve();
     await vi.waitFor(() => expect(readdirSync(dir)).toEqual(['completed.json']));
+  });
+});
+
+describe('gateway drain refusal', () => {
+  /** Core refuses new turns while the gateway drains for a stop or restart. */
+  const draining = () =>
+    Object.assign(new Error('Gateway is draining; new tasks are not accepted'), {
+      name: 'GatewayDrainingError',
+    });
+  const pendingRows = (dir: string) => readdirSync(dir).filter((n) => n.startsWith('u-'));
+  const completedKeys = (dir: string) => {
+    const file = join(dir, 'completed.json');
+    return existsSync(file) ? readFileSync(file, 'utf8') : '';
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('keeps a refused update at the head of its chat and retries it after a pause', async () => {
+    const dir = journalDir();
+    const journal = await openMaxUpdateJournal({ accountId: 'dr1', dir });
+    const queue = createMaxWebhookUpdateQueue({ accountId: 'dr1', journal });
+    await queue.admit(makeMsgUpdate(777, 'first-mid'), 'k1');
+    await queue.admit(makeMsgUpdate(777, 'second-mid'), 'k2');
+    const complete = vi.spyOn(journal, 'complete');
+    vi.useFakeTimers();
+    const dispatched: Array<string | undefined> = [];
+    let refusals = 1;
+    const onError = vi.fn();
+    const onWarn = vi.fn();
+    const onInfo = vi.fn();
+    const controller = new AbortController();
+    const consumer = queue.consume({
+      dispatch: async (u) => {
+        dispatched.push(midOf(u));
+        if (refusals-- > 0) throw draining();
+      },
+      abortSignal: controller.signal,
+      onError,
+      onWarn,
+      onInfo,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dispatched).toEqual(['first-mid']);
+    // The chat's next update waits behind the refused one.
+    await vi.advanceTimersByTimeAsync(1_900);
+    expect(dispatched).toEqual(['first-mid']);
+    expect(pendingRows(dir)).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.waitFor(() => expect(pendingRows(dir)).toHaveLength(0));
+    expect(dispatched).toEqual(['first-mid', 'first-mid', 'second-mid']);
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(completedKeys(dir)).toContain('k1');
+    expect(onError).not.toHaveBeenCalled();
+    // One warning for the refusal, one info for the retry that went through; no ids or text.
+    expect(onWarn).toHaveBeenCalledTimes(1);
+    expect(onInfo).toHaveBeenCalledTimes(1);
+    const logged = String([...onWarn.mock.calls, ...onInfo.mock.calls]);
+    expect(logged).toContain('draining');
+    expect(logged).not.toMatch(/first-mid|777/);
+    controller.abort();
+    await consumer;
+  });
+
+  it('keeps a refused update on disk when the channel stops during the pause; the next process handles it', async () => {
+    const dir = journalDir();
+    const queue = createMaxWebhookUpdateQueue({
+      accountId: 'dr2',
+      journal: await openMaxUpdateJournal({ accountId: 'dr2', dir }),
+      stopGraceMs: 1,
+    });
+    await queue.admit(makeMsgUpdate(1, 'm1'), 'k1');
+    vi.useFakeTimers();
+    const dispatch = vi.fn(async () => {
+      throw draining();
+    });
+    const onError = vi.fn();
+    const onWarn = vi.fn();
+    const controller = new AbortController();
+    const consumer = queue.consume({ dispatch, abortSignal: controller.signal, onError, onWarn });
+    // Refused three times: after 2 s and 5 s pauses, then stopped 1 s into the 10 s one.
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(dispatch).toHaveBeenCalledTimes(3);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    await consumer;
+    vi.useRealTimers();
+    expect(dispatch).toHaveBeenCalledTimes(3);
+    expect(onError).not.toHaveBeenCalled();
+    expect(onWarn).toHaveBeenCalledWith(expect.stringMatching(/1 update\(s\) not dispatched/));
+    expect(pendingRows(dir)).toHaveLength(1);
+    expect(completedKeys(dir)).not.toContain('k1');
+    restartProcess();
+
+    const after = createMaxWebhookUpdateQueue({
+      accountId: 'dr2',
+      journal: await openMaxUpdateJournal({ accountId: 'dr2', dir }),
+    });
+    expect(await after.recover()).toEqual({ recovered: 1, stale: 0, unreadable: 0 });
+    expect(await drain(after, 1)).toEqual(['m1']);
+    expect(readdirSync(dir)).toEqual(['completed.json']);
+  });
+
+  it('recognizes the refusal wrapped in a cause', async () => {
+    const dir = journalDir();
+    const queue = createMaxWebhookUpdateQueue({
+      accountId: 'dr3',
+      journal: await openMaxUpdateJournal({ accountId: 'dr3', dir }),
+    });
+    await queue.admit(makeMsgUpdate(1, 'm1'), 'k1');
+    vi.useFakeTimers();
+    const dispatch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('reply failed', { cause: draining() }))
+      .mockResolvedValueOnce(undefined);
+    const onError = vi.fn();
+    const controller = new AbortController();
+    const consumer = queue.consume({ dispatch, abortSignal: controller.signal, onError });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.waitFor(() => expect(pendingRows(dir)).toHaveLength(0));
+    expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(onError).not.toHaveBeenCalled();
+    controller.abort();
+    await consumer;
+  });
+
+  it('does not retry a refusal after core adopted the turn: core owns its recovery', async () => {
+    const dir = journalDir();
+    const queue = createMaxWebhookUpdateQueue({
+      accountId: 'dr4',
+      journal: await openMaxUpdateJournal({ accountId: 'dr4', dir }),
+    });
+    await queue.admit(makeMsgUpdate(1, 'm1'), 'k1');
+    vi.useFakeTimers();
+    const dispatch = vi.fn(async () => {
+      await maxTurnAdoptionReplyOptions().turnAdoptionLifecycle?.onAdopted();
+      throw draining();
+    });
+    const onError = vi.fn();
+    const controller = new AbortController();
+    const consumer = queue.consume({ dispatch, abortSignal: controller.signal, onError });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(pendingRows(dir)).toHaveLength(0));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(completedKeys(dir)).toContain('k1');
+    controller.abort();
+    await consumer;
+  });
+
+  it('does not retry in the in-memory queue, where core adoption is not observable', async () => {
+    const queue = createMaxWebhookUpdateQueue({ accountId: 'dr5' });
+    vi.useFakeTimers();
+    const dispatch = vi.fn().mockRejectedValueOnce(draining()).mockResolvedValue(undefined);
+    const onError = vi.fn();
+    const controller = new AbortController();
+    const consumer = queue.consume({ dispatch, abortSignal: controller.signal, onError });
+    queue.push(makeMsgUpdate(1, 'm1'));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+    controller.abort();
+    await consumer;
   });
 });
 

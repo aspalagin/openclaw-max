@@ -11,6 +11,7 @@ import { MaxStateStore } from './state.js';
 import { maxTurnAdoptionReplyOptions } from './turn-adoption.js';
 import type * as UpdateJournal from './update-journal.js';
 import { openMaxUpdateJournal, resetMaxUpdateJournalsForTest } from './update-journal.js';
+import { maxUpdateDedupeKey } from './webhook.js';
 
 const dispatchCalls = vi.hoisted(() => ({ fn: undefined as undefined | ((u: unknown) => void) }));
 const journalMode = vi.hoisted(() => ({ unavailable: false }));
@@ -317,6 +318,115 @@ describe('polling across a restart', () => {
     await polling.done;
     expect(dispatched).toEqual(['bot_added']);
     expect(String(polling.log.warn.mock.calls.flat())).toContain('older than maxEventAgeMinutes');
+  });
+
+  describe('while the gateway drains', () => {
+    /** Core refuses new turns while the gateway drains for a stop or restart. */
+    const draining = () =>
+      Object.assign(new Error('Gateway is draining; new tasks are not accepted'), {
+        name: 'GatewayDrainingError',
+      });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('neither remembers a refused update nor persists the marker; the next start handles it', async () => {
+      const dispatched: Array<string | undefined> = [];
+      const batch = { updates: [msg('d1'), msg('d2')], marker: 11 };
+      const first = run('drain-refused', [batch]);
+      dispatchCalls.fn = (u) => {
+        dispatched.push((u as MaxUpdate).message?.body?.mid);
+        throw draining();
+      };
+      await vi.waitFor(() => expect(dispatched).toEqual(['d1']));
+      // The channel stops during the pause before the retry.
+      first.abort.abort();
+      await first.done;
+      await first.state.flush();
+      expect(first.state.marker).toBeUndefined();
+      expect(first.log.error).not.toHaveBeenCalled();
+      expect(first.log.warn).toHaveBeenCalledWith(expect.stringContaining('draining'));
+
+      resetMaxUpdateJournalsForTest(); // new process
+      const journal = await openMaxUpdateJournal({ accountId: 'drain-refused' });
+      expect(journal.hasCompleted(maxUpdateDedupeKey(msg('d1')) as string)).toBe(false);
+      resetMaxUpdateJournalsForTest();
+
+      dispatchCalls.fn = (u) => dispatched.push((u as MaxUpdate).message?.body?.mid);
+      const second = run('drain-refused', [batch]);
+      await vi.waitFor(() => expect(second.getUpdates).toHaveBeenCalledTimes(2));
+      second.abort.abort();
+      await second.done;
+      expect(dispatched).toEqual(['d1', 'd1', 'd2']);
+      await second.state.flush();
+      expect(second.state.marker).toBe(11);
+    });
+
+    it('retries a refused update after a pause, then goes on with the batch', async () => {
+      vi.useFakeTimers();
+      const dispatched: Array<string | undefined> = [];
+      let refusals = 1;
+      const polling = run('drain-retried', [{ updates: [msg('r1'), msg('r2')], marker: 12 }]);
+      dispatchCalls.fn = (u) => {
+        dispatched.push((u as MaxUpdate).message?.body?.mid);
+        if (refusals-- > 0) throw draining();
+      };
+      await vi.waitFor(() => expect(dispatched).toEqual(['r1']));
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.waitFor(() => expect(polling.getUpdates).toHaveBeenCalledTimes(2));
+      expect(dispatched).toEqual(['r1', 'r1', 'r2']);
+      polling.abort.abort();
+      await polling.done;
+      await polling.state.flush();
+      expect(polling.state.marker).toBe(12);
+      expect(polling.log.error).not.toHaveBeenCalled();
+      expect(polling.log.info).toHaveBeenCalledWith(expect.stringContaining('accepted after 1'));
+    });
+
+    it('does not retry a refusal after core adopted the turn', async () => {
+      const dispatched: Array<string | undefined> = [];
+      dispatchCalls.fn = async (u) => {
+        dispatched.push((u as MaxUpdate).message?.body?.mid);
+        await maxTurnAdoptionReplyOptions().turnAdoptionLifecycle?.onAdopted();
+        throw draining();
+      };
+      const polling = run('drain-adopted', [{ updates: [msg('a1')], marker: 13 }]);
+      await vi.waitFor(() => expect(polling.getUpdates).toHaveBeenCalledTimes(2));
+      polling.abort.abort();
+      await polling.done;
+      expect(dispatched).toEqual(['a1']);
+      expect(polling.log.error).toHaveBeenCalledWith(
+        expect.stringContaining('GatewayDrainingError'),
+      );
+      await polling.state.flush();
+      expect(polling.state.marker).toBe(13);
+    });
+
+    it('keeps a refused webhook leftover in the journal for the next start', async () => {
+      const journal = await openMaxUpdateJournal({ accountId: 'drain-leftover' });
+      await journal.append(msg('w1'), 'kw1');
+      resetMaxUpdateJournalsForTest(); // restarted with transport "polling"
+
+      const dispatched: Array<string | undefined> = [];
+      dispatchCalls.fn = (u) => {
+        dispatched.push((u as MaxUpdate).message?.body?.mid);
+        throw draining();
+      };
+      const first = run('drain-leftover', []);
+      await vi.waitFor(() => expect(dispatched).toEqual(['w1']));
+      first.abort.abort();
+      await first.done;
+      expect(first.getUpdates).not.toHaveBeenCalled();
+
+      resetMaxUpdateJournalsForTest(); // new process
+      dispatchCalls.fn = (u) => dispatched.push((u as MaxUpdate).message?.body?.mid);
+      const second = run('drain-leftover', [{ updates: [msg('p1')], marker: 1 }]);
+      await vi.waitFor(() => expect(second.getUpdates).toHaveBeenCalledTimes(2));
+      second.abort.abort();
+      await second.done;
+      expect(dispatched).toEqual(['w1', 'w1', 'p1']);
+    });
   });
 
   it('first handles webhook updates left in the journal when switched to polling', async () => {

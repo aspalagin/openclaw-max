@@ -307,6 +307,7 @@ export async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
         `[${account.accountId}] Webhook update dispatch failed (${update.update_type}): ${String(err)}`,
       ),
     onWarn: (message) => log?.warn(message),
+    onInfo: (message) => log?.info(message),
   });
   stopSubscriptionWatch();
 

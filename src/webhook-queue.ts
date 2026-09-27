@@ -13,6 +13,7 @@
  */
 
 import type { MaxUpdate } from './api.js';
+import { isMaxGatewayDrainingError, waitForMaxDrainRetry } from './gateway-drain.js';
 import { runWithMaxTurnAdoption } from './turn-adoption.js';
 import type { MaxJournalEntry, MaxUpdateJournal } from './update-journal.js';
 
@@ -74,8 +75,11 @@ export function maxWebhookUpdateLane(update: MaxUpdate): string {
   return String(update.message?.recipient?.chat_id ?? update.chat_id ?? 'global');
 }
 
-/** An update in memory; `entry` is its journal row when the queue is durable. */
-type QueuedUpdate = { update: MaxUpdate; entry?: MaxJournalEntry };
+/**
+ * An update in memory; `entry` is its journal row when the queue is durable,
+ * `refusals` counts core's refusals of it while the gateway drains.
+ */
+type QueuedUpdate = { update: MaxUpdate; entry?: MaxJournalEntry; refusals?: number };
 
 type Handover = { updates: QueuedUpdate[]; settled: Promise<void> };
 
@@ -113,6 +117,7 @@ export type MaxWebhookUpdateQueue = {
     abortSignal: AbortSignal;
     onError: (err: unknown, update: MaxUpdate) => void;
     onWarn?: (message: string) => void;
+    onInfo?: (message: string) => void;
   }) => Promise<void>;
   /** Start failed before consume(): release the queue, keeping taken-over updates. */
   close: () => void;
@@ -264,6 +269,7 @@ export function createMaxWebhookUpdateQueue(params: {
     abortSignal,
     onError,
     onWarn,
+    onInfo,
   }) => {
     if (onWarn) warn = onWarn;
     const lanes = new Map<string, QueuedUpdate[]>();
@@ -277,6 +283,15 @@ export function createMaxWebhookUpdateQueue(params: {
       if (queued) queued.push(item);
       else lanes.set(lane, [item]);
       if (!active.has(lane) && !ready.includes(lane)) ready.push(lane);
+    };
+
+    /** Back to the head of its lane, ahead of the chat's later updates; after the stop, passed on. */
+    const requeueFirst = (lane: string, item: QueuedUpdate): void => {
+      if (closed) return enqueue(item);
+      pending += 1;
+      const queued = lanes.get(lane);
+      if (queued) queued.unshift(item);
+      else lanes.set(lane, [item]);
     };
 
     const runLane = async (lane: string): Promise<void> => {
@@ -296,7 +311,27 @@ export function createMaxWebhookUpdateQueue(params: {
             await (entry
               ? runWithMaxTurnAdoption(complete, () => dispatch(item.update))
               : dispatch(item.update));
+            if (item.refusals) {
+              onInfo?.(
+                `[${accountId}] MAX webhook: ${item.update.update_type} accepted after ${item.refusals} refusal(s) of the draining gateway`,
+              );
+            }
           } catch (err) {
+            // Refused by the draining gateway before core adopted the turn: the
+            // turn never started. The update stays at the head of its chat and
+            // is retried after a pause; a stop meanwhile hands it over with the
+            // leftovers and its journal row stays on disk for the next process.
+            if (entry && !completion && isMaxGatewayDrainingError(err)) {
+              item.refusals = (item.refusals ?? 0) + 1;
+              if (item.refusals === 1) {
+                warn?.(
+                  `[${accountId}] MAX webhook: the gateway is draining and refused ${item.update.update_type}; kept queued, retried until accepted or the channel stops (then after the restart)`,
+                );
+              }
+              requeueFirst(lane, item);
+              await waitForMaxDrainRetry(item.refusals, abortSignal);
+              continue;
+            }
             onError(err, item.update);
           }
           await complete();

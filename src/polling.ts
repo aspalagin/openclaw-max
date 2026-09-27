@@ -15,6 +15,7 @@ import {
 
 import { MaxApiError, type MaxSubscription, type MaxUpdate } from './api.js';
 import { dispatchUpdate } from './dispatch.js';
+import { isMaxGatewayDrainingError, waitForMaxDrainRetry } from './gateway-drain.js';
 import {
   MAX_SUBSCRIBED_UPDATE_TYPES,
   type MaxMonitorOptions,
@@ -105,20 +106,24 @@ async function openPollingJournal(opts: MaxMonitorOptions): Promise<MaxUpdateJou
   }
 }
 
-/** One polled update: skip a handled or stale one, dispatch, remember it. */
+/**
+ * One polled update: skip a handled or stale one, dispatch, remember it.
+ * False when the channel stopped while the draining gateway refused it: not
+ * handled, not remembered.
+ */
 async function handlePolledUpdate(
   update: MaxUpdate,
   opts: MaxMonitorOptions,
   journal: MaxUpdateJournal | undefined,
   maxAgeMs: number,
-): Promise<void> {
+): Promise<boolean> {
   const { account, log } = opts;
   const key = maxUpdateDedupeKey(update);
   if (key && journal?.hasCompleted(key)) {
     log?.debug?.(
       `[${account.accountId}] MAX polling: ${update.update_type} already handled, skipped`,
     );
-    return;
+    return true;
   }
   let remembered: Promise<void> | undefined;
   const remember = (): Promise<void> =>
@@ -130,7 +135,9 @@ async function handlePolledUpdate(
     );
   } else {
     try {
-      await dispatchWithAdoption(remember, update, opts, Boolean(key && journal));
+      const durable = Boolean(key && journal);
+      const adopted = () => remembered !== undefined;
+      if (!(await dispatchThroughDrain(remember, adopted, update, opts, durable))) return false;
     } catch (err) {
       log?.error(
         `[${account.accountId}] Error dispatching update ${update.update_type}: ${String(err)}`,
@@ -138,6 +145,7 @@ async function handlePolledUpdate(
     }
   }
   await remember();
+  return true;
 }
 
 /**
@@ -154,6 +162,42 @@ function dispatchWithAdoption(
 ): Promise<void> {
   const dispatch = () => dispatchUpdate(update, opts);
   return durable ? runWithMaxTurnAdoption(done, dispatch) : dispatch();
+}
+
+/**
+ * dispatchWithAdoption, again after a pause while the draining gateway refuses
+ * a durable update before core adopted its turn: the turn never started (see
+ * gateway-drain.ts). False when the channel stopped first; other errors throw.
+ */
+async function dispatchThroughDrain(
+  done: () => Promise<void>,
+  adopted: () => boolean,
+  update: MaxUpdate,
+  opts: MaxMonitorOptions,
+  durable: boolean,
+): Promise<boolean> {
+  const { account, log } = opts;
+  let refusals = 0;
+  for (;;) {
+    try {
+      await dispatchWithAdoption(done, update, opts, durable);
+      if (refusals > 0) {
+        log?.info(
+          `[${account.accountId}] MAX polling: ${update.update_type} accepted after ${refusals} refusal(s) of the draining gateway`,
+        );
+      }
+      return true;
+    } catch (err) {
+      if (!durable || adopted() || !isMaxGatewayDrainingError(err)) throw err;
+      refusals += 1;
+      if (refusals === 1) {
+        log?.warn(
+          `[${account.accountId}] MAX polling: the gateway is draining and refused ${update.update_type}; retried until accepted or the channel stops (then after the restart)`,
+        );
+      }
+      if (!(await waitForMaxDrainRetry(refusals, opts.abortSignal))) return false;
+    }
+  }
 }
 
 /**
@@ -187,7 +231,12 @@ async function drainWebhookLeftovers(
     const staleMs = staleMaxUpdateAgeMs(entry.update, maxAgeMs, Date.now(), entry.receivedAt);
     if (staleMs === undefined) {
       try {
-        await dispatchWithAdoption(complete, entry.update, opts, true);
+        const adopted = () => completed !== undefined;
+        if (!(await dispatchThroughDrain(complete, adopted, entry.update, opts, true))) {
+          // Stopped while the draining gateway refused it: the next start takes it.
+          journal.release(entry);
+          continue;
+        }
       } catch (err) {
         log?.error(
           `[${account.accountId}] Error dispatching update ${entry.update.update_type}: ${String(err)}`,
@@ -245,7 +294,10 @@ export async function startMaxPollingLoop(opts: MaxMonitorOptions): Promise<void
           batchCompleted = false;
           break;
         }
-        await handlePolledUpdate(update, opts, journal, maxAgeMs);
+        if (!(await handlePolledUpdate(update, opts, journal, maxAgeMs))) {
+          batchCompleted = false;
+          break;
+        }
       }
 
       // …but only PERSIST the marker after the whole batch is handled. A restart
