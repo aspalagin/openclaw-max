@@ -318,6 +318,20 @@ describe('openclaw.plugin.json channel schema', () => {
     expect(Object.keys(properties).sort()).toEqual(Object.keys(MaxAccountSchemaBase.shape).sort());
   });
 
+  it('accepts the same top-level keys as the zod schema (defaultAccount included)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const manifest = JSON.parse(
+      readFileSync(new URL('../openclaw.plugin.json', import.meta.url), 'utf8'),
+    );
+    const { MaxConfigSchema } = await import('./config-schema.js');
+    expect(MaxConfigSchema.safeParse({ defaultAccount: 'default' }).success).toBe(true);
+    const topLevel = Object.keys(manifest.channelConfigs.max.schema.properties);
+    for (const key of topLevel) {
+      const probe = key === 'accounts' ? {} : key === 'commands' ? [] : undefined;
+      expect(MaxConfigSchema.safeParse({ [key]: probe }).success, key).toBe(true);
+    }
+  });
+
   it('carries no defaults: the gateway would write them into accounts.<id> and hide inheritance', async () => {
     const { readFileSync } = await import('node:fs');
     const manifest = JSON.parse(

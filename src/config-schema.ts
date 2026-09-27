@@ -241,6 +241,8 @@ const MaxBotCommandSchema = z
 export const MaxConfigSchema = MaxAccountSchemaBase.extend({
   accounts: z.record(z.string(), MaxAccountSchema.optional()).optional(),
   commands: z.array(MaxBotCommandSchema).max(32).optional(),
+  /** Accepted as in the manifest; the channel-level options are always the "default" account. */
+  defaultAccount: z.string().optional(),
 }).superRefine((value, ctx) => {
   requireOpenAllowFrom({
     policy: value.dmPolicy,
