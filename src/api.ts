@@ -287,6 +287,14 @@ export class MaxChatSendLimiter {
 
 let sharedSendLimiter = new MaxChatSendLimiter();
 
+/** The bot's own user id per token digest, remembered from any GET /me (the start probe). */
+const botUserIds = new Map<string, number>();
+
+/** @internal Forget remembered bot ids (test isolation). */
+export function resetMaxBotUserIdsForTests(): void {
+  botUserIds.clear();
+}
+
 /** @internal Fresh process-wide send limiter (test isolation). */
 export function resetMaxSendLimiterForTests(): void {
   sharedSendLimiter = new MaxChatSendLimiter();
@@ -526,7 +534,14 @@ export class MaxApi {
   // ── Bot info ──
 
   async getMe(): Promise<MaxUser> {
-    return this.request<MaxUser>('GET', '/me');
+    const me = await this.request<MaxUser>('GET', '/me');
+    if (typeof me?.user_id === 'number') botUserIds.set(this.tokenKey, me.user_id);
+    return me;
+  }
+
+  /** The bot's own user id: remembered from a GET /me with this token, else fetched once. */
+  async getBotUserId(): Promise<number> {
+    return botUserIds.get(this.tokenKey) ?? (await this.getMe()).user_id;
   }
 
   // ── Messages ──

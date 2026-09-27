@@ -75,6 +75,22 @@ describe('MaxApi', () => {
 
       await expect(api.getMe()).rejects.toThrow(MaxApiError);
     });
+
+    it('remembers the bot id per token for getBotUserId (no second GET /me)', async () => {
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ user_id: 12345, is_bot: true }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ user_id: 777, is_bot: true }) });
+
+      await api.getMe();
+      const again = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL });
+
+      await expect(again.getBotUserId()).resolves.toBe(12345);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      const other = new MaxApi({ token: 'other-token', baseUrl: MOCK_BASE_URL });
+      await expect(other.getBotUserId()).resolves.toBe(777);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('sendMessage', () => {

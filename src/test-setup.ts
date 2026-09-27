@@ -10,7 +10,11 @@ import { join } from 'node:path';
 import type * as SsrfRuntime from 'openclaw/plugin-sdk/ssrf-runtime';
 import { beforeEach, vi } from 'vitest';
 
-import { resetMaxSendLimiterForTests, setMaxFetchForTests } from './api.js';
+import {
+  resetMaxBotUserIdsForTests,
+  resetMaxSendLimiterForTests,
+  setMaxFetchForTests,
+} from './api.js';
 import { resetMaxNetworkBindingsForTests } from './network.js';
 
 process.env.OPENCLAW_STATE_DIR = mkdtempSync(join(tmpdir(), 'openclaw-max-test-'));
@@ -37,4 +41,6 @@ beforeEach(() => {
   resetMaxSendLimiterForTests();
   // Account resolution binds apiBaseUrl/httpProxy to tokens; start clean.
   resetMaxNetworkBindingsForTests();
+  // GET /me remembers the bot id per token; start clean.
+  resetMaxBotUserIdsForTests();
 });

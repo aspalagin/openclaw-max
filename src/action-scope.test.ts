@@ -17,6 +17,7 @@ const OTHER_GROUP = -9999;
 const ALLOWED_USER = 1001; // allowFrom
 const PAIRED_USER = 5005; // pairing store
 const STRANGER = 4004;
+const BOT = 9009; // GET /me
 
 function makeCfg(extra: Record<string, unknown> = {}) {
   return {
@@ -46,11 +47,13 @@ function turn(chatId: number, requester = STRANGER) {
 const DIALOGS: Record<number, number> = { 801: ALLOWED_USER, 800: STRANGER, 805: PAIRED_USER };
 
 const spies = {} as Record<
-  'send' | 'edit' | 'remove' | 'pin' | 'unpin' | 'getChat' | 'getMessage',
+  'send' | 'edit' | 'remove' | 'pin' | 'unpin' | 'getChat' | 'getMessage' | 'getMe',
   ReturnType<typeof vi.spyOn>
 >;
 /** chat id of the message GET /messages/{mid} returns (edit/delete). */
 let messageChat: number;
+/** Author of that message: the bot unless a test says otherwise. */
+let messageAuthor: number;
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -78,11 +81,18 @@ beforeEach(() => {
       dialog_with_user: { user_id: userId, first_name: 'U', is_bot: false },
     };
   });
+  messageAuthor = BOT;
   spies.getMessage = vi.spyOn(MaxApi.prototype, 'getMessageById').mockImplementation(async () => ({
+    sender: { user_id: messageAuthor, first_name: 'A', is_bot: messageAuthor === BOT },
     recipient: { chat_id: messageChat, chat_type: messageChat < 0 ? 'chat' : 'dialog' },
     timestamp: 1,
     body: { mid: 'mid.x' },
   }));
+  spies.getMe = vi.spyOn(MaxApi.prototype, 'getMe').mockResolvedValue({
+    user_id: BOT,
+    first_name: 'Bot',
+    is_bot: true,
+  });
 });
 
 type ActionCase = {
@@ -328,6 +338,55 @@ describe('edit and delete resolve the chat of the message', () => {
     expect(err).toBeInstanceOf(ToolAuthorizationError);
     expect(err.message).toContain('cannot resolve the chat of message mid.1');
     expect(spies.remove).not.toHaveBeenCalled();
+  });
+});
+
+// Outside the chat of the turn only the bot's own messages may be changed.
+describe.each(ACTIONS.slice(5))('$action of a message outside the current chat', (item) => {
+  it("refuses someone else's message in an admitted chat, before any mutation", async () => {
+    messageAuthor = STRANGER;
+
+    const err = await refusal(run(item, ADMITTED_GROUP, turn(801, ALLOWED_USER)));
+
+    expect(err).toBeInstanceOf(ToolAuthorizationError);
+    expect(err.message).toContain('mid.1 was not sent by this bot');
+    expect(spies[item.mutation]).not.toHaveBeenCalled();
+  });
+
+  it("refuses someone else's message in an admitted dialog", async () => {
+    messageAuthor = ALLOWED_USER;
+
+    const err = await refusal(run(item, 801, turn(ADMITTED_GROUP)));
+
+    expect(err.message).toContain('was not sent by this bot');
+    expect(spies[item.mutation]).not.toHaveBeenCalled();
+  });
+
+  it("allows the bot's own message, its author read from the same lookup", async () => {
+    await run(item, ADMITTED_GROUP, turn(801, ALLOWED_USER));
+
+    expect(spies.getMessage).toHaveBeenCalledTimes(1);
+    expect(spies[item.mutation]).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps someone else's message in the chat of the turn and for the owner as before", async () => {
+    messageAuthor = STRANGER;
+
+    await run(item, ADMITTED_GROUP, turn(ADMITTED_GROUP));
+    await run(item, OTHER_GROUP, { ...turn(ADMITTED_GROUP), senderIsOwner: true });
+
+    expect(spies.getMe).not.toHaveBeenCalled();
+    expect(spies[item.mutation]).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses when the bot id cannot be resolved (fail-closed)', async () => {
+    spies.getMe.mockRejectedValueOnce(new MaxApiError('MAX API GET /me → 502', 502));
+
+    const err = await refusal(run(item, ADMITTED_GROUP, turn(801, ALLOWED_USER)));
+
+    expect(err).toBeInstanceOf(ToolAuthorizationError);
+    expect(err.message).toContain("cannot resolve the bot's own user id");
+    expect(spies[item.mutation]).not.toHaveBeenCalled();
   });
 });
 

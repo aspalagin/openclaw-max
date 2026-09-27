@@ -14,6 +14,7 @@ import { admitMaxDmUser, admitMaxGroupMessage, type MaxAdmission } from './acces
 import type { ResolvedMaxAccount } from './accounts.js';
 import { MaxApi, MaxApiError } from './api.js';
 import { isChatNotFound } from './send.js';
+import type { MaxMessage } from './types.js';
 
 /**
  * - `admitted` (default): the current chat of the turn, an owner request
@@ -61,7 +62,9 @@ export async function assertMaxActionInScope(
       : undefined;
 
   const api = new MaxApi({ token: account.token });
-  const located = await failClosed(ctx.action, target, () => locateActionChat(api, target));
+  const { chat: located, authorId } = await failClosed(ctx.action, target, () =>
+    locateActionChat(api, target),
+  );
   if (isCurrentChat(located, currentChatId, requesterId)) return;
 
   if (scope === 'current') {
@@ -78,6 +81,31 @@ export async function assertMaxActionInScope(
       ? admitMaxGroupMessage(account, ctx.cfg, chat.chatId, requesterId)
       : await admitMaxDmUser(account, chat.userId);
   if (!admission.admitted) deny(ctx.action, describeChat(chat), admission.reason);
+  // Outside the chat of the turn, edit and delete reach only the bot's own
+  // messages: what others wrote in an admitted chat is not the agent's to change.
+  if ('messageId' in target) await assertBotMessage(ctx.action, api, target.messageId, authorId);
+}
+
+/** The author comes from the same GET /messages/{mid} as the chat; the bot id is remembered. */
+async function assertBotMessage(
+  action: string,
+  api: MaxApi,
+  messageId: string,
+  authorId: number | undefined,
+): Promise<void> {
+  let botUserId: number;
+  try {
+    botUserId = await api.getBotUserId();
+  } catch (err) {
+    throw new ToolAuthorizationError(
+      `MAX ${action} refused: cannot resolve the bot's own user id to check the author of message ${messageId} (${String(err)})`,
+    );
+  }
+  if (authorId != null && authorId === botUserId) return;
+  throw new ToolAuthorizationError(
+    `MAX ${action} refused: message ${messageId} was not sent by this bot. Outside the chat of the current turn ` +
+      'only messages the bot sent itself may be edited or deleted (channels.max.actionScope).',
+  );
 }
 
 function deny(action: string, chat: string, reason: string): never {
@@ -144,26 +172,34 @@ async function failClosed<T>(
 /**
  * Where the action lands, without an API call for explicit targets:
  * user:<id> is a dialog, a negative id a group or channel, a positive id is
- * classified later. An existing message is looked up (GET /messages/{mid}).
+ * classified later. An existing message is looked up (GET /messages/{mid}),
+ * which also tells its author.
  */
-async function locateActionChat(api: MaxApi, target: MaxActionTarget): Promise<MaxActionChat> {
+async function locateActionChat(
+  api: MaxApi,
+  target: MaxActionTarget,
+): Promise<{ chat: MaxActionChat; authorId?: number }> {
   if ('messageId' in target) {
     const message = await api.getMessageById(target.messageId);
-    const chatId = message.recipient?.chat_id;
-    if (chatId == null) throw new Error('the message has no recipient chat');
-    const chatType = message.recipient?.chat_type;
-    if (chatType === 'chat' || chatType === 'channel') return { kind: 'group', chatId };
-    if (chatType === 'dialog') return { kind: 'dialog', chatId };
-    return chatId < 0 ? { kind: 'group', chatId } : { kind: 'unknown', chatId };
+    return { chat: chatOfMessage(message), authorId: message.sender?.user_id };
   }
   const to = target.to.trim().replace(/^max:/, '');
   if (to.startsWith('user:')) {
     const userId = Number(to.slice(5));
     if (!Number.isFinite(userId)) throw new Error(`invalid MAX target: ${target.to}`);
-    return { kind: 'dialog', userId };
+    return { chat: { kind: 'dialog', userId } };
   }
   const chatId = Number(to);
   if (!to || !Number.isFinite(chatId)) throw new Error(`invalid MAX target: ${target.to}`);
+  return { chat: chatId < 0 ? { kind: 'group', chatId } : { kind: 'unknown', chatId } };
+}
+
+function chatOfMessage(message: MaxMessage): MaxActionChat {
+  const chatId = message.recipient?.chat_id;
+  if (chatId == null) throw new Error('the message has no recipient chat');
+  const chatType = message.recipient?.chat_type;
+  if (chatType === 'chat' || chatType === 'channel') return { kind: 'group', chatId };
+  if (chatType === 'dialog') return { kind: 'dialog', chatId };
   return chatId < 0 ? { kind: 'group', chatId } : { kind: 'unknown', chatId };
 }
 
