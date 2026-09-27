@@ -368,6 +368,14 @@ From the MAX Bot API documentation:
 
 **Proxy and internal addresses.** With `httpProxy` set, host names of the media the plugin downloads are resolved by the proxy, not by the plugin: literal private addresses and blocked host names are still refused, but a name that the proxy's DNS resolves to an internal address is fetched from the proxy's network. A proxy that sits inside an internal network therefore gives a path to that network's addresses. Use a proxy that has no access to internal resources.
 
+**Known limitations.**
+
+- If the disk fills up or becomes read-only while the gateway runs, the webhook answers `503` to every event and the bot does not answer until space is freed.
+- In an admitted group, a captionless voice message that MAX has not transcribed is sent to speech-to-text to look for a mention of the bot. This is paid and not rate-limited; it happens only when mention patterns are configured (`groups.<id>.disableAudioPreflight` turns it off for a group).
+- A button whose payload starts with `/` runs, when pressed, as a command from the person who pressed it, with that person's rights — as in core channels.
+- An event whose processing crashes the gateway process (rather than raising an error the plugin catches) is processed again after every start until it is older than `maxEventAgeMinutes`; with `0`, without limit.
+- `pin` and `unpin` check the chat but not the message author: in an admitted chat where the bot is an administrator they pin and unpin any message (unlike `edit` and `delete` outside the current chat).
+
 Report vulnerabilities privately as described in [SECURITY.md](https://github.com/aspalagin/openclaw-max/blob/main/SECURITY.md). Supported version: 0.8.x.
 
 ## Privacy
