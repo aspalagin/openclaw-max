@@ -341,6 +341,102 @@ describe('edit and delete resolve the chat of the message', () => {
   });
 });
 
+// A reply quotes its message in the target chat: it must be a message of that chat.
+describe.each(ACTIONS.slice(0, 3))('$action with replyTo', (item) => {
+  /** Where each message lives: mid → chat id (dialog 801 is with ALLOWED_USER, 800 with STRANGER). */
+  const WHERE: Record<string, number> = {
+    'mid.here': ADMITTED_GROUP,
+    'mid.other': OTHER_GROUP,
+    'mid.dm': 801,
+    'mid.dm-stranger': 800,
+  };
+  const reply = (replyTo: string): ActionCase => ({
+    ...item,
+    params: (to) => ({ ...item.params(to), replyTo }),
+  });
+
+  beforeEach(() => {
+    spies.getMessage.mockImplementation(async (mid: string) => {
+      const chatId = WHERE[mid];
+      if (chatId == null) throw new MaxApiError('MAX API GET /messages → 404', 404);
+      return {
+        recipient: { chat_id: chatId, chat_type: chatId < 0 ? 'chat' : 'dialog' },
+        timestamp: 1,
+        body: { mid },
+      };
+    });
+  });
+
+  it('allows a reply to a message of the target chat, current or admitted', async () => {
+    await run(reply('mid.here'), ADMITTED_GROUP, turn(ADMITTED_GROUP));
+    await run(reply('mid.here'), ADMITTED_GROUP, turn(801, ALLOWED_USER));
+
+    expect(spies.getMessage).toHaveBeenCalledWith('mid.here');
+    expect(spies.send).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a reply to a message of another chat, in the current chat too', async () => {
+    const err = await refusal(run(reply('mid.other'), ADMITTED_GROUP, turn(ADMITTED_GROUP)));
+
+    expect(err).toBeInstanceOf(ToolAuthorizationError);
+    expect(err.message).toContain(
+      `replyTo message mid.other belongs to another chat (chat ${OTHER_GROUP})`,
+    );
+    expect(spies.send).not.toHaveBeenCalled();
+  });
+
+  it('refuses when the chat of the reply message cannot be resolved (fail-closed)', async () => {
+    const err = await refusal(run(reply('mid.gone'), ADMITTED_GROUP, turn(801, ALLOWED_USER)));
+
+    expect(err).toBeInstanceOf(ToolAuthorizationError);
+    expect(err.message).toContain('replyTo message mid.gone cannot be resolved to a chat');
+    expect(spies.send).not.toHaveBeenCalled();
+  });
+
+  it('needs no lookup for the message that started the turn', async () => {
+    const context = turn(ADMITTED_GROUP);
+    const withMessage = {
+      ...context,
+      toolContext: { ...context.toolContext, currentMessageId: 'mid.turn' },
+    };
+
+    await run(reply('mid.turn'), ADMITTED_GROUP, withMessage);
+
+    expect(spies.getMessage).not.toHaveBeenCalled();
+    expect(spies.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('matches a dialog addressed by user id against the peer of the reply chat', async () => {
+    await run(reply('mid.dm'), `user:${ALLOWED_USER}`, turn(ADMITTED_GROUP));
+    expect(spies.send).toHaveBeenCalledTimes(1);
+
+    const err = await refusal(
+      run(reply('mid.dm-stranger'), `user:${ALLOWED_USER}`, turn(ADMITTED_GROUP)),
+    );
+    expect(err.message).toContain('belongs to another chat (dialog 800)');
+    expect(spies.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the owner and actionScope="off" as before, without a lookup', async () => {
+    await run(reply('mid.other'), ADMITTED_GROUP, { ...turn(ADMITTED_GROUP), senderIsOwner: true });
+    await run(
+      reply('mid.other'),
+      ADMITTED_GROUP,
+      turn(ADMITTED_GROUP),
+      makeCfg({ actionScope: 'off' }),
+    );
+
+    expect(spies.getMessage).not.toHaveBeenCalled();
+    expect(spies.send).toHaveBeenCalledTimes(2);
+  });
+
+  it('looks nothing up without replyTo', async () => {
+    await run(item, ADMITTED_GROUP, turn(ADMITTED_GROUP));
+
+    expect(spies.getMessage).not.toHaveBeenCalled();
+  });
+});
+
 // Outside the chat of the turn only the bot's own messages may be changed.
 describe.each(ACTIONS.slice(5))('$action of a message outside the current chat', (item) => {
   it("refuses someone else's message in an admitted chat, before any mutation", async () => {
@@ -436,6 +532,24 @@ describe('sends core delivers itself (presentation) are scoped before delivery',
     await expect(
       prepare(OTHER_GROUP, { ...turn(ADMITTED_GROUP), senderIsOwner: true }),
     ).resolves.toMatchObject({ presentation });
+  });
+
+  it('refuses a reply to a message of another chat before core delivers', async () => {
+    messageChat = OTHER_GROUP;
+
+    const err = await refusal(
+      Promise.resolve(
+        actions.prepareSendPayload!({
+          ctx: { action: 'send', cfg: makeCfg(), params: {}, ...turn(ADMITTED_GROUP) } as never,
+          to: String(ADMITTED_GROUP),
+          payload: { text: 'hi', presentation } as never,
+          replyToId: 'mid.1',
+        }),
+      ),
+    );
+
+    expect(err).toBeInstanceOf(ToolAuthorizationError);
+    expect(err.message).toContain('replyTo message mid.1 belongs to another chat');
   });
 
   it('keeps plain sends on the handleAction path (null)', async () => {

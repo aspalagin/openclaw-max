@@ -32,8 +32,11 @@ type MaxSettledChat =
 /** As located before any GET /chats: `unknown` is a positive id not yet classified. */
 type MaxActionChat = MaxSettledChat | { kind: 'unknown'; chatId: number };
 
-/** What the action addresses: an explicit target or an existing message. */
-export type MaxActionTarget = { to: string } | { messageId: string };
+/**
+ * What the action addresses: an explicit target (with the message a send
+ * replies to, if any) or an existing message.
+ */
+export type MaxActionTarget = { to: string; replyTo?: string | null } | { messageId: string };
 
 /**
  * Throws ToolAuthorizationError (a tool error the agent sees) when the action
@@ -65,7 +68,11 @@ export async function assertMaxActionInScope(
   const { chat: located, authorId } = await failClosed(ctx.action, target, () =>
     locateActionChat(api, target),
   );
-  if (isCurrentChat(located, currentChatId, requesterId)) return;
+  const replyTo = 'to' in target ? target.replyTo?.trim() || undefined : undefined;
+  if (isCurrentChat(located, currentChatId, requesterId)) {
+    if (replyTo) await assertReplyInChat(ctx, api, replyTo, located, currentChatId);
+    return;
+  }
 
   if (scope === 'current') {
     deny(
@@ -84,6 +91,49 @@ export async function assertMaxActionInScope(
   // Outside the chat of the turn, edit and delete reach only the bot's own
   // messages: what others wrote in an admitted chat is not the agent's to change.
   if ('messageId' in target) await assertBotMessage(ctx.action, api, target.messageId, authorId);
+  if (replyTo) await assertReplyInChat(ctx, api, replyTo, chat);
+}
+
+/**
+ * A reply quotes its message in the chat it is sent to: that message must
+ * belong to the same chat, or the quote would carry another chat's text
+ * there. GET /messages/{mid} runs only for a reply; the message that started
+ * the turn needs no lookup in its own chat.
+ */
+async function assertReplyInChat(
+  ctx: ChannelMessageActionContext,
+  api: MaxApi,
+  replyTo: string,
+  target: MaxActionChat,
+  currentChatId?: string,
+): Promise<void> {
+  const turnMessageId = ctx.toolContext?.currentMessageId;
+  if (currentChatId && turnMessageId != null && String(turnMessageId).trim() === replyTo) return;
+  const refuse = (why: string): never => {
+    throw new ToolAuthorizationError(
+      `MAX ${ctx.action} refused: replyTo message ${replyTo} ${why}; a reply may quote only a message ` +
+        `of the chat it is sent to, here ${describeChat(target)} (channels.max.actionScope).`,
+    );
+  };
+  let replyChat: MaxActionChat;
+  try {
+    replyChat = chatOfMessage(await api.getMessageById(replyTo));
+  } catch (err) {
+    return refuse(`cannot be resolved to a chat (${String(err)})`);
+  }
+  const targetChatId = target.chatId ?? (currentChatId != null ? Number(currentChatId) : undefined);
+  if (targetChatId != null && replyChat.chatId === targetChatId) return;
+  // A dialog addressed by user id: the reply must sit in the dialog with that user.
+  if (target.kind === 'dialog' && targetChatId == null && target.userId != null) {
+    let peer: MaxSettledChat;
+    try {
+      peer = await classifyChat(api, replyChat);
+    } catch (err) {
+      return refuse(`cannot be resolved to a chat (${String(err)})`);
+    }
+    if (peer.kind === 'dialog' && peer.chatId != null && peer.userId === target.userId) return;
+  }
+  refuse(`belongs to another chat (${describeChat(replyChat)})`);
 }
 
 /** The author comes from the same GET /messages/{mid} as the chat; the bot id is remembered. */

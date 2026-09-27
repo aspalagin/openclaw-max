@@ -290,13 +290,13 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
   // sendPayload), never reaching handleAction: the action gate and scope are
   // checked here first, then core delivers the payload unchanged. Any other
   // send declines (null) and keeps the handleAction path, which checks them.
-  prepareSendPayload: async ({ ctx, to, payload }) => {
+  prepareSendPayload: async ({ ctx, to, payload, replyToId }) => {
     if (!payload.presentation) return null;
     const account = resolveMaxAccount({ cfg: ctx.cfg, accountId: ctx.accountId });
     if (!createActionGate(account.config.actions)('send')) {
       throw new Error('MAX action "send" is disabled by channels.max.actions');
     }
-    await assertMaxActionInScope(ctx, account, { to });
+    await assertMaxActionInScope(ctx, account, { to, replyTo: replyToId });
     return payload;
   },
 
@@ -354,7 +354,10 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
 
     if (action === 'send') {
       const to = stripPrefix(readTargetParam(params))!;
-      await assertMaxActionInScope(ctx, account, { to });
+      await assertMaxActionInScope(ctx, account, {
+        to,
+        replyTo: readStringParam(params, 'replyTo'),
+      });
       const presentation = normalizeMessagePresentation(params.presentation);
       const pin = readMaxDeliveryPin(params.delivery, params.pin);
       const content =
@@ -555,7 +558,10 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
 
     if (action === 'sticker') {
       const to = stripPrefix(readTargetParam(params))!;
-      await assertMaxActionInScope(ctx, account, { to });
+      await assertMaxActionInScope(ctx, account, {
+        to,
+        replyTo: readStringParam(params, 'replyTo'),
+      });
       // stickerId may come as string or string[] from message tool schema
       const rawStickerId = params.stickerId;
       let stickerCode: string | undefined = Array.isArray(rawStickerId)
@@ -580,8 +586,8 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
 
     if (action === 'sendAttachment') {
       const to = stripPrefix(readTargetParam(params))!;
-      await assertMaxActionInScope(ctx, account, { to });
       const replyTo = readStringParam(params, 'replyTo');
+      await assertMaxActionInScope(ctx, account, { to, replyTo });
       const caption =
         readStringParam(params, 'message') ?? readStringParam(params, 'caption') ?? '';
       const attachType =
