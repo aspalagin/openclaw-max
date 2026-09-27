@@ -364,6 +364,8 @@ From the MAX Bot API documentation:
 - **TLS:** the extra Russian CAs are trusted only for the plugin's own connections.
 - **Logs:** no message text by default.
 
+**Proxy and internal addresses.** With `httpProxy` set, host names of the media the plugin downloads are resolved by the proxy, not by the plugin: literal private addresses and blocked host names are still refused, but a name that the proxy's DNS resolves to an internal address is fetched from the proxy's network. A proxy that sits inside an internal network therefore gives a path to that network's addresses. Use a proxy that has no access to internal resources.
+
 Report vulnerabilities privately as described in [SECURITY.md](https://github.com/aspalagin/openclaw-max/blob/main/SECURITY.md). Supported version: 0.8.x.
 
 ## Privacy
