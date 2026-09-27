@@ -13,6 +13,29 @@ export function getMaxRuntime(): PluginRuntime {
   return runtime;
 }
 
+/** The log levels plugin modules without an account log sink use. */
+export type MaxLogger = {
+  info: (message: string) => void;
+  warn: (message: string) => void;
+  error: (message: string) => void;
+};
+
+let pluginLogger: { owner: PluginRuntime; logger: MaxLogger } | undefined;
+
+/**
+ * Logger for modules with no account log sink at hand (API client, send
+ * helpers): the plugin's child logger of the gateway runtime, or the console
+ * before the runtime is set (CLI, tests).
+ */
+export function getMaxLogger(): MaxLogger {
+  const logging = runtime?.logging;
+  if (!runtime || typeof logging?.getChildLogger !== 'function') return console;
+  if (pluginLogger?.owner !== runtime) {
+    pluginLogger = { owner: runtime, logger: logging.getChildLogger({ plugin: 'max' }) };
+  }
+  return pluginLogger.logger;
+}
+
 /**
  * Legacy runtime config API (OpenClaw < 2026.9.3).
  * Since 2026.9.3 `loadConfig`/`writeConfigFile` are removed from PluginRuntime;

@@ -28,6 +28,7 @@ import {
 } from './api.js';
 import { toMaxMarkdown } from './format.js';
 import { downloadMaxRemoteMedia, type MaxLoadedMedia, sanitizeMaxFileName } from './media-temp.js';
+import { getMaxLogger } from './runtime.js';
 
 export type MaxSendButton = {
   text: string;
@@ -397,7 +398,7 @@ async function retryOnceOnTimeout(send: () => Promise<MaxSendResult>): Promise<M
     return await send();
   } catch (err) {
     if (!(err instanceof MaxRequestTimeoutError)) throw err;
-    console.error(
+    getMaxLogger().error(
       `[MAX] send timed out after ${err.elapsedMs}ms (phase=${err.phase}); retrying once`,
     );
     return send();
@@ -441,7 +442,7 @@ async function withPlainTextFallback<T>(
   } catch (err) {
     if (!opts.format || !text.trim() || !isMaxFormatRejection(err)) throw err;
     const code = err instanceof MaxApiError ? (err.code ?? err.status) : '';
-    console.warn(`[MAX] ${opts.format} refused (${code}); resending as plain text`);
+    getMaxLogger().warn(`[MAX] ${opts.format} refused (${code}); resending as plain text`);
     return attempt({ ...opts, format: undefined });
   }
 }
@@ -800,7 +801,7 @@ async function uploadMaxAttachment(
     return { type, payload: { token: uploaded.token } };
   } catch (err) {
     if (type !== 'audio' || !(err instanceof MaxApiError)) throw err;
-    console.warn(
+    getMaxLogger().warn(
       `[MAX] audio upload of ${media.fileName} refused (${err.code ?? err.status}); sending as a file`,
     );
     return uploadMaxAttachment(api, media, 'file');
@@ -880,7 +881,7 @@ async function sendMaxAttachmentsMessage(
       return await send(false);
     } catch (err) {
       if (!hasAudio || !isMaxAudioRefusal(err)) throw err;
-      console.warn(
+      getMaxLogger().warn(
         `[MAX] message with audio refused (${(err as MaxApiError).code ?? 400}); sending the audio as a file`,
       );
       audioAsFile = true;
@@ -891,7 +892,9 @@ async function sendMaxAttachmentsMessage(
     return await send(true);
   } catch (err) {
     if (!(err instanceof MaxApiError)) throw err;
-    console.warn(`[MAX] image by URL refused (${err.code ?? err.status}); uploading instead`);
+    getMaxLogger().warn(
+      `[MAX] image by URL refused (${err.code ?? err.status}); uploading instead`,
+    );
     return send(false);
   }
 }

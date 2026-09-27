@@ -26,6 +26,7 @@ import {
   MaxNetworkConfigError,
   scrubProxyCredentials,
 } from './network.js';
+import { getMaxLogger } from './runtime.js';
 import { RUSSIAN_TRUSTED_ROOT_CA, RUSSIAN_TRUSTED_SUB_CA } from './russian-trusted-ca.js';
 import type {
   MaxBotCommand,
@@ -157,7 +158,7 @@ function getDirectMaxDispatcher(): Agent {
         const err = args[0];
         const elapsedMs = Date.now() - startedAt;
         if (err || elapsedMs > MAX_SLOW_CONNECT_MS) {
-          console.error(
+          getMaxLogger().error(
             `[MAX API] connect ${options.hostname} ${err ? 'failed' : 'slow'} dns+tcp+tls=${elapsedMs}ms` +
               (err ? ` (${err.name})` : ''),
           );
@@ -446,13 +447,15 @@ export class MaxApi {
       // it is excluded here; every other call reaching the server slowly is a
       // fingerprint that points away from a connect hang.
       if (elapsedMs > MAX_SLOW_REQUEST_MS && path !== '/updates') {
-        console.error(`[MAX API] ${method} ${path} slow: ${elapsedMs}ms (status ${res.status})`);
+        getMaxLogger().error(
+          `[MAX API] ${method} ${path} slow: ${elapsedMs}ms (status ${res.status})`,
+        );
       }
 
       if (!res.ok) {
         // Never log the request body: it may carry the webhook secret (POST
         // /subscriptions) or private message text. Log only method+path+status.
-        console.error(`[MAX API] ${method} ${path} → ${res.status}`);
+        getMaxLogger().error(`[MAX API] ${method} ${path} → ${res.status}`);
         const error = new MaxApiError(
           `MAX API ${method} ${path} → ${res.status}`,
           res.status,
@@ -475,7 +478,7 @@ export class MaxApi {
         // opaque "This operation was aborted" into a typed, loggable timeout
         // that records whether a response had started.
         const phase = gotResponse ? 'reading-body' : 'awaiting-response';
-        console.error(
+        getMaxLogger().error(
           `[MAX API] ${method} ${path} timed out after ${elapsedMs}ms (phase=${phase})`,
         );
         throw new MaxRequestTimeoutError(method, path, elapsedMs, phase);
@@ -483,7 +486,7 @@ export class MaxApi {
       if (!isAbort && !(err instanceof MaxApiError)) {
         // Network-level failure (DNS/TCP/TLS/reset): record timing so a connect
         // stall is distinguishable from a response-wait stall in the log.
-        console.error(
+        getMaxLogger().error(
           `[MAX API] ${method} ${path} failed after ${elapsedMs}ms: ${(err as Error).name}`,
         );
       }

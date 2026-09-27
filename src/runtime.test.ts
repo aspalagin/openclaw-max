@@ -4,7 +4,13 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getMaxRuntime, loadMaxConfig, setMaxRuntime, writeMaxConfig } from './runtime.js';
+import {
+  getMaxLogger,
+  getMaxRuntime,
+  loadMaxConfig,
+  setMaxRuntime,
+  writeMaxConfig,
+} from './runtime.js';
 
 describe('MAX Runtime Bridge', () => {
   const mockRuntime = {
@@ -111,5 +117,25 @@ describe('MAX runtime config helpers', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await expect(writeMaxConfig(baseCfg as any)).rejects.toThrow(/config API unavailable/);
     });
+  });
+});
+
+describe('getMaxLogger', () => {
+  it("uses the runtime's plugin child logger once the runtime is set, else the console", () => {
+    setMaxRuntime({ channel: {} } as never);
+    expect(getMaxLogger()).toBe(console);
+
+    const child = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const getChildLogger = vi.fn(() => child);
+    setMaxRuntime({ logging: { getChildLogger } } as never);
+    getMaxLogger().warn('[MAX] markdown refused (400); resending as plain text');
+    getMaxLogger().error('[MAX API] GET /me → 401');
+
+    expect(getChildLogger).toHaveBeenCalledTimes(1);
+    expect(getChildLogger).toHaveBeenCalledWith({ plugin: 'max' });
+    expect(child.warn).toHaveBeenCalledWith(
+      '[MAX] markdown refused (400); resending as plain text',
+    );
+    expect(child.error).toHaveBeenCalledWith('[MAX API] GET /me → 401');
   });
 });
