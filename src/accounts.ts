@@ -34,6 +34,8 @@ export interface MaxAccountConfig {
   notify?: boolean;
   /** Default: send messages without link previews (MAX `disable_link_preview`) */
   disableLinkPreview?: boolean;
+  /** Most media attachments downloaded per inbound message (default 12) */
+  mediaMaxCount?: number;
 }
 
 export interface ResolvedMaxAccount {
@@ -146,6 +148,7 @@ export function resolveMaxAccount(params: {
       actionScope: section.actionScope as MaxAccountConfig['actionScope'],
       notify: section.notify as boolean | undefined,
       disableLinkPreview: section.disableLinkPreview as boolean | undefined,
+      mediaMaxCount: section.mediaMaxCount as number | undefined,
     };
 
     if (accountConfig.botToken?.trim()) {
@@ -185,6 +188,7 @@ export function resolveMaxAccount(params: {
       notify: (raw.notify ?? section.notify) as boolean | undefined,
       disableLinkPreview: (raw.disableLinkPreview ?? section.disableLinkPreview) as
         boolean | undefined,
+      mediaMaxCount: (raw.mediaMaxCount ?? section.mediaMaxCount) as number | undefined,
     };
 
     if (accountConfig.botToken?.trim()) {

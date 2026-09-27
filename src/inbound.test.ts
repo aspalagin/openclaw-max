@@ -437,3 +437,22 @@ describe('forwards over the webhook transport', () => {
     );
   });
 });
+
+describe('inbound media count limit', () => {
+  it('shares one mediaMaxCount budget between own and forwarded attachments', async () => {
+    const runtime = makeRuntime();
+    setMaxRuntime(runtime.core as never);
+    await dispatchUpdate(
+      created({
+        body: { mid: 'mid.lim', seq: 3, text: 'look', attachments: [IMAGE, IMAGE] },
+        link: forwardLink({ text: 'Original', attachments: [IMAGE, IMAGE] }),
+      }),
+      makeOpts({ mediaMaxCount: 3 }) as never,
+    );
+
+    expect(runtime.fetchRemoteMedia).toHaveBeenCalledTimes(3);
+    expect(String(runtime.dispatched[0].BodyForAgent)).toContain(
+      '[1 more media attachment(s) not loaded: limit of 3 per message]',
+    );
+  });
+});

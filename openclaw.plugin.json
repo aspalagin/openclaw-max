@@ -186,6 +186,12 @@
                 "type": "number",
                 "exclusiveMinimum": 0
               },
+              "mediaMaxCount": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 12,
+                "description": "Most media attachments (images, stickers, video, audio, files) downloaded per inbound message, forwarded ones included; the agent gets a note about the rest. Size is limited separately by mediaMaxMb. Named accounts inherit the channel-level value."
+              },
               "markSeen": {
                 "type": "boolean"
               },

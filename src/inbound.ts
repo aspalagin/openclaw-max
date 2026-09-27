@@ -10,7 +10,7 @@ import { getAgentScopedMediaLocalRoots } from 'openclaw/plugin-sdk/media-local-r
 import { admitMaxGroupChat, readMaxDmAllowFrom } from './access-policy.js';
 import type { MaxAttachment, MaxLinkedMessage, MaxMessage, MaxUser } from './api.js';
 import { deliverMaxReply } from './deliver.js';
-import { collectInboundAttachments } from './inbound-attachments.js';
+import { collectInboundAttachments, resolveInboundMediaMaxCount } from './inbound-attachments.js';
 import type { MaxMonitorOptions } from './monitor-types.js';
 import { materializeMaxPresentation } from './presentation.js';
 import { getMaxRuntime } from './runtime.js';
@@ -167,17 +167,21 @@ export async function processIncomingMessage(
   }
 
   // Process attachments: download media, build descriptions for non-downloadable types
-  const { descriptions: attachmentDescriptions, mediaInputs: ownMediaInputs } =
-    await collectInboundAttachments({
-      attachments,
-      messageId,
-      chatId,
-      api: opts.api,
-      account,
-      log,
-    });
+  const {
+    descriptions: attachmentDescriptions,
+    mediaInputs: ownMediaInputs,
+    mediaTaken: ownMediaTaken,
+  } = await collectInboundAttachments({
+    attachments,
+    messageId,
+    chatId,
+    api: opts.api,
+    account,
+    log,
+  });
   // Forwarded attachments pass the same gates and download limits as the
-  // sender's own; their descriptions stay inside the forwarded block.
+  // sender's own (one media count budget per message); their descriptions
+  // stay inside the forwarded block.
   const forwarded = forward
     ? await collectInboundAttachments({
         attachments: forward.attachments,
@@ -186,6 +190,7 @@ export async function processIncomingMessage(
         api: opts.api,
         account,
         log,
+        mediaBudget: Math.max(0, resolveInboundMediaMaxCount(account) - ownMediaTaken),
       })
     : undefined;
   const mediaInputs = [...ownMediaInputs, ...(forwarded?.mediaInputs ?? [])];

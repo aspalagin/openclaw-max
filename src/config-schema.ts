@@ -91,6 +91,8 @@ export const MaxAccountSchemaBase = z
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
     responsePrefix: z.string().optional(),
     mediaMaxMb: z.number().positive().optional(),
+    /** Most media attachments downloaded per inbound message (default 12); the rest is noted. */
+    mediaMaxCount: z.number().int().positive().optional(),
     markSeen: z.boolean().optional(),
     /**
      * Chats message-tool actions may act in: "admitted" (default) — the current

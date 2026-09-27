@@ -17,7 +17,20 @@ export interface MaxInboundAttachments {
   descriptions: string[];
   /** One entry per downloaded attachment; array position is attachment identity. */
   mediaInputs: ChannelInboundMediaInput[];
+  /** Media attachments taken for download (the per-message count limit). */
+  mediaTaken: number;
 }
+
+/** Default most media attachments downloaded per inbound message: a full MAX album. */
+export const DEFAULT_INBOUND_MEDIA_MAX_COUNT = 12;
+
+/** Per-message media count limit of the account (`mediaMaxCount`). */
+export function resolveInboundMediaMaxCount(account: ResolvedMaxAccount): number {
+  return account.config.mediaMaxCount ?? DEFAULT_INBOUND_MEDIA_MAX_COUNT;
+}
+
+/** Longest link-preview description handed to the agent. */
+const MAX_SHARE_DESCRIPTION_CHARS = 300;
 
 /** Process attachments: download media, build descriptions for non-downloadable types. */
 export async function collectInboundAttachments(params: {
@@ -27,11 +40,16 @@ export async function collectInboundAttachments(params: {
   api: MaxApi;
   account: ResolvedMaxAccount;
   log?: ChannelLogSink;
+  /** Media downloads left for this message; default: the account's mediaMaxCount. */
+  mediaBudget?: number;
 }): Promise<MaxInboundAttachments> {
   const { attachments, messageId, chatId, api, account, log } = params;
   const core = getMaxRuntime();
   const attachmentDescriptions: string[] = [];
   const mediaInputs: ChannelInboundMediaInput[] = [];
+  const mediaBudget = params.mediaBudget ?? resolveInboundMediaMaxCount(account);
+  let mediaTaken = 0;
+  let mediaSkipped = 0;
 
   for (const att of attachments) {
     const attType = att.type ?? 'unknown';
@@ -48,6 +66,22 @@ export async function collectInboundAttachments(params: {
           rememberStickerCode(chatId, stickerCode);
         }
       }
+
+      // MAX may transcribe voice messages itself (AudioAttachment.transcription,
+      // a sibling of payload). The text goes to the agent and the audio fact is
+      // marked transcribed, so core media understanding does not run STT again.
+      const transcription = attType === 'audio' ? readAudioTranscription(att) : undefined;
+      if (transcription) {
+        attachmentDescriptions.push(`[Voice transcript: ${transcription}]`);
+      }
+
+      // Over the per-message count limit: no lookup, no download; the text
+      // parts above (sticker code, transcript) are cheap and stay.
+      if (mediaTaken >= mediaBudget) {
+        mediaSkipped += 1;
+        continue;
+      }
+      mediaTaken += 1;
 
       let url = (payload?.url ?? (att as Record<string, unknown>).url ?? '') as string;
 
@@ -73,14 +107,6 @@ export async function collectInboundAttachments(params: {
         } catch (err) {
           log?.debug?.(`[${account.accountId}] getVideoInfo failed: ${String(err)}`);
         }
-      }
-
-      // MAX may transcribe voice messages itself (AudioAttachment.transcription,
-      // a sibling of payload). The text goes to the agent and the audio fact is
-      // marked transcribed, so core media understanding does not run STT again.
-      const transcription = attType === 'audio' ? readAudioTranscription(att) : undefined;
-      if (transcription) {
-        attachmentDescriptions.push(`[Voice transcript: ${transcription}]`);
       }
 
       if (url && typeof url === 'string' && url.startsWith('http')) {
@@ -126,21 +152,131 @@ export async function collectInboundAttachments(params: {
         }
       }
     } else if (attType === 'share') {
-      const url = (payload?.url ?? (att as Record<string, unknown>).url ?? '') as string;
-      attachmentDescriptions.push(`[Share${url ? `: ${url}` : ''}]`);
+      attachmentDescriptions.push(describeShare(att));
     } else if (attType === 'location') {
-      const lat = (att as Record<string, unknown>).latitude ?? payload?.latitude ?? '';
-      const lon = (att as Record<string, unknown>).longitude ?? payload?.longitude ?? '';
-      attachmentDescriptions.push(`[Location: ${lat}, ${lon}]`);
+      attachmentDescriptions.push(describeLocation(att));
     } else if (attType === 'contact') {
-      const name = payload?.name ?? payload?.vcf_info ?? '';
-      attachmentDescriptions.push(`[Contact${name ? `: ${name}` : ''}]`);
+      attachmentDescriptions.push(describeContact(payload));
     } else if (attType !== 'inline_keyboard') {
       attachmentDescriptions.push(`[${attType}]`);
     }
   }
 
-  return { descriptions: attachmentDescriptions, mediaInputs };
+  if (mediaSkipped > 0) {
+    log?.warn?.(
+      `[${account.accountId}] ${mediaSkipped} media attachment(s) of ${messageId} not loaded: mediaMaxCount`,
+    );
+    attachmentDescriptions.push(
+      `[${mediaSkipped} more media attachment(s) not loaded: limit of ${resolveInboundMediaMaxCount(account)} per message]`,
+    );
+  }
+
+  return { descriptions: attachmentDescriptions, mediaInputs, mediaTaken };
+}
+
+/** One line of untrusted text: whitespace collapsed, clipped by code points. */
+function toInlineText(value: unknown, maxChars?: number): string {
+  if (typeof value !== 'string') return '';
+  const chars = Array.from(value.replace(/\s+/g, ' ').trim());
+  if (maxChars === undefined || chars.length <= maxChars) return chars.join('');
+  return `${chars.slice(0, maxChars - 1).join('')}…`;
+}
+
+/** Link preview card: title, description and link, whichever MAX sent. */
+function describeShare(att: MaxAttachment): string {
+  const raw = att as Record<string, unknown>;
+  const payload = raw.payload as Record<string, unknown> | undefined;
+  const url = toInlineText(payload?.url ?? raw.url);
+  const parts = [
+    toInlineText(raw.title),
+    toInlineText(raw.description, MAX_SHARE_DESCRIPTION_CHARS),
+    url,
+  ].filter(Boolean);
+  return parts.length ? `[Share: ${parts.join(' — ')}]` : '[Share]';
+}
+
+/** Coordinates with a map link (a Yandex Maps placemark). */
+function describeLocation(att: MaxAttachment): string {
+  const raw = att as Record<string, unknown>;
+  const payload = raw.payload as Record<string, unknown> | undefined;
+  const lat = Number(raw.latitude ?? payload?.latitude);
+  const lon = Number(raw.longitude ?? payload?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180)
+    return '[Location]';
+  return `[Location: ${lat}, ${lon} — https://yandex.ru/maps/?pt=${lon},${lat}&z=16&l=map]`;
+}
+
+/** Contact card: name and phones from the VCard, the MAX profile if linked; never the raw VCard. */
+function describeContact(payload: Record<string, unknown> | undefined): string {
+  const vcard = typeof payload?.vcf_info === 'string' ? parseMaxVcard(payload.vcf_info) : undefined;
+  const user = payload?.max_info as Record<string, unknown> | null | undefined;
+  const profileName = [user?.first_name, user?.last_name]
+    .map((part) => toInlineText(part))
+    .filter(Boolean)
+    .join(' ');
+  const name = vcard?.name || profileName || toInlineText(payload?.name);
+  const parts = name ? [name] : [];
+  if (vcard?.phones.length) parts.push(`phone: ${vcard.phones.join(', ')}`);
+  if (user && typeof user.user_id === 'number') {
+    const username = toInlineText(user.username);
+    parts.push(`MAX user: ${user.user_id}${username ? ` (@${username.replace(/^@/, '')})` : ''}`);
+  }
+  return parts.length ? `[Contact: ${parts.join('; ')}]` : '[Contact]';
+}
+
+/** Most phone numbers taken from one VCard. */
+const MAX_VCARD_PHONES = 5;
+
+/**
+ * Display name and phone numbers of a VCard (2.1/3.0/4.0): FN, else N; TEL
+ * values (a `tel:` URI prefix dropped). Folded lines, escapes and
+ * quoted-printable values are decoded; everything else is ignored.
+ * @internal exported for testing.
+ */
+export function parseMaxVcard(vcf: string): { name: string; phones: string[] } {
+  const lines = vcf.replace(/\r?\n[ \t]/g, '').split(/\r?\n/);
+  let fullName = '';
+  let structuredName = '';
+  const phones: string[] = [];
+  for (const line of lines) {
+    const colon = line.indexOf(':');
+    if (colon <= 0) continue;
+    const [rawProperty, ...params] = line.slice(0, colon).split(';');
+    const property = rawProperty.replace(/^[^.]*\./, '').toUpperCase();
+    let value = line.slice(colon + 1);
+    if (params.some((param) => /^ENCODING=QUOTED-PRINTABLE$/i.test(param))) {
+      value = decodeQuotedPrintable(value);
+    }
+    if (property === 'FN' && !fullName) {
+      fullName = toInlineText(unescapeVcardValue(value));
+    } else if (property === 'N' && !structuredName) {
+      // N: family;given;additional;prefix;suffix
+      const [family = '', given = ''] = value.split(';').map(unescapeVcardValue);
+      structuredName = toInlineText(`${given} ${family}`);
+    } else if (property === 'TEL') {
+      const phone = toInlineText(unescapeVcardValue(value).replace(/^tel:/i, ''));
+      if (phone && !phones.includes(phone) && phones.length < MAX_VCARD_PHONES) phones.push(phone);
+    }
+  }
+  return { name: fullName || structuredName, phones };
+}
+
+function unescapeVcardValue(value: string): string {
+  return value.replace(/\\([nN,;\\])/g, (_, ch: string) => (ch === 'n' || ch === 'N' ? ' ' : ch));
+}
+
+function decodeQuotedPrintable(value: string): string {
+  const bytes: number[] = [];
+  for (let i = 0; i < value.length; i += 1) {
+    const hex = value[i] === '=' ? value.slice(i + 1, i + 3) : '';
+    if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
+      bytes.push(parseInt(hex, 16));
+      i += 2;
+    } else {
+      bytes.push(...Buffer.from(value[i], 'utf8'));
+    }
+  }
+  return Buffer.from(bytes).toString('utf8');
 }
 
 /** Non-empty MAX transcription of an audio attachment, if any. */
