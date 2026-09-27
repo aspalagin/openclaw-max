@@ -364,7 +364,7 @@ describe('outbound adapter', () => {
     await expect(
       maxPlugin.outbound!.pinDeliveredMessage!({
         cfg: { channels: { max: { botToken: 'tok' } } } as never,
-        target: { channel: 'max', to: 'user:4260364' },
+        target: { channel: 'max', to: 'user:1000101' },
         messageId: 'mid.dm',
         pin: { enabled: true },
       }),
@@ -376,19 +376,19 @@ describe('outbound adapter', () => {
     const { maxPlugin } = await import('./channel.js');
     global.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ chat_id: 242316535, type: 'dialog', status: 'active' }),
+      json: async () => ({ chat_id: 2000202, type: 'dialog', status: 'active' }),
     });
 
     await maxPlugin.outbound!.pinDeliveredMessage!({
       cfg: { channels: { max: { botToken: 'tok' } } } as never,
-      target: { channel: 'max', to: '242316535' },
+      target: { channel: 'max', to: '2000202' },
       messageId: 'mid.dm',
       pin: { enabled: true },
     });
 
     const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
     expect(calls).toHaveLength(1);
-    expect(String(calls[0][0])).toContain('/chats/242316535');
+    expect(String(calls[0][0])).toContain('/chats/2000202');
     expect(calls[0][1].method).toBe('GET');
   });
 });
@@ -474,7 +474,7 @@ function makeRuntime() {
   return { core, dispatched };
 }
 
-function pressUpdate(payload: string, userId = 4260364): MaxUpdate {
+function pressUpdate(payload: string, userId = 1000101): MaxUpdate {
   return {
     update_type: 'message_callback',
     timestamp: 1790372541327,
@@ -485,10 +485,10 @@ function pressUpdate(payload: string, userId = 4260364): MaxUpdate {
       payload,
     },
     message: {
-      recipient: { chat_type: 'dialog', chat_id: 242316535, user_id: userId },
+      recipient: { chat_type: 'dialog', chat_id: 2000202, user_id: userId },
       timestamp: 1790372383780,
       body: { mid: 'mid.card', text: 'Deploy approval' },
-      sender: { user_id: 238057211, first_name: 'Bot', is_bot: true },
+      sender: { user_id: 9000909, first_name: 'Bot', is_bot: true },
     },
     user_locale: 'ru',
   } as unknown as MaxUpdate;
@@ -538,13 +538,13 @@ describe('presentation button round trip', () => {
 
     await dispatchUpdate(
       pressUpdate(buttonPayload('Approve')),
-      makeOpts({ dmPolicy: 'allowlist', allowFrom: ['4260364'] }) as never,
+      makeOpts({ dmPolicy: 'allowlist', allowFrom: ['1000101'] }) as never,
     );
 
     expect(dispatched).toHaveLength(1);
     expect(dispatched[0]).toMatchObject({
       RawBody: 'callback_data: deploy:approve',
-      To: 'max:242316535',
+      To: 'max:2000202',
     });
   });
 
@@ -556,7 +556,7 @@ describe('presentation button round trip', () => {
 
     await dispatchUpdate(
       pressUpdate(buttonPayload('Status')),
-      makeOpts({ dmPolicy: 'allowlist', allowFrom: ['4260364'] }) as never,
+      makeOpts({ dmPolicy: 'allowlist', allowFrom: ['1000101'] }) as never,
     );
 
     expect(dispatched[0]).toMatchObject({ RawBody: '/status' });
@@ -567,7 +567,7 @@ describe('presentation button round trip', () => {
     const { dispatchUpdate } = await import('./dispatch.js');
     const { core, dispatched } = makeRuntime();
     setMaxRuntime(core as never);
-    const opts = makeOpts({ dmPolicy: 'allowlist', allowFrom: ['max:4260364'] });
+    const opts = makeOpts({ dmPolicy: 'allowlist', allowFrom: ['max:1000101'] });
 
     await dispatchUpdate(pressUpdate(buttonPayload('Allow once')), opts as never);
 
@@ -578,7 +578,7 @@ describe('presentation button round trip', () => {
         decision: 'allow-once',
         channel: 'max',
         accountId: 'default',
-        senderId: '4260364',
+        senderId: '1000101',
       }),
     );
     expect(opts.api.answerCallback).toHaveBeenCalledWith('cb.presentation.1', {
@@ -605,7 +605,7 @@ describe('presentation button round trip', () => {
     const { setMaxRuntime } = await import('./runtime.js');
     const { dispatchUpdate } = await import('./dispatch.js');
     setMaxRuntime(makeRuntime().core as never);
-    const opts = makeOpts({ allowFrom: ['4260364'] });
+    const opts = makeOpts({ allowFrom: ['1000101'] });
 
     await dispatchUpdate(pressUpdate(buttonPayload('Yes')), opts as never);
 
@@ -613,7 +613,7 @@ describe('presentation button round trip', () => {
       expect.objectContaining({
         questionId: QUESTION_ID,
         optionValue: 'yes',
-        senderId: '4260364',
+        senderId: '1000101',
       }),
     );
     const authorize = questionMock.resolveOption.mock.calls[0][0].authorize as () => boolean;
@@ -628,7 +628,7 @@ describe('presentation button round trip', () => {
     const { dispatchUpdate } = await import('./dispatch.js');
     setMaxRuntime(makeRuntime().core as never);
     approvalMock.resolve.mockRejectedValue(new Error('gateway unreachable'));
-    const opts = makeOpts({ allowFrom: ['4260364'] });
+    const opts = makeOpts({ allowFrom: ['1000101'] });
 
     await dispatchUpdate(pressUpdate(buttonPayload('Allow once')), opts as never);
 
@@ -666,7 +666,7 @@ describe('agent reply funnel', () => {
         json: async () => ({
           message: {
             body: { mid: 'mid.reply' },
-            recipient: { chat_id: 242316535, chat_type: 'dialog' },
+            recipient: { chat_id: 2000202, chat_type: 'dialog' },
           },
         }),
       })
@@ -677,14 +677,14 @@ describe('agent reply funnel', () => {
         update_type: 'message_created',
         timestamp: 1,
         message: {
-          sender: { user_id: 4260364, first_name: 'User' },
-          recipient: { chat_type: 'dialog', chat_id: 242316535 },
+          sender: { user_id: 1000101, first_name: 'User' },
+          recipient: { chat_type: 'dialog', chat_id: 2000202 },
           timestamp: 1,
           body: { mid: 'mid.in', text: 'deploy?' },
         },
       } as unknown as MaxUpdate,
       {
-        ...makeOpts({ dmPolicy: 'allowlist', allowFrom: ['4260364'], markSeen: false }),
+        ...makeOpts({ dmPolicy: 'allowlist', allowFrom: ['1000101'], markSeen: false }),
         token: 't',
       } as never,
     );

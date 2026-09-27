@@ -414,7 +414,7 @@ describe('MAX Group Functionality', () => {
     });
 
     it('should accept negative numeric group ID', () => {
-      expect(normalize('-71158913982654')).toBe('-71158913982654');
+      expect(normalize('-80000000000123')).toBe('-80000000000123');
     });
 
     it('should trim whitespace', () => {
@@ -430,8 +430,8 @@ describe('MAX Group Functionality', () => {
     });
 
     it('keeps the user: prefix (a user id is not a chat id)', () => {
-      expect(normalize('user:4260364')).toBe('user:4260364');
-      expect(normalize('max:user:4260364')).toBe('user:4260364');
+      expect(normalize('user:1000101')).toBe('user:1000101');
+      expect(normalize('max:user:1000101')).toBe('user:1000101');
       expect(normalize('max:12345')).toBe('12345');
       expect(normalize('user:abc')).toBeUndefined();
       expect(normalize('user:-5')).toBeUndefined();
@@ -443,9 +443,9 @@ describe('MAX Group Functionality', () => {
 
     it('should recognize numeric IDs', () => {
       expect(resolver.looksLikeId('12345')).toBe(true);
-      expect(resolver.looksLikeId('-71158913982654')).toBe(true);
-      expect(resolver.looksLikeId('user:4260364')).toBe(true);
-      expect(resolver.looksLikeId('max:user:4260364')).toBe(true);
+      expect(resolver.looksLikeId('-80000000000123')).toBe(true);
+      expect(resolver.looksLikeId('user:1000101')).toBe(true);
+      expect(resolver.looksLikeId('max:user:1000101')).toBe(true);
     });
 
     it('should reject non-numeric strings', () => {
@@ -624,18 +624,18 @@ describe('MAX Group Functionality', () => {
           timestamp: 1,
           callback_id: 'cb-1',
           payload: '/models',
-          user: { user_id: 5975998, first_name: 'Evgeniy', is_bot: false },
+          user: { user_id: 1000102, first_name: 'User', is_bot: false },
         },
         {
-          sender: { user_id: 186310742, first_name: 'Bot', is_bot: true },
-          recipient: { chat_id: -71158913982654, chat_type: 'chat' },
+          sender: { user_id: 9000808, first_name: 'Bot', is_bot: true },
+          recipient: { chat_id: -80000000000123, chat_type: 'chat' },
           timestamp: 1,
           body: { mid: 'original-msg' },
         },
       );
 
-      expect(synthetic.recipient).toEqual({ chat_id: -71158913982654, chat_type: 'chat' });
-      expect(synthetic.sender?.user_id).toBe(5975998);
+      expect(synthetic.recipient).toEqual({ chat_id: -80000000000123, chat_type: 'chat' });
+      expect(synthetic.sender?.user_id).toBe(1000102);
       expect(synthetic.body?.text).toBe('/models');
     });
   });

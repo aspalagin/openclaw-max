@@ -510,7 +510,7 @@ describe('webhook mode end to end', () => {
     );
     await vi.waitFor(() => expect(api.subscribe).toHaveBeenCalled());
 
-    const body = JSON.stringify(makeMsgUpdate(4260364, 'mid-1'));
+    const body = JSON.stringify(makeMsgUpdate(1000101, 'mid-1'));
     const req = Object.assign(Readable.from([body]), {
       method: 'POST',
       url: '/e2e/hook',

@@ -359,15 +359,14 @@ describe('processIncomingMessage attachment downloads after the gates', () => {
   });
 });
 
-// Raw `message_callback` update captured live on 2026-09-26 (names/usernames
+// Raw `message_callback` update captured live on 2026-09-26 (ids, names and usernames
 // neutralized). `message` is a sibling of `callback`, not nested in it.
 const LIVE_MESSAGE_CALLBACK = {
   callback: {
     timestamp: 1790372541327,
-    callback_id:
-      'f9LHodD0cOIcE0GTHf8RdfJDkzGZdg6GFHBI3eVxF-WDgGebGQjICTeb13K9VXDTSAxWIX9unc3bYj__sVyQ2AhBa3jV9ItunfosDJPY084qccjSZiQo',
+    callback_id: 'cb.live.0000000000000000',
     user: {
-      user_id: 4260364,
+      user_id: 1000101,
       first_name: 'User',
       is_bot: false,
       last_name: '',
@@ -378,11 +377,11 @@ const LIVE_MESSAGE_CALLBACK = {
   },
   timestamp: 1790372541327,
   message: {
-    recipient: { chat_type: 'dialog', chat_id: 242316535, user_id: 4260364 },
+    recipient: { chat_type: 'dialog', chat_id: 2000202, user_id: 1000101 },
     timestamp: 1790372383780,
     body: {
-      mid: 'mid.000000000e7174f701a0da828c245855',
-      seq: 117333844543428693,
+      mid: 'mid.0000000000000000000000000000c0de',
+      seq: 100000000000000000,
       text: 'Live-тест 3: нажми кнопку',
       attachments: [
         {
@@ -394,7 +393,7 @@ const LIVE_MESSAGE_CALLBACK = {
       ],
     },
     sender: {
-      user_id: 238057211,
+      user_id: 9000909,
       first_name: 'Bot',
       is_bot: true,
       username: 'test_bot',
@@ -474,10 +473,10 @@ describe('message_callback', () => {
 
     expect(synthetic.recipient).toEqual({
       chat_type: 'dialog',
-      chat_id: 242316535,
-      user_id: 4260364,
+      chat_id: 2000202,
+      user_id: 1000101,
     });
-    expect(synthetic.sender?.user_id).toBe(4260364);
+    expect(synthetic.sender?.user_id).toBe(1000101);
     expect(synthetic.body).toEqual({
       mid: LIVE_MESSAGE_CALLBACK.callback.callback_id,
       text: 'live-callback-test',
@@ -491,7 +490,7 @@ describe('message_callback', () => {
 
     const synthetic = buildCallbackMessage(update.callback!, null);
 
-    expect(synthetic.recipient).toEqual({ chat_id: 4260364 });
+    expect(synthetic.recipient).toEqual({ chat_id: 1000101 });
   });
 
   it('dispatches a live DM callback into the dialog chat, routed by the sender', async () => {
@@ -503,19 +502,19 @@ describe('message_callback', () => {
 
     await dispatchUpdate(
       structuredClone(LIVE_MESSAGE_CALLBACK) as unknown as MaxUpdate,
-      makeCallbackOpts({ dmPolicy: 'allowlist', allowFrom: ['4260364'] }),
+      makeCallbackOpts({ dmPolicy: 'allowlist', allowFrom: ['1000101'] }),
     );
 
     expect(dispatched).toHaveLength(1);
     expect(dispatched[0]).toMatchObject({
       ChatType: 'direct',
-      From: 'max:4260364',
-      To: 'max:242316535',
-      OriginatingTo: 'max:242316535',
+      From: 'max:1000101',
+      To: 'max:2000202',
+      OriginatingTo: 'max:2000202',
       RawBody: 'live-callback-test',
     });
     expect(core.channel.routing.resolveAgentRoute).toHaveBeenCalledWith(
-      expect.objectContaining({ peer: { kind: 'direct', id: '4260364' } }),
+      expect.objectContaining({ peer: { kind: 'direct', id: '1000101' } }),
     );
   });
 
@@ -527,21 +526,21 @@ describe('message_callback', () => {
     setMaxRuntime(core as any);
 
     const update = structuredClone(LIVE_MESSAGE_CALLBACK) as unknown as MaxUpdate;
-    update.message!.recipient = { chat_type: 'chat', chat_id: -71158913982654 };
+    update.message!.recipient = { chat_type: 'chat', chat_id: -80000000000123 };
 
     await dispatchUpdate(
       update,
-      makeCallbackOpts({ groupPolicy: 'allowlist', groups: { '-71158913982654': {} } }),
+      makeCallbackOpts({ groupPolicy: 'allowlist', groups: { '-80000000000123': {} } }),
     );
 
     expect(dispatched).toHaveLength(1);
     expect(dispatched[0]).toMatchObject({
       ChatType: 'group',
-      To: 'max:-71158913982654',
+      To: 'max:-80000000000123',
       WasMentioned: true,
     });
     expect(core.channel.routing.resolveAgentRoute).toHaveBeenCalledWith(
-      expect.objectContaining({ peer: { kind: 'group', id: '-71158913982654' } }),
+      expect.objectContaining({ peer: { kind: 'group', id: '-80000000000123' } }),
     );
   });
 });

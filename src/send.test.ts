@@ -75,12 +75,12 @@ describe('MAX Message Sending', () => {
           message: { body: { mid: 'msg-user' }, timestamp: 1, recipient: { chat_id: 9 } },
         } as never);
 
-      const result = await sendMaxMessage('4260364', 'Hi', { token: MOCK_TOKEN });
+      const result = await sendMaxMessage('1000101', 'Hi', { token: MOCK_TOKEN });
 
       expect(result.messageId).toBe('msg-user');
       expect(spy).toHaveBeenCalledTimes(2);
-      expect(spy.mock.calls[0][1]).toMatchObject({ chat_id: 4260364 });
-      expect(spy.mock.calls[1][1]).toMatchObject({ user_id: 4260364 });
+      expect(spy.mock.calls[0][1]).toMatchObject({ chat_id: 1000101 });
+      expect(spy.mock.calls[1][1]).toMatchObject({ user_id: 1000101 });
       expect(spy.mock.calls[1][1]).not.toHaveProperty('chat_id');
       spy.mockRestore();
     });
@@ -919,12 +919,12 @@ describe('pinMaxMessage in dialogs', () => {
     const pin = vi.spyOn(MaxApi.prototype, 'pinMessage');
     const getChat = vi.spyOn(MaxApi.prototype, 'getChat');
 
-    await expect(pinMaxMessage('user:4260364', 'mid.1', { token: MOCK_TOKEN })).resolves.toEqual({
+    await expect(pinMaxMessage('user:1000101', 'mid.1', { token: MOCK_TOKEN })).resolves.toEqual({
       pinned: false,
       reason: expect.stringMatching(/dialogs/),
     });
     await expect(
-      pinMaxMessage('242316535', 'mid.2', { token: MOCK_TOKEN, chatType: 'dialog' }),
+      pinMaxMessage('2000202', 'mid.2', { token: MOCK_TOKEN, chatType: 'dialog' }),
     ).resolves.toMatchObject({ pinned: false });
     expect(pin).not.toHaveBeenCalled();
     expect(getChat).not.toHaveBeenCalled();

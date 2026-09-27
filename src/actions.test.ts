@@ -565,7 +565,7 @@ describe('message tool: several attachments and dialog pins', () => {
       const result = await actions.handleAction({
         action: 'send',
         params: {
-          target: 'user:4260364',
+          target: 'user:1000101',
           message: 'Три файла',
           attachments: files.map((path) => ({ path })),
         },
@@ -612,7 +612,7 @@ describe('message tool: several attachments and dialog pins', () => {
     } as never);
     const pinned = await actions.handleAction({
       action: 'pin',
-      params: { target: 'user:4260364', messageId: 'm1' },
+      params: { target: 'user:1000101', messageId: 'm1' },
       cfg,
     } as never);
 
