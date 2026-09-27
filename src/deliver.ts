@@ -31,6 +31,8 @@ interface MaxVisibleDelivery {
   messageIds: string[];
   /** Text chunks the recipient can see, in order. */
   texts: string[];
+  /** A button press was answered (POST /answers: visible, but no message id). */
+  callbackAnswered?: boolean;
 }
 
 /**
@@ -44,7 +46,7 @@ interface MaxVisibleDelivery {
  * @internal exported for testing.
  */
 export function toMaxDeliveryError(err: unknown, visible: MaxVisibleDelivery): unknown {
-  if (visible.messageIds.length > 0) {
+  if (visible.messageIds.length > 0 || visible.callbackAnswered) {
     const content = visible.texts.join('\n\n');
     return createChannelPartialDeliveryError(err, {
       visibleReplySent: true,
@@ -106,25 +108,32 @@ export async function deliverMaxReply(params: {
   const sendOptions = resolveMaxSendFlags(account.config, { channelData: payload.channelData });
   const draftMid = payload.text ? (params.draft?.messageId ?? undefined) : undefined;
 
-  if (params.callbackId && !draftMid && (payload.text || buttons?.length)) {
-    try {
-      await answerMaxCallback(params.callbackId, payload.text ?? '', {
-        token: account.token,
-        format: 'markdown',
-        buttons,
-      });
-      statusSink?.({ lastOutboundAt: Date.now() });
-    } catch (err: unknown) {
-      logSendFailure(account, log, 'callback answer', err);
-      throw toMaxDeliveryError(err, { messageIds: [], texts: [] });
-    }
-    return;
-  }
-
   // Everything the recipient can already see; a visible stream draft counts
   // until it is replaced or deleted.
   const visible: MaxVisibleDelivery = { messageIds: draftMid ? [draftMid] : [], texts: [] };
   let failure: { err: unknown } | undefined;
+
+  // A button press is answered with the text and keyboard (POST /answers);
+  // the reply's media still follows in the chat below.
+  const answersCallback = Boolean(
+    params.callbackId && !draftMid && (payload.text || buttons?.length),
+  );
+  if (answersCallback) {
+    try {
+      await answerMaxCallback(params.callbackId as string, payload.text ?? '', {
+        token: account.token,
+        format: 'markdown',
+        buttons,
+      });
+      visible.callbackAnswered = true;
+      if (payload.text) visible.texts.push(payload.text);
+      statusSink?.({ lastOutboundAt: Date.now() });
+    } catch (err: unknown) {
+      // Like a failed text chunk: the media still goes, then reject.
+      logSendFailure(account, log, 'callback answer', err);
+      failure = { err };
+    }
+  }
 
   // delivery.pin: pin the first delivered message (first chunk).
   let firstMessageId: string | undefined;
@@ -149,7 +158,9 @@ export async function deliverMaxReply(params: {
     statusSink?.({ lastOutboundAt: Date.now() });
   };
 
-  if (payload.text) {
+  if (answersCallback) {
+    // The text went with the callback answer.
+  } else if (payload.text) {
     const chunkLimit = 4000; // MAX message limit
     const chunkMode = core.channel.text.resolveChunkMode(config, 'max', account.accountId);
     const chunks = core.channel.text.chunkMarkdownTextWithMode(payload.text, chunkLimit, chunkMode);
@@ -227,7 +238,8 @@ export async function deliverMaxReply(params: {
     }
   }
 
-  const pin = readMaxDeliveryPin(payload.delivery);
+  // The message a callback answer changed has no id here to pin.
+  const pin = answersCallback ? undefined : readMaxDeliveryPin(payload.delivery);
   if (pin && firstMessageId) {
     try {
       const pinned = await pinMaxMessage(chatId, firstMessageId, {

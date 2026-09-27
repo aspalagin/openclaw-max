@@ -341,6 +341,55 @@ describe('voice replies', () => {
     ]);
   });
 
+  it('answers a button press with the text and sends the voice to the chat after it', async () => {
+    mockFetch([200, { success: true }], sent('mid.voice'));
+
+    await deliver(
+      { text: SPOKEN, mediaUrl: voiceFile, audioAsVoice: true, channelData: BUTTONS },
+      { callbackId: 'cb.1', localMedia },
+    );
+
+    expect(calls.map((c) => `${c.method} ${new URL(c.url).pathname}`)).toEqual([
+      'POST /answers',
+      'POST /messages',
+    ]);
+    expect((calls[0].body.message as { text: string }).text).toBe(SPOKEN);
+    expect(uploads).toEqual(['audio']);
+    expect(posts()[0].body).toMatchObject({
+      attachments: [{ type: 'audio', payload: { token: 'tok:audio' } }],
+    });
+    expect(posts()[0].body.text).toBeUndefined();
+  });
+
+  it('reports the answered press as visible when the media then fails', async () => {
+    mockFetch([200, { success: true }], [400, { code: 'bad.media' }]);
+
+    const err = await rejection(
+      deliver(
+        { text: 'answer', mediaUrl: voiceFile, audioAsVoice: true },
+        { callbackId: 'cb.1', localMedia },
+      ),
+    );
+
+    expect(isChannelPartialDeliveryError(err)).toBe(true);
+    expect(err).toMatchObject({ deliveryResult: { messageIds: [], content: 'answer' } });
+  });
+
+  it('still sends the media when the callback answer fails, then rejects as partial', async () => {
+    mockFetch([403, { code: 'access.denied' }], sent('mid.voice'));
+
+    const err = await rejection(
+      deliver(
+        { text: 'answer', mediaUrl: voiceFile, audioAsVoice: true },
+        { callbackId: 'cb.1', localMedia },
+      ),
+    );
+
+    expect(uploads).toEqual(['audio']);
+    expect(isChannelPartialDeliveryError(err)).toBe(true);
+    expect(err).toMatchObject({ deliveryResult: { messageIds: ['mid.voice'] } });
+  });
+
   it('sends a voice-only reply as audio alone, never the spoken text', async () => {
     mockFetch(sent('mid.voice'));
 
