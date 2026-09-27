@@ -8,6 +8,7 @@
 
 import { ToolAuthorizationError } from 'openclaw/plugin-sdk/channel-actions';
 import type { ChannelMessageActionContext } from 'openclaw/plugin-sdk/channel-contract';
+import { normalizeAccountId } from 'openclaw/plugin-sdk/core';
 
 import { admitMaxDmUser, admitMaxGroupMessage, type MaxAdmission } from './access-policy.js';
 import type { ResolvedMaxAccount } from './accounts.js';
@@ -48,13 +49,20 @@ export async function assertMaxActionInScope(
   const scope: MaxActionScope = account.config.actionScope ?? 'admitted';
   if (scope === 'off' || ctx.senderIsOwner === true) return;
 
-  const currentChatId = readCurrentMaxChatId(ctx);
+  const turnChatId = readCurrentMaxChatId(ctx);
   const requesterId = ctx.requesterSenderId?.trim() || undefined;
   // Core passes the conversation only from a trusted channel turn. Without
   // one, an explicit senderIsOwner=false still marks a non-owner run (agent
   // runs started by plugins or hooks, non-admin gateway clients): those are
   // scoped to admitted chats, not treated as operator calls.
-  if (!currentChatId && !requesterId && ctx.senderIsOwner !== false) return;
+  if (!turnChatId && !requesterId && ctx.senderIsOwner !== false) return;
+  // The turn's chat is current only for the account the turn came in on:
+  // another bot of the same group is held to its own policy.
+  const turnAccountId = ctx.requesterAccountId?.trim();
+  const currentChatId =
+    !turnAccountId || normalizeAccountId(turnAccountId) === account.accountId
+      ? turnChatId
+      : undefined;
 
   const api = new MaxApi({ token: account.token });
   const located = await failClosed(ctx.action, target, () => locateActionChat(api, target));

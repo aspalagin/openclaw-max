@@ -301,3 +301,25 @@ describe('edit and delete resolve the chat of the message', () => {
     expect(spies.remove).not.toHaveBeenCalled();
   });
 });
+
+describe('the current chat belongs to the account of the turn', () => {
+  // A second bot whose own policy admits no group.
+  const cfg = makeCfg({ accounts: { second: { botToken: 'second-token', groups: {} } } });
+
+  it('holds another account acting in the chat of the turn to its own policy', async () => {
+    const context = { ...turn(OTHER_GROUP), requesterAccountId: 'default', accountId: 'second' };
+
+    const err = await refusal(run(ACTIONS[0], OTHER_GROUP, context, cfg));
+
+    expect(err).toBeInstanceOf(ToolAuthorizationError);
+    expect(spies.send).not.toHaveBeenCalled();
+  });
+
+  it('keeps the chat of the turn current for the account the turn came in on', async () => {
+    const context = { ...turn(OTHER_GROUP), requesterAccountId: 'second', accountId: 'second' };
+
+    await run(ACTIONS[0], OTHER_GROUP, context, cfg);
+
+    expect(spies.send).toHaveBeenCalledTimes(1);
+  });
+});
