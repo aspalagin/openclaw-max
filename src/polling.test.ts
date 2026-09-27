@@ -5,8 +5,29 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MaxApiError } from './api.js';
+import { MaxApiError, type MaxUpdate } from './api.js';
 import { POLL_AUTH_PAUSE_MS, resolvePollRetryDelayMs, startMaxPollingLoop } from './polling.js';
+import { MaxStateStore } from './state.js';
+import type * as UpdateJournal from './update-journal.js';
+import { openMaxUpdateJournal, resetMaxUpdateJournalsForTest } from './update-journal.js';
+
+const dispatchCalls = vi.hoisted(() => ({ fn: undefined as undefined | ((u: unknown) => void) }));
+const journalMode = vi.hoisted(() => ({ unavailable: false }));
+vi.mock('./update-journal.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof UpdateJournal>();
+  return {
+    ...actual,
+    openMaxUpdateJournal: vi.fn(
+      async (options: Parameters<typeof actual.openMaxUpdateJournal>[0]) => {
+        if (journalMode.unavailable) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+        return actual.openMaxUpdateJournal(options);
+      },
+    ),
+  };
+});
+vi.mock('./dispatch.js', () => ({
+  dispatchUpdate: vi.fn(async (update: unknown) => dispatchCalls.fn?.(update)),
+}));
 
 function apiError(status: number, retryAfterMs?: number): MaxApiError {
   const err = new MaxApiError(`MAX API GET /updates → ${status}`, status, null);
@@ -52,7 +73,11 @@ describe('startMaxPollingLoop retries', () => {
   type Step = Error | { updates: []; marker: number };
 
   let abort: AbortController;
-  let log: { info: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
+  let log: {
+    info: ReturnType<typeof vi.fn>;
+    warn: ReturnType<typeof vi.fn>;
+    error: ReturnType<typeof vi.fn>;
+  };
 
   /** getUpdates plays `steps` in order, then hangs like a long poll until the stop. */
   function start(steps: Step[]) {
@@ -79,12 +104,26 @@ describe('startMaxPollingLoop retries', () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);
     abort = new AbortController();
-    log = { info: vi.fn(), error: vi.fn() };
+    log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    // Keep the first poll synchronous with the fake clock: no disk I/O first.
+    journalMode.unavailable = true;
   });
 
   afterEach(() => {
+    journalMode.unavailable = false;
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it('polls without the journal when it cannot be opened, and says so', async () => {
+    const { getUpdates, done } = start([]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getUpdates).toHaveBeenCalledTimes(1);
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringContaining('MAX update journal unavailable (EACCES)'),
+    );
+    abort.abort();
+    await done;
   });
 
   it('backs off exponentially and resets after a successful poll', async () => {
@@ -150,5 +189,97 @@ describe('startMaxPollingLoop retries', () => {
     expect(stopped).toBe(true);
     expect(getUpdates).toHaveBeenCalledTimes(1);
     expect(statusSink).toHaveBeenLastCalledWith({ connected: false });
+  });
+});
+
+describe('polling across a restart', () => {
+  const msg = (mid: string, timestamp = Date.now()): MaxUpdate =>
+    ({
+      update_type: 'message_created',
+      timestamp,
+      message: { body: { mid }, timestamp, recipient: { chat_id: 1 } },
+    }) as MaxUpdate;
+
+  /** One gateway process: polls `batches` in order, then hangs until stopped. */
+  function run(accountId: string, batches: Array<{ updates: MaxUpdate[]; marker: number }>) {
+    const abort = new AbortController();
+    const state = new MaxStateStore(accountId);
+    const getUpdates = vi.fn(async ({ signal }: { signal: AbortSignal }) => {
+      const batch = batches.shift();
+      if (batch) return structuredClone(batch);
+      return new Promise<never>((_, reject) => {
+        signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    });
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const done = state.load().then(() =>
+      startMaxPollingLoop({
+        api: { getUpdates },
+        account: { accountId, config: {} },
+        abortSignal: abort.signal,
+        log,
+        state,
+      } as never),
+    );
+    return { abort, getUpdates, log, state, done };
+  }
+
+  afterEach(() => {
+    dispatchCalls.fn = undefined;
+    resetMaxUpdateJournalsForTest();
+  });
+
+  it('neither loses nor repeats updates when stopped mid-batch', async () => {
+    const dispatched: Array<string | undefined> = [];
+    const batch = { updates: [msg('p1'), msg('p2'), msg('p3')], marker: 42 };
+
+    const first = run('restart-mid-batch', [batch]);
+    dispatchCalls.fn = (u) => {
+      dispatched.push((u as MaxUpdate).message?.body?.mid);
+      // The gateway stops while p1 is being handled.
+      first.abort.abort();
+    };
+    await first.done;
+    await first.state.flush();
+    expect(dispatched).toEqual(['p1']);
+    // Not persisted: the next start polls the same batch again.
+    expect(first.state.marker).toBeUndefined();
+
+    resetMaxUpdateJournalsForTest(); // new process
+    dispatchCalls.fn = (u) => dispatched.push((u as MaxUpdate).message?.body?.mid);
+    const second = run('restart-mid-batch', [batch]);
+    await vi.waitFor(() => expect(second.getUpdates).toHaveBeenCalledTimes(2));
+    second.abort.abort();
+    await second.done;
+    expect(dispatched).toEqual(['p1', 'p2', 'p3']);
+    await second.state.flush();
+    expect(second.state.marker).toBe(42);
+  });
+
+  it('skips messages older than maxEventAgeMinutes but still handles registry updates', async () => {
+    const dispatched: string[] = [];
+    dispatchCalls.fn = (u) => dispatched.push((u as MaxUpdate).update_type);
+    const old = Date.now() - 61 * 60_000;
+    const added = { update_type: 'bot_added', timestamp: old, chat_id: 5 } as MaxUpdate;
+    const polling = run('stale-poll', [{ updates: [msg('old', old), added], marker: 7 }]);
+    await vi.waitFor(() => expect(polling.getUpdates).toHaveBeenCalledTimes(2));
+    polling.abort.abort();
+    await polling.done;
+    expect(dispatched).toEqual(['bot_added']);
+    expect(String(polling.log.warn.mock.calls.flat())).toContain('older than maxEventAgeMinutes');
+  });
+
+  it('first handles webhook updates left in the journal when switched to polling', async () => {
+    const journal = await openMaxUpdateJournal({ accountId: 'switched' });
+    await journal.append(msg('w1'), 'kw1');
+    resetMaxUpdateJournalsForTest(); // restarted with transport "polling"
+
+    const dispatched: Array<string | undefined> = [];
+    dispatchCalls.fn = (u) => dispatched.push((u as MaxUpdate).message?.body?.mid);
+    const polling = run('switched', [{ updates: [msg('p1')], marker: 1 }]);
+    await vi.waitFor(() => expect(polling.getUpdates).toHaveBeenCalledTimes(2));
+    polling.abort.abort();
+    await polling.done;
+    expect(dispatched).toEqual(['w1', 'p1']);
   });
 });

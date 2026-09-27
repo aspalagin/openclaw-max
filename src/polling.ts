@@ -13,13 +13,16 @@ import {
   sleepWithAbort,
 } from 'openclaw/plugin-sdk/runtime-env';
 
-import { MaxApiError, type MaxSubscription } from './api.js';
+import { MaxApiError, type MaxSubscription, type MaxUpdate } from './api.js';
 import { dispatchUpdate } from './dispatch.js';
 import {
   MAX_SUBSCRIBED_UPDATE_TYPES,
   type MaxMonitorOptions,
   type MaxStatusPatch,
 } from './monitor-types.js';
+import { type MaxUpdateJournal, openMaxUpdateJournal } from './update-journal.js';
+import { maxUpdateDedupeKey } from './webhook.js';
+import { resolveMaxEventMaxAgeMs, staleMaxUpdateAgeMs } from './webhook-queue.js';
 
 /**
  * Polling mode: MAX stops serving GET /updates while any webhook subscription
@@ -79,6 +82,100 @@ export function resolvePollRetryDelayMs(err: unknown, failures: number): number 
   return Math.max(backoffMs, Math.min(retryAfterMs, POLL_MAX_RETRY_AFTER_MS));
 }
 
+/**
+ * Dedupe keys of handled updates survive restarts in the account journal: a
+ * restart mid-batch re-fetches the whole batch (the marker is persisted only
+ * after it), and core's inbound dedupe lives in process memory. Undefined when
+ * the state directory is not writable (then replays are dispatched again).
+ */
+async function openPollingJournal(opts: MaxMonitorOptions): Promise<MaxUpdateJournal | undefined> {
+  const { account, log } = opts;
+  try {
+    return await openMaxUpdateJournal({
+      accountId: account.accountId,
+      warn: (message) => log?.warn(`[${account.accountId}] ${message}`),
+    });
+  } catch (err) {
+    const code = (err as { code?: unknown })?.code;
+    log?.warn(
+      `[${account.accountId}] MAX update journal unavailable (${typeof code === 'string' ? code : String(err)}); updates handled before a restart may be handled again`,
+    );
+    return undefined;
+  }
+}
+
+/** One polled update: skip a handled or stale one, dispatch, remember it. */
+async function handlePolledUpdate(
+  update: MaxUpdate,
+  opts: MaxMonitorOptions,
+  journal: MaxUpdateJournal | undefined,
+  maxAgeMs: number,
+): Promise<void> {
+  const { account, log } = opts;
+  const key = maxUpdateDedupeKey(update);
+  if (key && journal?.hasCompleted(key)) {
+    log?.debug?.(
+      `[${account.accountId}] MAX polling: ${update.update_type} already handled, skipped`,
+    );
+    return;
+  }
+  const staleMs = staleMaxUpdateAgeMs(update, maxAgeMs, Date.now());
+  if (staleMs !== undefined) {
+    log?.warn(
+      `[${account.accountId}] MAX polling: ${update.update_type} from ${Math.round(staleMs / 60_000)} min ago skipped (older than maxEventAgeMinutes)`,
+    );
+  } else {
+    try {
+      await dispatchUpdate(update, opts);
+    } catch (err) {
+      log?.error(
+        `[${account.accountId}] Error dispatching update ${update.update_type}: ${String(err)}`,
+      );
+    }
+  }
+  if (key) await journal?.remember(key);
+}
+
+/**
+ * Updates a webhook-mode run accepted but did not handle before the transport
+ * was switched to polling: handle them first, in order.
+ */
+async function drainWebhookLeftovers(
+  opts: MaxMonitorOptions,
+  journal: MaxUpdateJournal,
+  maxAgeMs: number,
+): Promise<void> {
+  const { account, log } = opts;
+  let pending;
+  try {
+    pending = await journal.readPending();
+  } catch (err) {
+    log?.error(`[${account.accountId}] MAX update journal read failed: ${String(err)}`);
+    return;
+  }
+  if (pending.entries.length + pending.unreadable === 0) return;
+  log?.warn(
+    `[${account.accountId}] MAX polling: ${pending.entries.length} webhook update(s) accepted before the restart handled first, ${pending.unreadable} unreadable dropped`,
+  );
+  for (const entry of pending.entries) {
+    if (opts.abortSignal.aborted) {
+      journal.release(entry);
+      continue;
+    }
+    const staleMs = staleMaxUpdateAgeMs(entry.update, maxAgeMs, Date.now(), entry.receivedAt);
+    if (staleMs === undefined) {
+      try {
+        await dispatchUpdate(entry.update, opts);
+      } catch (err) {
+        log?.error(
+          `[${account.accountId}] Error dispatching update ${entry.update.update_type}: ${String(err)}`,
+        );
+      }
+    }
+    await journal.complete(entry);
+  }
+}
+
 export async function startMaxPollingLoop(opts: MaxMonitorOptions): Promise<void> {
   const { api, account, abortSignal, log, statusSink } = opts;
   let marker: number | null = opts.state?.marker ?? null;
@@ -86,6 +183,10 @@ export async function startMaxPollingLoop(opts: MaxMonitorOptions): Promise<void
   log?.info(
     `[${account.accountId}] MAX long-polling started${marker != null ? ` (resuming from marker ${marker})` : ''}`,
   );
+
+  const maxAgeMs = resolveMaxEventMaxAgeMs(account.config.maxEventAgeMinutes);
+  const journal = await openPollingJournal(opts);
+  if (journal) await drainWebhookLeftovers(opts, journal, maxAgeMs);
 
   let failures = 0;
   while (!abortSignal.aborted) {
@@ -122,18 +223,12 @@ export async function startMaxPollingLoop(opts: MaxMonitorOptions): Promise<void
           batchCompleted = false;
           break;
         }
-        try {
-          await dispatchUpdate(update, opts);
-        } catch (err) {
-          log?.error(
-            `[${account.accountId}] Error dispatching update ${update.update_type}: ${String(err)}`,
-          );
-        }
+        await handlePolledUpdate(update, opts, journal, maxAgeMs);
       }
 
       // …but only PERSIST the marker after the whole batch is handled. A restart
       // mid-batch then resumes from before the unprocessed updates (at-least-once);
-      // OpenClaw dedups replays by mid, so re-delivery is safe but loss is not.
+      // the journal's dedupe keys skip the ones already handled.
       if (batchCompleted && !abortSignal.aborted && resp.marker != null) {
         opts.state?.setMarker(resp.marker);
       }

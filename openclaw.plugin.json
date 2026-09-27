@@ -591,7 +591,7 @@
               "maxEventAgeMinutes": {
                 "type": "integer",
                 "minimum": 0,
-                "description": "Messages, edits, button presses and bot_started older than this many minutes (by MAX event time) are skipped instead of answered, so after a long outage the bot does not reply to hours-old messages (webhook and the queue recovered after a restart). Default 60; 0 answers any age."
+                "description": "Messages, edits, button presses and bot_started older than this many minutes (by MAX event time) are skipped instead of answered, so after a long outage the bot does not reply to hours-old messages (webhook, the queue recovered after a restart and long polling). Default 60; 0 answers any age."
               },
               "mediaMaxCount": {
                 "type": "integer",
