@@ -62,6 +62,7 @@ export const maxStatusAdapter: NonNullable<MaxChannelPlugin['status']> = {
     configured: isMaxAccountConfigured(account),
     tokenSource: account.tokenSource,
     tokenStatus: account.tokenStatus,
+    ...(account.stateReason ? { stateReason: account.stateReason } : {}),
     running: runtime?.running ?? false,
     ...(runtime?.lifecycle !== undefined ? { lifecycle: runtime.lifecycle } : {}),
     ...(typeof runtime?.connected === 'boolean' ? { connected: runtime.connected } : {}),
@@ -170,7 +171,9 @@ export const maxStatusAdapter: NonNullable<MaxChannelPlugin['status']> = {
           channel: 'max',
           accountId: snapshot.accountId,
           kind: 'config' as const,
-          message: 'MAX bot token not configured',
+          message: snapshot.stateReason
+            ? `MAX bot token not configured: ${snapshot.stateReason}`
+            : 'MAX bot token not configured',
           fix: 'Set channels.max.botToken or MAX_BOT_TOKEN env var',
         });
       }

@@ -16,9 +16,11 @@ import {
 import {
   isMaxAccountConfigured,
   listMaxAccountIds,
+  readMaxAccount,
   type ResolvedMaxAccount,
   resolveMaxAccount,
 } from './accounts.js';
+import { resolveMaxTransport } from './monitor-types.js';
 
 type MaxChannelPlugin = ChannelPlugin<ResolvedMaxAccount>;
 
@@ -26,6 +28,24 @@ type MaxChannelPlugin = ChannelPlugin<ResolvedMaxAccount>;
 export const maxConfigAdapter: NonNullable<MaxChannelPlugin['config']> = {
   listAccountIds: (cfg) => listMaxAccountIds(cfg),
   resolveAccount: (cfg, accountId) => resolveMaxAccount({ cfg, accountId }),
+
+  // Read-only status (openclaw status / channels status, doctor): where the
+  // token comes from and whether it is usable in this command path, never
+  // the token itself. A SecretRef the command cannot read is
+  // configured_unavailable, not "not configured".
+  inspectAccount: (cfg, accountId) => {
+    const account = readMaxAccount({ cfg, accountId });
+    return {
+      accountId: account.accountId,
+      ...(account.name ? { name: account.name } : {}),
+      enabled: account.enabled,
+      configured: isMaxAccountConfigured(account),
+      tokenSource: account.tokenSource,
+      tokenStatus: account.tokenStatus,
+      mode: resolveMaxTransport(account.config),
+      ...(account.stateReason ? { stateReason: account.stateReason } : {}),
+    };
+  },
   defaultAccountId: () => DEFAULT_ACCOUNT_ID,
 
   setAccountEnabled: ({ cfg, accountId, enabled }) =>
@@ -56,6 +76,7 @@ export const maxConfigAdapter: NonNullable<MaxChannelPlugin['config']> = {
     configured: isMaxAccountConfigured(account),
     tokenSource: account.tokenSource,
     tokenStatus: account.tokenStatus,
+    ...(account.stateReason ? { stateReason: account.stateReason } : {}),
   }),
 
   resolveAllowFrom: ({ cfg, accountId }) =>

@@ -71,6 +71,8 @@ export interface ResolvedMaxAccount {
    * webhook secret).
    */
   secretErrors?: Partial<Record<MaxSecretField, string>>;
+  /** Set when no token was found: what to configure, or which token file option failed. */
+  stateReason?: string;
   /**
    * Account settings; a named account inherits every channel-level value it
    * does not set itself, except MAX_ACCOUNT_OWN_KEYS.
@@ -242,6 +244,30 @@ export function resolveMaxAccount(params: {
   cfg: OpenClawConfig;
   accountId?: string | null;
 }): ResolvedMaxAccount {
+  const account = readMaxAccount(params);
+  // Every MaxApi built for this token (any send/action/lifecycle path) uses
+  // the account's API base URL and proxy — or fails with their config error.
+  bindMaxNetwork(
+    account.token,
+    resolveAccountNetwork(account.accountId, account.config, account.secretErrors?.httpProxy),
+  );
+  return account;
+}
+
+/** Why an account has no token: the options to set or the unreadable token file (no path of the file itself). */
+function missingTokenReason(accountId: string, tokenFile: string | undefined): string {
+  const path = maxAccountConfigPath(accountId);
+  if (tokenFile?.trim()) return `${path}.tokenFile is missing, empty or not a regular file`;
+  return accountId === DEFAULT_ACCOUNT_ID
+    ? `no bot token: set ${path}.botToken, ${path}.tokenFile or MAX_BOT_TOKEN`
+    : `no bot token: set ${path}.botToken or ${path}.tokenFile`;
+}
+
+/** Account resolution without side effects (resolveMaxAccount also binds its network). */
+export function readMaxAccount(params: {
+  cfg: OpenClawConfig;
+  accountId?: string | null;
+}): ResolvedMaxAccount {
   const { cfg, accountId: rawId } = params;
   const accountId = rawId ? normalizeAccountId(rawId) : DEFAULT_ACCOUNT_ID;
   const section = getMaxSection(cfg) ?? {};
@@ -352,10 +378,6 @@ export function resolveMaxAccount(params: {
   setResolved('httpProxy', httpProxy.value ?? (accountConfig.httpProxy === '' ? '' : undefined));
   if (httpProxy.error) secretErrors.httpProxy = httpProxy.error;
 
-  // Every MaxApi built for this token (any send/action/lifecycle path) uses
-  // the account's API base URL and proxy — or fails with their config error.
-  bindMaxNetwork(token, resolveAccountNetwork(accountId, accountConfig, secretErrors.httpProxy));
-
   return {
     accountId,
     name: accountConfig.name,
@@ -364,6 +386,9 @@ export function resolveMaxAccount(params: {
     tokenSource,
     tokenStatus: token ? 'available' : secretErrors.botToken ? 'configured_unavailable' : 'missing',
     ...(Object.keys(secretErrors).length > 0 ? { secretErrors } : {}),
+    ...(token || secretErrors.botToken
+      ? {}
+      : { stateReason: missingTokenReason(accountId, accountConfig.tokenFile) }),
     config: accountConfig,
   };
 }
