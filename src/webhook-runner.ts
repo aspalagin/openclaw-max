@@ -18,14 +18,16 @@ import {
   type MaxStatusPatch,
 } from './monitor-types.js';
 import type { MaxStateStore } from './state.js';
+import { type MaxUpdateJournal, openMaxUpdateJournal } from './update-journal.js';
 import {
+  maxUpdateDedupeKey,
   type MaxWebhookTarget,
   registerMaxWebhookRoute,
   registerMaxWebhookTarget,
   resolveMaxWebhookPath,
   subscribeMaxWebhook,
 } from './webhook.js';
-import { createMaxWebhookUpdateQueue } from './webhook-queue.js';
+import { createMaxWebhookUpdateQueue, resolveMaxEventMaxAgeMs } from './webhook-queue.js';
 
 /** MAX secret format (SubscriptionRequestBody.secret): 5–256 of [A-Za-z0-9_-]. */
 const MAX_WEBHOOK_SECRET_PATTERN = /^[\w-]{5,256}$/;
@@ -206,11 +208,34 @@ export async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
   } as MaxStatusPatch);
 
   // MAX requires HTTP 200 within 30s while agent runs regularly take minutes.
-  // The route handler acks and only enqueues; this account task dispatches
-  // (see webhook-queue.ts: dispatching from the request context fails with
-  // GatewayDrainingError once the request's work admission is released).
-  const queue = createMaxWebhookUpdateQueue({ accountId: account.accountId });
-  const onUpdate = (update: MaxUpdate): Promise<void> => {
+  // The route handler records and enqueues before the ack; this account task
+  // dispatches (see webhook-queue.ts: dispatching from the request context
+  // fails with GatewayDrainingError once the request's work admission is
+  // released).
+  const journal = await openWebhookJournal(opts);
+  const queueConfig = account.config.webhookQueue;
+  const queue = createMaxWebhookUpdateQueue({
+    accountId: account.accountId,
+    journal,
+    pendingLimit: queueConfig?.maxPending,
+    overflow: queueConfig?.overflow,
+    maxAgeMs: resolveMaxEventMaxAgeMs(account.config.maxEventAgeMinutes),
+    onWarn: (message) => log?.warn(message),
+  });
+  if (journal) {
+    // Before the route exists: what an earlier process accepted goes first.
+    try {
+      const { recovered, stale, unreadable } = await queue.recover();
+      if (recovered + stale + unreadable > 0) {
+        log?.warn(
+          `[${account.accountId}] MAX webhook queue: ${recovered} update(s) accepted before the restart queued again, ${stale} stale skipped (maxEventAgeMinutes), ${unreadable} unreadable dropped`,
+        );
+      }
+    } catch (err) {
+      log?.error(`[${account.accountId}] MAX webhook queue recovery failed: ${String(err)}`);
+    }
+  }
+  const onUpdate = async (update: MaxUpdate): Promise<void> => {
     const at = Date.now();
     statusSink?.(
       channelReadyPatch({
@@ -219,8 +244,10 @@ export async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
         mode: 'webhook',
       }) as MaxStatusPatch,
     );
-    queue.push(update);
-    return Promise.resolve();
+    const result = await queue.admit(update, maxUpdateDedupeKey(update));
+    if (result === 'duplicate') {
+      log?.debug?.(`[${account.accountId}] MAX webhook: duplicate ${update.update_type} skipped`);
+    }
   };
 
   const target: MaxWebhookTarget = {
@@ -291,6 +318,32 @@ export async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
   unregisterTarget();
   statusSink?.({ mode: 'webhook', connected: false } as MaxStatusPatch);
   log?.info(`[${account.accountId}] MAX webhook mode stopped (subscription kept)`);
+}
+
+/**
+ * The account's durable webhook journal, or undefined for the in-memory queue
+ * (webhookQueue.mode "memory", or the state directory is not writable).
+ */
+async function openWebhookJournal(opts: MaxMonitorOptions): Promise<MaxUpdateJournal | undefined> {
+  const { account, log } = opts;
+  if (account.config.webhookQueue?.mode === 'memory') {
+    log?.info(
+      `[${account.accountId}] MAX webhook queue in memory (webhookQueue.mode "memory"): updates acknowledged but not yet handled are lost on restart`,
+    );
+    return undefined;
+  }
+  try {
+    return await openMaxUpdateJournal({
+      accountId: account.accountId,
+      warn: (message) => log?.warn(`[${account.accountId}] ${message}`),
+    });
+  } catch (err) {
+    const code = (err as { code?: unknown })?.code;
+    log?.warn(
+      `[${account.accountId}] MAX webhook durable queue unavailable (${typeof code === 'string' ? code : String(err)}); using the in-memory queue — updates acknowledged but not yet handled are lost on restart`,
+    );
+    return undefined;
+  }
 }
 
 /** MAX webhook secret: 5–256 chars of [A-Za-z0-9-]. */

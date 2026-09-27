@@ -5,6 +5,9 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Readable } from 'node:stream';
 
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
@@ -12,19 +15,24 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { MaxApi, MaxUpdate } from './api.js';
 import { startMaxPolling } from './monitor.js';
+import { openMaxUpdateJournal, resetMaxUpdateJournalsForTest } from './update-journal.js';
 import { handleMaxWebhookRequest } from './webhook.js';
-import { createMaxWebhookUpdateQueue, resetMaxWebhookHandoversForTest } from './webhook-queue.js';
+import {
+  createMaxWebhookUpdateQueue,
+  MaxWebhookQueueRejectedError,
+  resetMaxWebhookHandoversForTest,
+} from './webhook-queue.js';
 
 const dispatchCalls = vi.hoisted(() => ({ fn: undefined as undefined | ((u: unknown) => void) }));
 vi.mock('./dispatch.js', () => ({
   dispatchUpdate: vi.fn(async (update: unknown) => dispatchCalls.fn?.(update)),
 }));
 
-function makeMsgUpdate(chatId: number, mid: string): MaxUpdate {
+function makeMsgUpdate(chatId: number, mid: string, timestamp = Date.now()): MaxUpdate {
   return {
     update_type: 'message_created',
-    timestamp: 1,
-    message: { body: { mid }, timestamp: 1, recipient: { chat_id: chatId } },
+    timestamp,
+    message: { body: { mid }, timestamp, recipient: { chat_id: chatId } },
   } as MaxUpdate;
 }
 
@@ -40,8 +48,40 @@ const tick = (ms = 10) => new Promise((r) => setTimeout(r, ms));
 
 afterEach(() => {
   resetMaxWebhookHandoversForTest();
+  resetMaxUpdateJournalsForTest();
   dispatchCalls.fn = undefined;
 });
+
+/** Process restart or crash: in-memory queues and journals are gone, the disk stays. */
+const restartProcess = () => {
+  resetMaxWebhookHandoversForTest();
+  resetMaxUpdateJournalsForTest();
+};
+
+const journalDir = () => join(mkdtempSync(join(tmpdir(), 'max-queue-')), 'inbox');
+
+const midOf = (u: MaxUpdate) => u.message?.body?.mid;
+
+/** Consume until `count` dispatches, then stop; returns the dispatched mids. */
+async function drain(
+  queue: ReturnType<typeof createMaxWebhookUpdateQueue>,
+  count: number,
+): Promise<Array<string | undefined>> {
+  const mids: Array<string | undefined> = [];
+  const controller = new AbortController();
+  const done = queue.consume({
+    dispatch: async (u) => {
+      mids.push(midOf(u));
+    },
+    abortSignal: controller.signal,
+    onError: () => {},
+  });
+  await vi.waitFor(() => expect(mids).toHaveLength(count));
+  await tick();
+  controller.abort();
+  await done;
+  return mids;
+}
 
 describe('createMaxWebhookUpdateQueue', () => {
   it('dispatches in the consumer (account task) context, not the pushing request context', async () => {
@@ -252,6 +292,154 @@ describe('createMaxWebhookUpdateQueue', () => {
   });
 });
 
+describe('durable webhook queue', () => {
+  it('dispatches updates accepted before a crash after the restart, first and in order', async () => {
+    const dir = journalDir();
+    const before = createMaxWebhookUpdateQueue({
+      accountId: 'd1',
+      journal: await openMaxUpdateJournal({ accountId: 'd1', dir }),
+    });
+    expect(await before.admit(makeMsgUpdate(1, 'm1'), 'k1')).toBe('queued');
+    expect(await before.admit(makeMsgUpdate(1, 'm2'), 'k2')).toBe('queued');
+    // Acked to MAX, never dispatched: the gateway dies here.
+    restartProcess();
+
+    const after = createMaxWebhookUpdateQueue({
+      accountId: 'd1',
+      journal: await openMaxUpdateJournal({ accountId: 'd1', dir }),
+    });
+    expect(await after.recover()).toEqual({ recovered: 2, stale: 0, unreadable: 0 });
+    expect(await after.admit(makeMsgUpdate(1, 'm3'), 'k3')).toBe('queued');
+    expect(await drain(after, 3)).toEqual(['m1', 'm2', 'm3']);
+    // Handled updates leave only their dedupe keys behind.
+    expect(readdirSync(dir)).toEqual(['completed.json']);
+  });
+
+  it('rejects a redelivery of a handled update after a restart', async () => {
+    const dir = journalDir();
+    const first = createMaxWebhookUpdateQueue({
+      accountId: 'd2',
+      journal: await openMaxUpdateJournal({ accountId: 'd2', dir }),
+    });
+    const update = makeMsgUpdate(1, 'm1');
+    await first.admit(update, 'k1');
+    expect(await drain(first, 1)).toEqual(['m1']);
+    restartProcess();
+
+    const second = createMaxWebhookUpdateQueue({
+      accountId: 'd2',
+      journal: await openMaxUpdateJournal({ accountId: 'd2', dir }),
+    });
+    await second.recover();
+    expect(await second.admit(update, 'k1')).toBe('duplicate');
+    expect(readdirSync(dir)).toEqual(['completed.json']);
+  });
+
+  it('refuses beyond maxPending with overflow "reject" and drops with "drop"', async () => {
+    const dir = journalDir();
+    const journal = await openMaxUpdateJournal({ accountId: 'd3', dir });
+    const strict = createMaxWebhookUpdateQueue({ accountId: 'd3', journal, pendingLimit: 1 });
+    await strict.admit(makeMsgUpdate(1, 'm1'), 'k1');
+    await expect(strict.admit(makeMsgUpdate(1, 'm2'), 'k2')).rejects.toBeInstanceOf(
+      MaxWebhookQueueRejectedError,
+    );
+    // Not journaled: MAX redelivers it later.
+    expect(readdirSync(dir).filter((n) => n.startsWith('u-'))).toHaveLength(1);
+    expect(journal.isDuplicate('k2')).toBe(false);
+
+    const warn = vi.fn();
+    const lenient = createMaxWebhookUpdateQueue({
+      accountId: 'd3b',
+      pendingLimit: 1,
+      overflow: 'drop',
+      onWarn: warn,
+    });
+    await lenient.admit(makeMsgUpdate(1, 'm1'));
+    expect(await lenient.admit(makeMsgUpdate(1, 'm2'))).toBe('dropped');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('queue full'));
+  });
+
+  it('skips stale messages, at admission and on recovery, but not registry updates', async () => {
+    const dir = journalDir();
+    let now = 10_000_000;
+    const clock = () => now;
+    const warn = vi.fn();
+    const first = createMaxWebhookUpdateQueue({
+      accountId: 'd4',
+      journal: await openMaxUpdateJournal({ accountId: 'd4', dir, now: clock }),
+      maxAgeMs: 60_000,
+      now: clock,
+      onWarn: warn,
+    });
+    expect(await first.admit(makeMsgUpdate(1, 'old', now - 60_001), 'k0')).toBe('stale');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('older than maxEventAgeMinutes'));
+    await first.admit(makeMsgUpdate(1, 'fresh', now), 'k1');
+    const added = { update_type: 'bot_added', timestamp: 1, chat_id: 5 } as MaxUpdate;
+    expect(await first.admit(added, 'k2')).toBe('queued');
+    restartProcess();
+
+    // Down for more than the limit: the message is not answered, bot_added still counts.
+    now += 120_000;
+    const second = createMaxWebhookUpdateQueue({
+      accountId: 'd4',
+      journal: await openMaxUpdateJournal({ accountId: 'd4', dir, now: clock }),
+      maxAgeMs: 60_000,
+      now: clock,
+    });
+    expect(await second.recover()).toEqual({ recovered: 1, stale: 1, unreadable: 0 });
+    expect(await drain(second, 1)).toEqual([undefined]);
+    expect(readdirSync(dir)).toEqual(['completed.json']);
+  });
+
+  it('skips a damaged journal row and dispatches the rest', async () => {
+    const dir = journalDir();
+    const first = createMaxWebhookUpdateQueue({
+      accountId: 'd5',
+      journal: await openMaxUpdateJournal({ accountId: 'd5', dir }),
+    });
+    await first.admit(makeMsgUpdate(1, 'm1'), 'k1');
+    writeFileSync(join(dir, 'u-0000000000001-000000.json'), '{broken');
+    restartProcess();
+
+    const second = createMaxWebhookUpdateQueue({
+      accountId: 'd5',
+      journal: await openMaxUpdateJournal({ accountId: 'd5', dir }),
+    });
+    expect(await second.recover()).toEqual({ recovered: 1, stale: 0, unreadable: 1 });
+    expect(await drain(second, 1)).toEqual(['m1']);
+  });
+
+  it('keeps an entry dispatching in a stopped task out of the next task of the same process', async () => {
+    const dir = journalDir();
+    const journal = await openMaxUpdateJournal({ accountId: 'd6', dir });
+    const first = createMaxWebhookUpdateQueue({ accountId: 'd6', journal, stopGraceMs: 1 });
+    await first.admit(makeMsgUpdate(1, 'm1'), 'k1');
+    const gate = deferred();
+    const dispatched: Array<string | undefined> = [];
+    const controller = new AbortController();
+    const running = first.consume({
+      dispatch: async (u) => {
+        dispatched.push(midOf(u));
+        await gate.promise;
+      },
+      abortSignal: controller.signal,
+      onError: () => {},
+    });
+    await vi.waitFor(() => expect(dispatched).toEqual(['m1']));
+    controller.abort();
+    await running;
+
+    // Config reload: a new task of the account in the same process.
+    const second = createMaxWebhookUpdateQueue({
+      accountId: 'd6',
+      journal: await openMaxUpdateJournal({ accountId: 'd6', dir }),
+    });
+    expect(await second.recover()).toEqual({ recovered: 0, stale: 0, unreadable: 0 });
+    gate.resolve();
+    await vi.waitFor(() => expect(readdirSync(dir)).toEqual(['completed.json']));
+  });
+});
+
 describe('webhook mode end to end', () => {
   it('dispatches a webhook update from the account task, not the HTTP request scope', async () => {
     const admission = new AsyncLocalStorage<{ origin: string; released: boolean }>();
@@ -307,5 +495,57 @@ describe('webhook mode end to end', () => {
 
     controller.abort();
     await start;
+  });
+
+  it('falls back to the in-memory queue when the state directory is not writable, and says so', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'max-state-'));
+    writeFileSync(join(base, 'max'), '');
+    const savedStateDir = process.env.OPENCLAW_STATE_DIR;
+    process.env.OPENCLAW_STATE_DIR = base;
+    const dispatched: unknown[] = [];
+    dispatchCalls.fn = (u) => dispatched.push(u);
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const api = {
+      getSubscriptions: vi.fn().mockResolvedValue({ subscriptions: [] }),
+      subscribe: vi.fn().mockResolvedValue({ success: true }),
+      unsubscribe: vi.fn(),
+    };
+    const controller = new AbortController();
+    try {
+      const start = startMaxPolling({
+        api: api as unknown as MaxApi,
+        account: {
+          accountId: 'fallback',
+          enabled: true,
+          token: 't',
+          tokenSource: 'config',
+          config: { webhookUrl: 'https://max.example/fb/hook', webhookSecret: 'fb-secret' },
+        },
+        config: {} as OpenClawConfig,
+        abortSignal: controller.signal,
+        log,
+        registerWebhookRoute: (() => () => {}) as never,
+      });
+      await vi.waitFor(() => expect(api.subscribe).toHaveBeenCalled());
+      expect(String(log.warn.mock.calls.flat())).toContain(
+        'durable queue unavailable (ENOTDIR); using the in-memory queue',
+      );
+
+      const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
+      const body = JSON.stringify(makeMsgUpdate(1, 'mem-1'));
+      const req = Object.assign(Readable.from([body]), {
+        method: 'POST',
+        url: '/fb/hook',
+        headers: { 'x-max-bot-api-secret': 'fb-secret' },
+        socket: { destroyed: false, writableEnded: false },
+      });
+      await handleMaxWebhookRequest(req as never, res as never);
+      expect(res.statusCode).toBe(200);
+      await vi.waitFor(() => expect(dispatched).toHaveLength(1));
+      controller.abort();
+      await start;
+    } finally {
+      process.env.OPENCLAW_STATE_DIR = savedStateDir;
+    }
   });
 });

@@ -13,6 +13,7 @@
  */
 
 import type { MaxUpdate } from './api.js';
+import type { MaxJournalEntry, MaxUpdateJournal } from './update-journal.js';
 
 /** Updates handled at once across chats; one chat is always sequential. */
 export const MAX_WEBHOOK_CHAT_CONCURRENCY = 4;
@@ -23,12 +24,59 @@ export const MAX_WEBHOOK_STOP_GRACE_MS = 3000;
 /** How long a restarted consumer waits for its predecessor's in-flight dispatches. */
 export const MAX_WEBHOOK_HANDOVER_WAIT_MS = 60_000;
 
+/** Default age past which updates the bot would answer are skipped (maxEventAgeMinutes). */
+export const MAX_EVENT_MAX_AGE_MINUTES = 60;
+
+/** Updates a late answer would confuse; registry updates (bot_added, …) are always handled. */
+const AGE_FENCED_UPDATE_TYPES = new Set([
+  'message_created',
+  'message_edited',
+  'message_callback',
+  'bot_started',
+]);
+
+/** maxEventAgeMinutes in ms; 0 (or less) turns the age fence off. */
+export function resolveMaxEventMaxAgeMs(minutes: number | undefined): number {
+  const value = minutes ?? MAX_EVENT_MAX_AGE_MINUTES;
+  return value > 0 ? value * 60_000 : 0;
+}
+
+/**
+ * Age of an update the bot would answer, when it is past `maxAgeMs`: MAX's
+ * event time, else when it was received. Undefined when fresh or not fenced.
+ */
+export function staleMaxUpdateAgeMs(
+  update: MaxUpdate,
+  maxAgeMs: number,
+  now: number,
+  receivedAt?: number,
+): number | undefined {
+  if (maxAgeMs <= 0 || !AGE_FENCED_UPDATE_TYPES.has(update.update_type)) return undefined;
+  const at = typeof update.timestamp === 'number' ? update.timestamp : receivedAt;
+  if (at === undefined) return undefined;
+  const age = now - at;
+  return age > maxAgeMs ? age : undefined;
+}
+
+/** The queue could not take an update: the route answers non-200 so MAX redelivers. */
+export class MaxWebhookQueueRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MaxWebhookQueueRejectedError';
+  }
+}
+
+export type MaxWebhookAdmitResult = 'queued' | 'duplicate' | 'stale' | 'dropped';
+
 /** Serialization lane: the chat an update belongs to. */
 export function maxWebhookUpdateLane(update: MaxUpdate): string {
   return String(update.message?.recipient?.chat_id ?? update.chat_id ?? 'global');
 }
 
-type Handover = { updates: MaxUpdate[]; settled: Promise<void> };
+/** An update in memory; `entry` is its journal row when the queue is durable. */
+type QueuedUpdate = { update: MaxUpdate; entry?: MaxJournalEntry };
+
+type Handover = { updates: QueuedUpdate[]; settled: Promise<void> };
 
 /**
  * Updates acked to MAX but not dispatched when an account task stopped
@@ -37,11 +85,24 @@ type Handover = { updates: MaxUpdate[]; settled: Promise<void> };
  */
 const handovers = new Map<string, Handover>();
 /** Open queues per account: a stopping task hands leftovers to an overlapping successor. */
-const openQueues = new Map<string, Set<(update: MaxUpdate) => void>>();
+const openQueues = new Map<string, Set<(item: QueuedUpdate) => void>>();
 
 export type MaxWebhookUpdateQueue = {
-  /** Called by the route handler (request context): enqueue only, never dispatch. */
+  /**
+   * Called by the route handler (request context) before it answers MAX:
+   * durably records (journal) and enqueues, never dispatches. Throws
+   * MaxWebhookQueueRejectedError (full, overflow "reject") or the journal
+   * write error — the route then answers 503 and MAX redelivers.
+   */
+  admit: (update: MaxUpdate, dedupeKey?: string) => Promise<MaxWebhookAdmitResult>;
+  /** In-memory enqueue (no journal); drops beyond the pending limit. */
   push: (update: MaxUpdate) => void;
+  /**
+   * Durable queue: take over entries an earlier process left in the journal,
+   * ahead of everything queued since. Stale ones (maxAgeMs) are completed
+   * without dispatch. Call before the route is registered.
+   */
+  recover: () => Promise<{ recovered: number; stale: number; unreadable: number }>;
   /**
    * Runs in the account task until abortSignal fires: dispatches updates in
    * order per chat, up to `concurrency` chats at once. Resolves after stop.
@@ -62,8 +123,19 @@ export function createMaxWebhookUpdateQueue(params: {
   pendingLimit?: number;
   stopGraceMs?: number;
   handoverWaitMs?: number;
+  /** Durable mode: updates are journaled before the ack and survive restarts. */
+  journal?: MaxUpdateJournal;
+  /** Full queue: "reject" (default) answers MAX non-200 so it redelivers; "drop" acks and drops. */
+  overflow?: 'reject' | 'drop';
+  /** Skip updates the bot would answer when older than this; 0 = no limit. */
+  maxAgeMs?: number;
+  now?: () => number;
+  onWarn?: (message: string) => void;
 }): MaxWebhookUpdateQueue {
-  const { accountId } = params;
+  const { accountId, journal } = params;
+  const overflow = params.overflow ?? 'reject';
+  const maxAgeMs = params.maxAgeMs ?? 0;
+  const now = params.now ?? Date.now;
   const concurrency = Math.max(1, params.concurrency ?? MAX_WEBHOOK_CHAT_CONCURRENCY);
   const pendingLimit = params.pendingLimit ?? MAX_WEBHOOK_PENDING_LIMIT;
   const stopGraceMs = params.stopGraceMs ?? MAX_WEBHOOK_STOP_GRACE_MS;
@@ -72,42 +144,97 @@ export function createMaxWebhookUpdateQueue(params: {
   // Taken over at creation: updates pushed later must queue behind them.
   const previous = handovers.get(accountId);
   handovers.delete(accountId);
-  const inbox: MaxUpdate[] = previous ? [...previous.updates] : [];
+  const inbox: QueuedUpdate[] = previous ? [...previous.updates] : [];
   let pending = inbox.length;
   let closed = false;
   let wake: (() => void) | undefined;
-  let warn: ((message: string) => void) | undefined;
+  let warn: ((message: string) => void) | undefined = params.onWarn;
 
-  const push = (update: MaxUpdate): void => {
+  const enqueue = (item: QueuedUpdate): void => {
     if (closed) {
       // Route still selected this target while the task was stopping.
       const successor = [...siblings].at(-1);
-      if (successor) return successor(update);
+      if (successor) return successor(item);
       const handover = handovers.get(accountId);
-      if (handover) handover.updates.push(update);
-      else handovers.set(accountId, { updates: [update], settled: Promise.resolve() });
+      if (handover) handover.updates.push(item);
+      else handovers.set(accountId, { updates: [item], settled: Promise.resolve() });
       return;
     }
-    if (pending >= pendingLimit) {
+    pending += 1;
+    inbox.push(item);
+    wake?.();
+  };
+  const siblings = openQueues.get(accountId) ?? new Set();
+  siblings.add(enqueue);
+  openQueues.set(accountId, siblings);
+
+  const push = (update: MaxUpdate): void => {
+    if (!closed && pending >= pendingLimit) {
       warn?.(
         `[${accountId}] MAX webhook queue full (${pendingLimit}); dropping ${update.update_type}`,
       );
       return;
     }
-    pending += 1;
-    inbox.push(update);
-    wake?.();
+    enqueue({ update });
   };
-  const siblings = openQueues.get(accountId) ?? new Set();
-  siblings.add(push);
-  openQueues.set(accountId, siblings);
+
+  const admit: MaxWebhookUpdateQueue['admit'] = async (update, dedupeKey) => {
+    const staleMs = staleMaxUpdateAgeMs(update, maxAgeMs, now());
+    if (staleMs !== undefined) {
+      warn?.(
+        `[${accountId}] MAX webhook: ${update.update_type} from ${Math.round(staleMs / 60_000)} min ago skipped (older than maxEventAgeMinutes)`,
+      );
+      return 'stale';
+    }
+    if (journal && dedupeKey && journal.isDuplicate(dedupeKey)) return 'duplicate';
+    if (!closed && pending >= pendingLimit) {
+      if (overflow === 'reject') {
+        throw new MaxWebhookQueueRejectedError(
+          `MAX webhook queue full (${pendingLimit} pending); ${update.update_type} refused for redelivery`,
+        );
+      }
+      warn?.(
+        `[${accountId}] MAX webhook queue full (${pendingLimit}); dropping ${update.update_type}`,
+      );
+      return 'dropped';
+    }
+    const entry = journal ? await journal.append(update, dedupeKey) : undefined;
+    enqueue({ update, entry });
+    return 'queued';
+  };
+
+  const recover: MaxWebhookUpdateQueue['recover'] = async () => {
+    if (!journal) return { recovered: 0, stale: 0, unreadable: 0 };
+    const { entries, unreadable } = await journal.readPending();
+    const recovered: QueuedUpdate[] = [];
+    let stale = 0;
+    for (const entry of entries) {
+      if (staleMaxUpdateAgeMs(entry.update, maxAgeMs, now(), entry.receivedAt) !== undefined) {
+        stale += 1;
+        await journal.complete(entry);
+        continue;
+      }
+      recovered.push({ update: entry.update, entry });
+    }
+    if (recovered.length > 0) {
+      if (closed) {
+        for (const item of recovered) enqueue(item);
+      } else {
+        // An earlier process accepted these before anything queued here.
+        inbox.unshift(...recovered);
+        pending += recovered.length;
+        wake?.();
+      }
+    }
+    return { recovered: recovered.length, stale, unreadable };
+  };
 
   /** Stop accepting and pass undispatched updates (lanes first, then inbox) on. */
-  const close = (fromLanes: MaxUpdate[], settled: Promise<void>): void => {
+  const close = (fromLanes: QueuedUpdate[], settled: Promise<void>): void => {
     if (closed) return;
     closed = true;
     wake = undefined;
-    siblings.delete(push);
+    siblings.delete(enqueue);
     if (siblings.size === 0 && openQueues.get(accountId) === siblings) {
       openQueues.delete(accountId);
     }
@@ -118,7 +245,7 @@ export function createMaxWebhookUpdateQueue(params: {
     const successor = [...siblings].at(-1);
     if (successor) {
       // A newer task of this account is already consuming: queue there.
-      for (const update of leftover) successor(update);
+      for (const item of leftover) successor(item);
       warn?.(
         `[${accountId}] MAX webhook stopped with ${leftover.length} update(s) not dispatched; moved to the running successor`,
       );
@@ -137,17 +264,17 @@ export function createMaxWebhookUpdateQueue(params: {
     onError,
     onWarn,
   }) => {
-    warn = onWarn;
-    const lanes = new Map<string, MaxUpdate[]>();
+    if (onWarn) warn = onWarn;
+    const lanes = new Map<string, QueuedUpdate[]>();
     const ready: string[] = [];
     const active = new Set<string>();
     const inflight = new Set<Promise<void>>();
 
-    const route = (update: MaxUpdate): void => {
-      const lane = maxWebhookUpdateLane(update);
+    const route = (item: QueuedUpdate): void => {
+      const lane = maxWebhookUpdateLane(item.update);
       const queued = lanes.get(lane);
-      if (queued) queued.push(update);
-      else lanes.set(lane, [update]);
+      if (queued) queued.push(item);
+      else lanes.set(lane, [item]);
       if (!active.has(lane) && !ready.includes(lane)) ready.push(lane);
     };
 
@@ -155,14 +282,16 @@ export function createMaxWebhookUpdateQueue(params: {
       try {
         for (;;) {
           if (abortSignal.aborted) return;
-          const update = lanes.get(lane)?.shift();
-          if (!update) return;
+          const item = lanes.get(lane)?.shift();
+          if (!item) return;
           pending -= 1;
           try {
-            await dispatch(update);
+            await dispatch(item.update);
           } catch (err) {
-            onError(err, update);
+            onError(err, item.update);
           }
+          // Handled or failed alike: a failed turn is not replayed (0.7 semantics).
+          if (item.entry) await journal?.complete(item.entry);
         }
       } finally {
         active.delete(lane);
@@ -200,14 +329,14 @@ export function createMaxWebhookUpdateQueue(params: {
         await waitAtMost(previous.settled, handoverWaitMs, abortSignal);
       }
       while (!abortSignal.aborted) {
-        while (inbox.length > 0) route(inbox.shift() as MaxUpdate);
+        while (inbox.length > 0) route(inbox.shift() as QueuedUpdate);
         pump();
         await nextWake();
         wake = undefined;
       }
     } finally {
       abortSignal.removeEventListener('abort', onAbort);
-      const leftover: MaxUpdate[] = [];
+      const leftover: QueuedUpdate[] = [];
       for (const queued of lanes.values()) leftover.push(...queued);
       lanes.clear();
       const settled = Promise.allSettled([...inflight]).then(() => undefined);
@@ -216,7 +345,7 @@ export function createMaxWebhookUpdateQueue(params: {
     }
   };
 
-  return { push, consume, close: () => close([], Promise.resolve()) };
+  return { admit, push, recover, consume, close: () => close([], Promise.resolve()) };
 }
 
 /** Resolves when `promise` settles, `ms` elapse or `signal` aborts — whichever is first. */

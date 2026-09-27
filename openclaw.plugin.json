@@ -563,6 +563,36 @@
                 "type": "number",
                 "exclusiveMinimum": 0
               },
+              "webhookQueue": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "durable",
+                      "memory"
+                    ]
+                  },
+                  "maxPending": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "overflow": {
+                    "type": "string",
+                    "enum": [
+                      "reject",
+                      "drop"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "description": "Webhook queue. mode \"durable\" (default): every accepted update is written to the plugin state directory before MAX gets its 200, so a gateway restart or crash does not lose it; handled updates are deleted. mode \"memory\": the 0.7 in-memory queue. maxPending (default 5000) bounds accepted but unhandled updates; when full, overflow \"reject\" (default) answers 503 so MAX redelivers later, \"drop\" acknowledges and drops."
+              },
+              "maxEventAgeMinutes": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Messages, edits, button presses and bot_started older than this many minutes (by MAX event time) are skipped instead of answered, so after a long outage the bot does not reply to hours-old messages (webhook and the queue recovered after a restart). Default 60; 0 answers any age."
+              },
               "mediaMaxCount": {
                 "type": "integer",
                 "minimum": 1,

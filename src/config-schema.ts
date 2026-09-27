@@ -105,6 +105,28 @@ export const MaxAccountSchemaBase = z
     /** File holding the webhook secret (regular file, not a symlink) */
     webhookSecretFile: z.string().optional(),
     webhookPath: z.string().optional(),
+    /**
+     * Webhook queue: "durable" (default) journals every accepted update before
+     * MAX gets its 200, so a restart or crash does not lose it; "memory" keeps
+     * the 0.7 in-memory queue. maxPending (default 5000) bounds accepted but
+     * unhandled updates; when full, overflow "reject" (default) answers 503
+     * so MAX redelivers later, "drop" acknowledges and drops.
+     */
+    webhookQueue: z
+      .object({
+        mode: z.enum(['durable', 'memory']).optional(),
+        maxPending: z.number().int().positive().optional(),
+        overflow: z.enum(['reject', 'drop']).optional(),
+      })
+      .strict()
+      .optional(),
+    /**
+     * Messages, edits, button presses and bot_started older than this many
+     * minutes (by MAX event time) are skipped instead of answered: after a
+     * long outage the bot does not reply to hours-old messages. Default 60;
+     * 0 answers any age.
+     */
+    maxEventAgeMinutes: z.number().int().min(0).optional(),
     historyLimit: z.number().int().min(0).optional(),
     dmHistoryLimit: z.number().int().min(0).optional(),
     dms: z.record(z.string(), DmConfigSchema.optional()).optional(),

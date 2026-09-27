@@ -401,7 +401,7 @@ describe('MAX Webhook Handler', () => {
       unregister();
     });
 
-    it('should ack 200 and log onUpdate errors asynchronously', async () => {
+    it('answers 503 when the update could not be queued, and takes the redelivery', async () => {
       const mockAccount: ResolvedMaxAccount = {
         accountId: 'default',
         enabled: true,
@@ -409,7 +409,10 @@ describe('MAX Webhook Handler', () => {
         tokenSource: 'config',
         config: {},
       };
-      const onUpdate = vi.fn().mockRejectedValue(new Error('Processing failed'));
+      const onUpdate = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('disk full'))
+        .mockResolvedValueOnce(undefined);
       const errorLog = vi.fn();
       const target: MaxWebhookTarget = {
         account: mockAccount,
@@ -420,26 +423,31 @@ describe('MAX Webhook Handler', () => {
         error: errorLog,
       };
       const unregister = registerMaxWebhookTarget(target);
+      const body = JSON.stringify({
+        update_type: 'message_created',
+        timestamp: 5,
+        message: { body: { mid: 'mid-503' } },
+      });
+      const send = async () => {
+        const res = createMockResponse();
+        await handleMaxWebhookRequest(
+          createMockRequest('POST', '/error-test', { 'x-max-bot-api-secret': 'err-secret' }, body),
+          res,
+        );
+        return res;
+      };
 
-      const req = createMockRequest(
-        'POST',
-        '/error-test',
-        { 'x-max-bot-api-secret': 'err-secret' },
-        JSON.stringify({ update_type: 'bot_started', timestamp: Date.now() }),
-      );
-      const res = createMockResponse();
-
-      await handleMaxWebhookRequest(req, res);
-
-      // MAX only needs the 200; a processing failure must not trigger redelivery.
-      expect(res._status).toBe(200);
-      await vi.waitFor(() => expect(errorLog).toHaveBeenCalled());
-      expect(String(errorLog.mock.calls[0][0])).toContain('Processing failed');
+      // Not recorded: MAX must redeliver instead of losing the update.
+      expect((await send())._status).toBe(503);
+      expect(String(errorLog.mock.calls[0][0])).toContain('disk full');
+      // The redelivery is not taken for a duplicate of the failed attempt.
+      expect((await send())._status).toBe(200);
+      expect(onUpdate).toHaveBeenCalledTimes(2);
 
       unregister();
     });
 
-    it('should answer 200 before a slow update finishes', async () => {
+    it('answers only after onUpdate has recorded the update', async () => {
       let release!: () => void;
       const onUpdate = vi.fn(
         () =>
@@ -462,7 +470,7 @@ describe('MAX Webhook Handler', () => {
       });
 
       const res = createMockResponse();
-      await handleMaxWebhookRequest(
+      const handled = handleMaxWebhookRequest(
         createMockRequest(
           'POST',
           '/slow',
@@ -471,9 +479,11 @@ describe('MAX Webhook Handler', () => {
         ),
         res,
       );
-      expect(res._status).toBe(200);
       await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
+      expect(res._status).toBeUndefined();
       release();
+      await handled;
+      expect(res._status).toBe(200);
       unregister();
     });
 

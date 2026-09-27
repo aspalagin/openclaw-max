@@ -280,6 +280,8 @@ describe('MAX Account Resolution', () => {
       actionScope: 'current',
       notify: false,
       disableLinkPreview: true,
+      webhookQueue: { mode: 'memory', maxPending: 100, overflow: 'drop' },
+      maxEventAgeMinutes: 0,
     };
 
     it('inherits every channel-level option the account does not set', () => {
@@ -300,6 +302,8 @@ describe('MAX Account Resolution', () => {
         actionScope: 'current',
         notify: false,
         disableLinkPreview: true,
+        webhookQueue: { mode: 'memory', maxPending: 100, overflow: 'drop' },
+        maxEventAgeMinutes: 0,
       });
     });
 

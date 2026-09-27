@@ -46,6 +46,10 @@ export type MaxWebhookTarget = {
   config: OpenClawConfig;
   path: string;
   secret?: string;
+  /**
+   * Awaited before MAX gets its 200: must only record/enqueue (never dispatch).
+   * A rejection answers 503 so MAX redelivers the update.
+   */
   onUpdate: (update: MaxUpdate) => Promise<void>;
   log?: (message: string) => void;
   error?: (message: string) => void;
@@ -199,32 +203,38 @@ export async function handleMaxWebhookRequest(
 
   const update = raw as MaxUpdate;
 
-  // MAX needs 200 within 30 s while an agent turn can take minutes: ack first,
-  // then hand the update to the account task. Errors are logged, never turned
-  // into a non-200 (that would only make MAX redeliver and eventually
-  // unsubscribe the bot). onUpdate must only enqueue: this request's work
-  // admission is released when the handler returns, so agent/session work
-  // started from here would fail with GatewayDrainingError.
-  res.statusCode = 200;
-  res.setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify({ ok: true }));
-
   const dedupeKey = maxUpdateDedupeKey(update);
   if (dedupeKey && rememberUpdate(matchedTarget.seen, dedupeKey)) {
     matchedTarget.log?.(
       `[${matchedTarget.account.accountId}] MAX webhook: duplicate ${dedupeKey} skipped`,
     );
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ ok: true }));
     return true;
   }
 
-  void Promise.resolve()
-    .then(() => matchedTarget.onUpdate(update))
-    .catch((err: unknown) => {
-      matchedTarget.error?.(
-        `[${matchedTarget.account.accountId}] Webhook update processing failed: ${String(err)}`,
-      );
-    });
+  // MAX needs 200 within 30 s while an agent turn can take minutes: onUpdate
+  // only records the update (durable journal) and enqueues it for the account
+  // task, then MAX gets its 200. It must not dispatch: this request's work
+  // admission is released when the handler returns, so agent/session work
+  // started from here would fail with GatewayDrainingError. When the update
+  // could not be recorded, 503 makes MAX redeliver it instead of losing it.
+  try {
+    await matchedTarget.onUpdate(update);
+  } catch (err) {
+    if (dedupeKey) matchedTarget.seen.delete(dedupeKey);
+    matchedTarget.error?.(
+      `[${matchedTarget.account.accountId}] MAX webhook: ${update.update_type} not queued, answering 503 for redelivery: ${String(err)}`,
+    );
+    res.statusCode = 503;
+    res.end('Service Unavailable');
+    return true;
+  }
 
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify({ ok: true }));
   return true;
 }
 

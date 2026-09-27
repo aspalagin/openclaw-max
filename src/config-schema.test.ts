@@ -329,3 +329,21 @@ describe('openclaw.plugin.json channel schema', () => {
     expect(parsed.accounts?.two).toEqual({ botToken: 't' });
   });
 });
+
+describe('webhook queue options', () => {
+  it('accepts the queue mode, bounds, overflow policy and an age limit of 0', () => {
+    const parsed = MaxAccountSchema.parse({
+      webhookQueue: { mode: 'memory', maxPending: 10, overflow: 'drop' },
+      maxEventAgeMinutes: 0,
+    });
+    expect(parsed.webhookQueue).toEqual({ mode: 'memory', maxPending: 10, overflow: 'drop' });
+    expect(parsed.maxEventAgeMinutes).toBe(0);
+  });
+
+  it('rejects unknown queue keys, a non-positive maxPending and a negative age', () => {
+    expect(() => MaxAccountSchema.parse({ webhookQueue: { size: 1 } })).toThrow();
+    expect(() => MaxAccountSchema.parse({ webhookQueue: { maxPending: 0 } })).toThrow();
+    expect(() => MaxAccountSchema.parse({ webhookQueue: { overflow: 'block' } })).toThrow();
+    expect(() => MaxAccountSchema.parse({ maxEventAgeMinutes: -1 })).toThrow();
+  });
+});
