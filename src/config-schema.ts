@@ -3,7 +3,7 @@
  */
 
 import { MarkdownConfigSchema, ToolPolicySchema } from 'openclaw/plugin-sdk/channel-config-schema';
-import { registerSensitiveConfigSchema } from 'openclaw/plugin-sdk/secret-input';
+import { buildOptionalSecretInputSchema } from 'openclaw/plugin-sdk/secret-input';
 import { z } from 'zod';
 
 // Policy fields are built with this package's own zod: wrapping the SDK's enum
@@ -75,7 +75,8 @@ export const MaxAccountSchemaBase = z
     name: z.string().optional(),
     enabled: z.boolean().optional(),
     markdown: MarkdownConfigSchema.optional(),
-    botToken: z.string().optional(),
+    /** Plain token or a core SecretRef { source, provider, id } (also webhookSecret, httpProxy) */
+    botToken: buildOptionalSecretInputSchema(),
     tokenFile: z.string().optional(),
     /** Default "pairing" (applied where read); named accounts inherit the channel value. */
     dmPolicy: DmPolicySchema.optional(),
@@ -88,7 +89,7 @@ export const MaxAccountSchemaBase = z
     transport: z.enum(['polling', 'webhook']).optional(),
     webhookUrl: z.string().optional(),
     /** MAX secret: 5–256 of [A-Za-z0-9_-]; checked at start */
-    webhookSecret: z.string().optional(),
+    webhookSecret: buildOptionalSecretInputSchema(),
     /** File holding the webhook secret (regular file, not a symlink) */
     webhookSecretFile: z.string().optional(),
     webhookPath: z.string().optional(),
@@ -125,9 +126,9 @@ export const MaxAccountSchemaBase = z
     /**
      * HTTP(S) proxy for all MAX traffic of the account (API, uploads, media
      * downloads), e.g. http://user:pass@host:3128; "" turns an inherited one
-     * off. Sensitive: credentials are never logged.
+     * off. Sensitive: credentials are never logged. Accepts a SecretRef.
      */
-    httpProxy: registerSensitiveConfigSchema(z.string()).optional(),
+    httpProxy: buildOptionalSecretInputSchema(),
     actions: z
       .record(
         z.string(),

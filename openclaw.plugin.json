@@ -68,7 +68,106 @@
                 "type": "object"
               },
               "botToken": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "const": "env"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                          },
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[A-Z][A-Z0-9_]{0,127}$"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "provider",
+                          "id"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "const": "store"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                          },
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[A-Z][A-Z0-9_]{0,127}$"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "provider",
+                          "id"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "const": "file"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                          },
+                          "id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "provider",
+                          "id"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "const": "exec"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                          },
+                          "id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "provider",
+                          "id"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                ],
+                "description": "MAX Bot API token, or a SecretRef to it ({ source: env|file|exec|store, provider, id }) resolved by the gateway before the account starts. Alternatives: tokenFile, MAX_BOT_TOKEN (default account)."
               },
               "tokenFile": {
                 "type": "string"
@@ -117,8 +216,106 @@
                 "description": "Public HTTPS URL (port 443, trusted CA) MAX posts updates to; its path is served on the gateway HTTP server."
               },
               "webhookSecret": {
-                "type": "string",
-                "description": "X-Max-Bot-Api-Secret value, 5-256 of A-Z a-z 0-9 _ -. Prefer webhookSecretFile; generated and kept in the account state file when neither is set."
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "const": "env"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                          },
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[A-Z][A-Z0-9_]{0,127}$"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "provider",
+                          "id"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "const": "store"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                          },
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[A-Z][A-Z0-9_]{0,127}$"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "provider",
+                          "id"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "const": "file"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                          },
+                          "id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "provider",
+                          "id"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "const": "exec"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                          },
+                          "id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "provider",
+                          "id"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                ],
+                "description": "X-Max-Bot-Api-Secret value, 5-256 of A-Z a-z 0-9 _ -. Prefer webhookSecretFile; generated and kept in the account state file when neither is set. Accepts a SecretRef."
               },
               "webhookSecretFile": {
                 "type": "string",
@@ -216,8 +413,106 @@
                 "description": "MAX Bot API base URL (default https://platform-api2.max.ru), e.g. a test stand; a path prefix is kept. https only; http is accepted just for loopback hosts, so the bot token never travels unencrypted. A bad value stops the account at start with an error. Named accounts inherit the channel-level value."
               },
               "httpProxy": {
-                "type": "string",
-                "description": "HTTP(S) proxy for all outbound MAX traffic of the account: Bot API calls, file uploads and media downloads, e.g. http://user:pass@proxy.example:3128. MAX TLS (Russian Trusted CA included) is verified inside the tunnel; loopback targets bypass the proxy. Credentials are never logged. Named accounts inherit the channel-level value; \"\" turns an inherited proxy off."
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "const": "env"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                          },
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[A-Z][A-Z0-9_]{0,127}$"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "provider",
+                          "id"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "const": "store"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                          },
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[A-Z][A-Z0-9_]{0,127}$"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "provider",
+                          "id"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "const": "file"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                          },
+                          "id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "provider",
+                          "id"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "const": "exec"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                          },
+                          "id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "provider",
+                          "id"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                ],
+                "description": "HTTP(S) proxy for all outbound MAX traffic of the account: Bot API calls, file uploads and media downloads, e.g. http://user:pass@proxy.example:3128. MAX TLS (Russian Trusted CA included) is verified inside the tunnel; loopback targets bypass the proxy. Credentials are never logged. Named accounts inherit the channel-level value; \"\" turns an inherited proxy off. Accepts a SecretRef (e.g. when the URL carries credentials)."
               },
               "actions": {
                 "type": "object",
@@ -280,6 +575,26 @@
         }
       },
       "uiHints": {
+        "botToken": {
+          "label": "Bot token",
+          "help": "MAX Bot API token or a SecretRef to it.",
+          "sensitive": true
+        },
+        "webhookSecret": {
+          "label": "Webhook secret",
+          "sensitive": true,
+          "advanced": true
+        },
+        "accounts.*.botToken": {
+          "label": "Bot token",
+          "help": "MAX Bot API token or a SecretRef to it.",
+          "sensitive": true
+        },
+        "accounts.*.webhookSecret": {
+          "label": "Webhook secret",
+          "sensitive": true,
+          "advanced": true
+        },
         "apiBaseUrl": {
           "label": "API base URL",
           "placeholder": "https://platform-api2.max.ru",

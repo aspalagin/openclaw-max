@@ -13,7 +13,12 @@ import {
   setAccountEnabledInConfigSection,
 } from 'openclaw/plugin-sdk/core';
 
-import { listMaxAccountIds, type ResolvedMaxAccount, resolveMaxAccount } from './accounts.js';
+import {
+  isMaxAccountConfigured,
+  listMaxAccountIds,
+  type ResolvedMaxAccount,
+  resolveMaxAccount,
+} from './accounts.js';
 
 type MaxChannelPlugin = ChannelPlugin<ResolvedMaxAccount>;
 
@@ -40,14 +45,17 @@ export const maxConfigAdapter: NonNullable<MaxChannelPlugin['config']> = {
       clearBaseFields: ['botToken', 'tokenFile', 'name'],
     }),
 
-  isConfigured: (account) => Boolean(account.token?.trim()),
+  // An unresolved SecretRef token counts as configured: startAccount then
+  // fails with its config path instead of the account being silently skipped.
+  isConfigured: (account) => isMaxAccountConfigured(account),
 
   describeAccount: (account) => ({
     accountId: account.accountId,
     name: account.name,
     enabled: account.enabled,
-    configured: Boolean(account.token?.trim()),
+    configured: isMaxAccountConfigured(account),
     tokenSource: account.tokenSource,
+    tokenStatus: account.tokenStatus,
   }),
 
   resolveAllowFrom: ({ cfg, accountId }) =>

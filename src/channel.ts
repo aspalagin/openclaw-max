@@ -29,6 +29,7 @@ import {
   buildMaxModelsProviderChannelData,
 } from './model-buttons.js';
 import { maxSetupWizard } from './onboarding.js';
+import { maxChannelSecrets } from './secret-contract.js';
 import { sendMaxHeartbeatTyping } from './typing.js';
 
 // ── Meta ──
@@ -102,6 +103,9 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
   directory: maxDirectoryAdapter,
   outbound: maxOutboundAdapter,
   setup: maxSetupAdapter,
+  // botToken, webhookSecret, httpProxy accept SecretRefs (also exported as
+  // dist/secret-contract-api.js for the gateway's pre-runtime resolution).
+  secrets: maxChannelSecrets,
   status: maxStatusAdapter,
   gateway: maxGatewayAdapter,
   heartbeat: { sendTyping: sendMaxHeartbeatTyping, sendTypingGuarded: sendMaxHeartbeatTyping },

@@ -7,7 +7,12 @@ import type { ChannelPlugin } from 'openclaw/plugin-sdk/channel-core';
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
 import { DEFAULT_ACCOUNT_ID } from 'openclaw/plugin-sdk/core';
 
-import { type ResolvedMaxAccount, resolveMaxAccountNetwork } from './accounts.js';
+import {
+  isMaxAccountConfigured,
+  MaxSecretConfigError,
+  type ResolvedMaxAccount,
+  resolveMaxAccountNetwork,
+} from './accounts.js';
 import { MaxApi } from './api.js';
 import { startMaxPolling } from './monitor.js';
 import { DEFAULT_MAX_API_BASE_URL, redactProxyUrl } from './network.js';
@@ -54,8 +59,9 @@ export const maxStatusAdapter: NonNullable<MaxChannelPlugin['status']> = {
     accountId: account.accountId,
     name: account.name,
     enabled: account.enabled,
-    configured: Boolean(account.token?.trim()),
+    configured: isMaxAccountConfigured(account),
     tokenSource: account.tokenSource,
+    tokenStatus: account.tokenStatus,
     running: runtime?.running ?? false,
     ...(runtime?.lifecycle !== undefined ? { lifecycle: runtime.lifecycle } : {}),
     ...(typeof runtime?.connected === 'boolean' ? { connected: runtime.connected } : {}),
@@ -178,6 +184,10 @@ export const maxStatusAdapter: NonNullable<MaxChannelPlugin['status']> = {
 export const maxGatewayAdapter: NonNullable<MaxChannelPlugin['gateway']> = {
   startAccount: async (ctx) => {
     const account = ctx.account;
+    // Path and ref only; the gateway normally isolates such an account itself.
+    if (account.secretErrors?.botToken) {
+      throw new MaxSecretConfigError(account.secretErrors.botToken);
+    }
     const token = account.token.trim();
     // A bad apiBaseUrl/httpProxy stops the account with a clear error rather
     // than letting it connect directly or to the wrong host.

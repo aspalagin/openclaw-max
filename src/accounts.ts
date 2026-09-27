@@ -7,6 +7,8 @@ import { lstatSync, readFileSync } from 'node:fs';
 import { mergeAccountConfig } from 'openclaw/plugin-sdk/account-core';
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from 'openclaw/plugin-sdk/core';
+import { resolveSecretInputString } from 'openclaw/plugin-sdk/secret-input';
+import { canResolveEnvSecretRefInReadOnlyPath } from 'openclaw/plugin-sdk/secret-ref-readonly';
 
 import {
   bindMaxNetwork,
@@ -14,6 +16,7 @@ import {
   MaxNetworkConfigError,
   resolveMaxNetwork,
 } from './network.js';
+import type { MaxSecretField } from './secret-contract.js';
 
 export interface MaxAccountConfig {
   enabled?: boolean;
@@ -56,6 +59,18 @@ export interface ResolvedMaxAccount {
   enabled: boolean;
   token: string;
   tokenSource: 'config' | 'env' | 'file' | 'none';
+  /**
+   * available — a token was found; configured_unavailable — botToken is a
+   * SecretRef the gateway did not resolve; missing — no token anywhere.
+   */
+  tokenStatus?: 'available' | 'configured_unavailable' | 'missing';
+  /**
+   * Options set to a SecretRef that did not resolve: config path and ref, never
+   * a value. The account does not start; it never falls back to a
+   * lower-precedence source (token file, MAX_BOT_TOKEN, no proxy, generated
+   * webhook secret).
+   */
+  secretErrors?: Partial<Record<MaxSecretField, string>>;
   /**
    * Account settings; a named account inherits every channel-level value it
    * does not set itself, except MAX_ACCOUNT_OWN_KEYS.
@@ -107,6 +122,46 @@ function readTokenFile(tokenFile?: string): string {
   }
 }
 
+/** Thrown at account start for an option whose SecretRef did not resolve. */
+export class MaxSecretConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MaxSecretConfigError';
+  }
+}
+
+type SecretOption = { value?: string; error?: string };
+
+/**
+ * A secret-capable option: a plain string, or a SecretRef the gateway has
+ * already replaced by its value in the runtime snapshot. A ref still present
+ * is unresolved — except an env ref the read-only SDK check allows (CLI and
+ * status paths without a gateway snapshot, as core channels do).
+ */
+function readSecretOption(cfg: OpenClawConfig, value: unknown, path: string): SecretOption {
+  const resolved = resolveSecretInputString({
+    value,
+    path,
+    defaults: cfg.secrets?.defaults,
+    mode: 'inspect',
+  });
+  if (resolved.status === 'available') return { value: resolved.value };
+  if (resolved.status === 'missing') return {};
+  const { ref } = resolved;
+  if (
+    ref.source === 'env' &&
+    canResolveEnvSecretRefInReadOnlyPath({ cfg, provider: ref.provider, id: ref.id })
+  ) {
+    const fromEnv = process.env[ref.id]?.trim();
+    if (fromEnv) return { value: fromEnv };
+  }
+  return {
+    error:
+      `MAX ${path} is a SecretRef (${ref.source}:${ref.provider}:${ref.id}) that did not ` +
+      'resolve; check the secret and secrets.providers (openclaw secrets audit)',
+  };
+}
+
 /**
  * List all MAX account IDs from config.
  */
@@ -155,19 +210,29 @@ export function maxAccountConfigPath(accountId: string): string {
  * MaxNetworkConfigError with the config path; never echoes proxy credentials.
  */
 export function resolveMaxAccountNetwork(account: ResolvedMaxAccount): MaxNetwork {
+  const proxyError = account.secretErrors?.httpProxy;
+  if (proxyError) throw new MaxNetworkConfigError(proxyError);
   return resolveMaxNetwork(account.config, maxAccountConfigPath(account.accountId));
 }
 
 function resolveAccountNetwork(
   accountId: string,
   config: MaxAccountConfig,
+  proxyError: string | undefined,
 ): MaxNetwork | { error: MaxNetworkConfigError } {
+  // An unresolved proxy ref must not mean "connect directly".
+  if (proxyError) return { error: new MaxNetworkConfigError(proxyError) };
   try {
     return resolveMaxNetwork(config, maxAccountConfigPath(accountId));
   } catch (err) {
     if (err instanceof MaxNetworkConfigError) return { error: err };
     throw err;
   }
+}
+
+/** A token was found, or botToken is a SecretRef that did not resolve. */
+export function isMaxAccountConfigured(account: ResolvedMaxAccount): boolean {
+  return Boolean(account.token?.trim()) || account.tokenStatus === 'configured_unavailable';
 }
 
 /**
@@ -185,6 +250,7 @@ export function resolveMaxAccount(params: {
   let accountConfig: MaxAccountConfig;
   let token = '';
   let tokenSource: ResolvedMaxAccount['tokenSource'] = 'none';
+  const secretErrors: NonNullable<ResolvedMaxAccount['secretErrors']> = {};
 
   if (accountId === DEFAULT_ACCOUNT_ID) {
     // Default account: top-level config
@@ -214,14 +280,18 @@ export function resolveMaxAccount(params: {
       httpProxy: section.httpProxy as string | undefined,
     };
 
-    if (accountConfig.botToken?.trim()) {
-      token = accountConfig.botToken.trim();
+    const botToken = readSecretOption(cfg, section.botToken, 'channels.max.botToken');
+    if (botToken.value) {
+      token = botToken.value;
       tokenSource = 'config';
+    } else if (botToken.error) {
+      tokenSource = 'config';
+      secretErrors.botToken = botToken.error;
     } else if (accountConfig.tokenFile?.trim()) {
       token = readTokenFile(accountConfig.tokenFile);
       tokenSource = token ? 'file' : 'none';
     }
-    if (!token && process.env.MAX_BOT_TOKEN?.trim()) {
+    if (!token && !botToken.error && process.env.MAX_BOT_TOKEN?.trim()) {
       token = process.env.MAX_BOT_TOKEN.trim();
       tokenSource = 'env';
     }
@@ -239,18 +309,52 @@ export function resolveMaxAccount(params: {
       enabled: section.enabled !== false && raw.enabled !== false,
     } as MaxAccountConfig;
 
-    if (accountConfig.botToken?.trim()) {
-      token = accountConfig.botToken.trim();
+    const botToken = readSecretOption(
+      cfg,
+      raw.botToken,
+      `${maxAccountConfigPath(accountId)}.botToken`,
+    );
+    if (botToken.value) {
+      token = botToken.value;
       tokenSource = 'config';
+    } else if (botToken.error) {
+      tokenSource = 'config';
+      secretErrors.botToken = botToken.error;
     } else if (accountConfig.tokenFile?.trim()) {
       token = readTokenFile(accountConfig.tokenFile);
       tokenSource = token ? 'file' : 'none';
     }
   }
+  // From here on a SecretRef option holds its value, or is absent.
+  const setResolved = (key: MaxSecretField, value: string | undefined) => {
+    if (!(key in accountConfig)) return;
+    if (value === undefined) delete accountConfig[key];
+    else accountConfig[key] = value;
+  };
+  setResolved('botToken', tokenSource === 'config' && token ? token : undefined);
+
+  // The webhook secret is per-bot; a named account's proxy may be inherited.
+  const webhookSecret = readSecretOption(
+    cfg,
+    accountConfig.webhookSecret,
+    `${maxAccountConfigPath(accountId)}.webhookSecret`,
+  );
+  setResolved('webhookSecret', webhookSecret.value);
+  if (webhookSecret.error) secretErrors.webhookSecret = webhookSecret.error;
+  const ownProxy =
+    accountId === DEFAULT_ACCOUNT_ID || Object.hasOwn(accounts?.[accountId] ?? {}, 'httpProxy');
+  const httpProxy = readSecretOption(
+    cfg,
+    accountConfig.httpProxy,
+    `${ownProxy ? maxAccountConfigPath(accountId) : 'channels.max'}.httpProxy`,
+  );
+  // "" still turns an inherited proxy off.
+  setResolved('httpProxy', httpProxy.value ?? (accountConfig.httpProxy === '' ? '' : undefined));
+  if (httpProxy.error) secretErrors.httpProxy = httpProxy.error;
 
   // Every MaxApi built for this token (any send/action/lifecycle path) uses
   // the account's API base URL and proxy — or fails with their config error.
-  bindMaxNetwork(token, resolveAccountNetwork(accountId, accountConfig));
+  bindMaxNetwork(token, resolveAccountNetwork(accountId, accountConfig, secretErrors.httpProxy));
 
   return {
     accountId,
@@ -258,6 +362,8 @@ export function resolveMaxAccount(params: {
     enabled: accountConfig.enabled ?? true,
     token,
     tokenSource,
+    tokenStatus: token ? 'available' : secretErrors.botToken ? 'configured_unavailable' : 'missing',
+    ...(Object.keys(secretErrors).length > 0 ? { secretErrors } : {}),
     config: accountConfig,
   };
 }

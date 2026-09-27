@@ -48,6 +48,9 @@ export async function resolveMaxWebhookSecret(
     return secret;
   };
 
+  // A webhookSecret SecretRef that did not resolve never falls back to the
+  // file or a generated secret.
+  if (account.secretErrors?.webhookSecret) throw new Error(account.secretErrors.webhookSecret);
   const configured = account.config.webhookSecret?.trim();
   if (configured) return validate(configured, 'webhookSecret');
 
