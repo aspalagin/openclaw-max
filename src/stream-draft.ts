@@ -9,7 +9,13 @@
 import type { ChannelLogSink } from 'openclaw/plugin-sdk/channel-contract';
 
 import type { ResolvedMaxAccount } from './accounts.js';
-import { deleteMaxMessage, editMaxMessage, type MaxSendButton, sendMaxMessage } from './send.js';
+import {
+  deleteMaxMessage,
+  editMaxMessage,
+  type MaxSendButton,
+  resolveMaxSendFlags,
+  sendMaxMessage,
+} from './send.js';
 
 const DRAFT_THROTTLE_MS = 1200;
 const DRAFT_MAX_CHARS = 4000;
@@ -78,10 +84,12 @@ export function createMaxDraftStream(params: {
     try {
       if (!draftMid) {
         // First chunk — send new message
+        // The draft is the message the user is notified about: account defaults apply.
         const res = await sendMaxMessage(chatId, trimmed, {
           token: account.token,
           replyToMessageId: params.replyToId,
           format: 'markdown',
+          ...resolveMaxSendFlags(account.config),
         });
         draftMid = res.messageId || null;
         statusSink?.({ lastOutboundAt: Date.now() });

@@ -20,7 +20,7 @@ import {
   type MaxLocalMediaAccess,
   pinMaxMessage,
   readMaxChannelButtons,
-  readMaxChannelSendOptions,
+  resolveMaxSendFlags,
   sendMaxMediaGroup,
   sendMaxMessage,
 } from './send.js';
@@ -100,7 +100,8 @@ export async function deliverMaxReply(params: {
   const { payload, account, chatId, config, log, statusSink } = params;
   const core = getMaxRuntime();
   const buttons = readMaxChannelButtons(payload.channelData);
-  const sendOptions = readMaxChannelSendOptions(payload.channelData);
+  // channelData.max (notify, silent, disableLinkPreview) beats the account defaults.
+  const sendOptions = resolveMaxSendFlags(account.config, { channelData: payload.channelData });
   const draftMid = payload.text ? (params.draft?.messageId ?? undefined) : undefined;
 
   if (params.callbackId && !draftMid && (payload.text || buttons?.length)) {

@@ -181,10 +181,15 @@ describe('outbound requests', () => {
     await sendMaxContact('1', { name: 'Bob', vcfPhone: '+70000000001' }, opts);
     await sendMaxSticker('1', 'abc123', opts);
 
-    expect(calls).toHaveLength(6);
+    // notify=false into a chat: one cached GET /chats/{chatId} rules out a channel.
+    const lookups = calls.filter((call) => call.method === 'GET');
+    expect(lookups.map((call) => call.url.pathname)).toEqual(['/chats/1']);
+    expect(schema.paths['/chats/{chatId}']?.get).toBeDefined();
+    const sends = calls.filter((call) => call.method !== 'GET');
+    expect(sends).toHaveLength(6);
     const newMessageBody = propertiesOf('NewMessageBody');
     const requestTypes = mappingKeys('AttachmentRequest');
-    for (const { method, url, body } of calls) {
+    for (const { method, url, body } of sends) {
       expect(`${method} ${url.pathname}`).toBe('POST /messages');
       expect(schema.paths['/messages']?.post).toBeDefined();
       expectSubset(Object.keys(body ?? {}), newMessageBody, 'NewMessageBody');
@@ -205,7 +210,7 @@ describe('outbound requests', () => {
         );
       }
     }
-    const contacts = calls
+    const contacts = sends
       .slice(3, 5)
       .map((call) => (call.body?.attachments as Array<{ payload: object }>)[0].payload);
     for (const payload of contacts) {

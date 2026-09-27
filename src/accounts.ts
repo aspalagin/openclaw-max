@@ -30,6 +30,10 @@ export interface MaxAccountConfig {
   markSeen?: boolean;
   /** Chats message-tool actions may act in (default "admitted"; see action-scope.ts) */
   actionScope?: 'admitted' | 'current' | 'off';
+  /** Default MAX `notify` of sent messages (default true); channels always notify */
+  notify?: boolean;
+  /** Default: send messages without link previews (MAX `disable_link_preview`) */
+  disableLinkPreview?: boolean;
 }
 
 export interface ResolvedMaxAccount {
@@ -140,6 +144,8 @@ export function resolveMaxAccount(params: {
       streamMode: section.streamMode as MaxAccountConfig['streamMode'],
       markSeen: section.markSeen as boolean | undefined,
       actionScope: section.actionScope as MaxAccountConfig['actionScope'],
+      notify: section.notify as boolean | undefined,
+      disableLinkPreview: section.disableLinkPreview as boolean | undefined,
     };
 
     if (accountConfig.botToken?.trim()) {
@@ -175,6 +181,10 @@ export function resolveMaxAccount(params: {
       streamMode: raw.streamMode as MaxAccountConfig['streamMode'],
       markSeen: raw.markSeen as boolean | undefined,
       actionScope: raw.actionScope as MaxAccountConfig['actionScope'],
+      // Send defaults fall back to the channel-level value.
+      notify: (raw.notify ?? section.notify) as boolean | undefined,
+      disableLinkPreview: (raw.disableLinkPreview ?? section.disableLinkPreview) as
+        boolean | undefined,
     };
 
     if (accountConfig.botToken?.trim()) {

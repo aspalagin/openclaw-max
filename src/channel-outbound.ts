@@ -19,6 +19,7 @@ import {
   type MaxLocalMediaAccess,
   pinMaxMessage,
   readMaxChannelButtons,
+  resolveMaxSendFlags,
   sendMaxMediaGroup,
   sendMaxMediaMessage,
   sendMaxMessage,
@@ -84,6 +85,10 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
       : rawPayload;
     const effectiveText = payload === rawPayload ? text : (payload.text ?? '');
     const buttons = readMaxChannelButtons(payload.channelData);
+    const sendFlags = resolveMaxSendFlags(account.config, {
+      silent: ctx.silent,
+      channelData: payload.channelData,
+    });
     const mediaUrls = mediaUrl
       ? [mediaUrl]
       : payload.mediaUrls?.length
@@ -100,6 +105,7 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
         replyToMessageId: replyToId ?? undefined,
         format: 'markdown',
         buttons,
+        ...sendFlags,
         mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
         localMedia: resolveOutboundLocalMedia(cfg, ctx),
       });
@@ -122,6 +128,7 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
         replyToMessageId: index === 0 ? (replyToId ?? undefined) : undefined,
         format: 'markdown',
         buttons: index === chunks.length - 1 ? buttons : undefined,
+        ...sendFlags,
       });
       if (index === 0) firstMessageId = result.messageId;
     }
@@ -132,7 +139,7 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
     };
   },
 
-  sendText: async ({ to, text, accountId, replyToId }) => {
+  sendText: async ({ to, text, accountId, replyToId, silent }) => {
     const cfg = await loadMaxConfig();
     const account = resolveMaxAccount({ cfg, accountId });
     if (!account.token) throw new Error('MAX bot token not configured');
@@ -141,6 +148,7 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
       token: account.token,
       replyToMessageId: replyToId ?? undefined,
       format: 'markdown',
+      ...resolveMaxSendFlags(account.config, { silent }),
     });
 
     return {
@@ -154,6 +162,7 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
     const cfg = await loadMaxConfig();
     const account = resolveMaxAccount({ cfg, accountId });
     if (!account.token) throw new Error('MAX bot token not configured');
+    const sendFlags = resolveMaxSendFlags(account.config, { silent: ctx.silent });
 
     if (!mediaUrl) {
       // No media, send as text
@@ -161,6 +170,7 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
         token: account.token,
         replyToMessageId: replyToId ?? undefined,
         format: 'markdown',
+        ...sendFlags,
       });
       return {
         channel: 'max',
@@ -173,6 +183,7 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
       token: account.token,
       replyToMessageId: replyToId ?? undefined,
       format: 'markdown',
+      ...sendFlags,
       mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
       localMedia: resolveOutboundLocalMedia(cfg, ctx),
     });

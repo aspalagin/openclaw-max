@@ -240,6 +240,32 @@ type MaxBodyAttachments = NonNullable<MaxNewMessageBody['attachments']>;
  * given (attachment-only bodies carry neither), notify, attachments and the
  * reply link.
  */
+/** Account defaults for notifications and link previews (config `notify`, `disableLinkPreview`). */
+export interface MaxSendDefaults {
+  notify?: boolean;
+  disableLinkPreview?: boolean;
+}
+
+/**
+ * Notification and link-preview options of one send. An explicit value of the
+ * call beats the account default: core's `silent` flag first, then
+ * channelData.max (`notify`, `silent`, `disableLinkPreview`). Unset fields stay
+ * unset, so MAX applies its own defaults (notify on, previews on).
+ */
+export function resolveMaxSendFlags(
+  defaults: MaxSendDefaults,
+  explicit: { silent?: boolean; channelData?: unknown } = {},
+): { notify?: boolean; disableLinkPreview?: boolean } {
+  const fromData = readMaxChannelSendOptions(explicit.channelData);
+  const notify =
+    typeof explicit.silent === 'boolean' ? !explicit.silent : (fromData.notify ?? defaults.notify);
+  const disableLinkPreview = fromData.disableLinkPreview ?? defaults.disableLinkPreview;
+  return {
+    ...(notify !== undefined ? { notify } : {}),
+    ...(disableLinkPreview !== undefined ? { disableLinkPreview } : {}),
+  };
+}
+
 function buildMaxBody(
   opts: MaxSendOptions,
   text: string | undefined,
@@ -300,7 +326,12 @@ async function sendWithBody(params: {
 }): Promise<MaxSendOutcome> {
   const { api, to, opts, retry } = params;
   const target = await resolveMaxTarget(api, to);
-  const body = typeof params.body === 'function' ? await params.body() : params.body;
+  let body = typeof params.body === 'function' ? await params.body() : params.body;
+  // MAX channels publish only with notifications (POST /messages: notify must
+  // be true or absent for a channel), so a silent send into a channel notifies.
+  if (body.notify === false && 'chat_id' in target && (await isMaxChannel(api, target.chat_id))) {
+    body = { ...body, notify: undefined };
+  }
   const sendTo = (to: MaxSendTarget) => {
     const sendParams = buildSendParams(to, opts);
     const send = () => api.sendMessage(body, sendParams);
@@ -321,6 +352,30 @@ async function sendWithBody(params: {
     messageId: result.message?.body?.mid ?? '',
     raw: result,
   };
+}
+
+/** Chat id → is a channel. A chat never changes its type, so this is never invalidated. */
+const channelChats = new Map<number, boolean>();
+
+/**
+ * Whether chat_id names a MAX channel (GET /chats/{chatId}, cached). A chat
+ * the bot does not know is not a channel (the send falls back to user_id);
+ * after any other lookup failure assume a channel: a notified post is better
+ * than a send MAX rejects.
+ */
+async function isMaxChannel(api: MaxApi, chatId: number): Promise<boolean> {
+  const cached = channelChats.get(chatId);
+  if (cached !== undefined) return cached;
+  let isChannel: boolean;
+  try {
+    isChannel = (await api.getChat(chatId)).type === 'channel';
+  } catch (err) {
+    if (!isChatNotFound(err)) return true;
+    isChannel = false;
+  }
+  if (channelChats.size >= 1000) channelChats.clear();
+  channelChats.set(chatId, isChannel);
+  return isChannel;
 }
 
 /** MAX answer for a chat_id that names no chat of the bot (e.g. a user id). */

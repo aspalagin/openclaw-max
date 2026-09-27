@@ -24,6 +24,7 @@ import {
   pinMaxMessage,
   readMaxChannelButtons,
   readMaxSendButtons,
+  resolveMaxSendFlags,
   sendMaxContact,
   sendMaxLocation,
   sendMaxMediaGroup,
@@ -254,6 +255,12 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       throw new Error('MAX bot token not configured');
     }
 
+    // Notification and link-preview options of sends: core's `silent` flag
+    // beats the account defaults (channels.max.notify / disableLinkPreview).
+    const sendFlags = resolveMaxSendFlags(account.config, {
+      silent: typeof params.silent === 'boolean' ? params.silent : undefined,
+    });
+
     // Strip provider prefix from target (e.g. "max:188862440" → "188862440")
     const stripPrefix = (val: string | undefined): string | undefined => {
       if (!val) return val;
@@ -325,6 +332,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
         for (let index = 0; index < chunks.length; index += 1) {
           const sent = await sendMaxMessage(to, chunks[index], {
             token: account.token,
+            ...sendFlags,
             replyToMessageId:
               index === 0 ? (readStringParam(params, 'replyTo') ?? undefined) : undefined,
             format: 'markdown',
@@ -354,6 +362,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
         if (firstCode) {
           const result = await sendMaxSticker(to, firstCode, {
             token: account.token,
+            ...sendFlags,
             replyToMessageId: replyTo ?? undefined,
           });
           return withPin(result.messageId, result.raw.message?.recipient?.chat_type);
@@ -365,6 +374,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       if (location) {
         const result = await sendMaxLocation(to, location, content || undefined, {
           token: account.token,
+          ...sendFlags,
           replyToMessageId: replyTo ?? undefined,
           format: 'markdown',
         });
@@ -376,6 +386,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       if (contactName) {
         const result = await sendMaxContact(to, readContactParams(params, contactName), {
           token: account.token,
+          ...sendFlags,
           replyToMessageId: replyTo ?? undefined,
         });
         return withPin(result.messageId, result.raw.message?.recipient?.chat_type);
@@ -390,6 +401,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
         // downloaded through the SSRF-guarded fetcher and uploaded.
         const result = await sendMaxMediaSources(to, content, mediaSources, {
           token: account.token,
+          ...sendFlags,
           replyToMessageId: replyTo ?? undefined,
           format: 'markdown',
           mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
@@ -400,6 +412,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
 
       const result = await sendMaxMessage(to, content, {
         token: account.token,
+        ...sendFlags,
         replyToMessageId: replyTo ?? undefined,
         format: 'markdown',
         buttons,
@@ -471,6 +484,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
 
       const result = await sendMaxSticker(to, stickerCode, {
         token: account.token,
+        ...sendFlags,
         replyToMessageId: replyTo ?? undefined,
       });
       return jsonResult({ ok: true, to, messageId: result.messageId });
@@ -489,6 +503,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       if (mediaSources.length) {
         const result = await sendMaxMediaSources(to, caption, mediaSources, {
           token: account.token,
+          ...sendFlags,
           replyToMessageId: replyTo ?? undefined,
           format: 'markdown',
           mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
@@ -513,6 +528,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
         if (location) {
           const result = await sendMaxLocation(to, location, caption || undefined, {
             token: account.token,
+            ...sendFlags,
             replyToMessageId: replyTo ?? undefined,
           });
           return jsonResult({ ok: true, to, messageId: result.messageId });
@@ -526,6 +542,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
           readStringParam(params, 'contactName') ?? readStringParam(params, 'name') ?? 'Unknown';
         const result = await sendMaxContact(to, readContactParams(params, contactName), {
           token: account.token,
+          ...sendFlags,
           replyToMessageId: replyTo ?? undefined,
         });
         return jsonResult({ ok: true, to, messageId: result.messageId });

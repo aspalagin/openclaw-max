@@ -98,6 +98,13 @@ export const MaxAccountSchemaBase = z
      * "current" — non-owner turns only in their own chat; "off" — no check.
      */
     actionScope: z.enum(['admitted', 'current', 'off']).optional(),
+    /**
+     * Send defaults; an explicit value of the call (core `silent`,
+     * channelData.max) wins. Named accounts inherit the channel-level value.
+     * notify=false sends without push notifications (channels always notify).
+     */
+    notify: z.boolean().optional(),
+    disableLinkPreview: z.boolean().optional(),
     actions: z
       .record(
         z.string(),
