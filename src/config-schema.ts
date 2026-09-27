@@ -127,6 +127,11 @@ export const MaxAccountSchemaBase = z
      * 0 answers any age.
      */
     maxEventAgeMinutes: z.number().int().min(0).optional(),
+    /**
+     * Debug logs of inbound messages carry a text preview (50 characters).
+     * Off by default: logs hold message type, length and ids, never text.
+     */
+    logMessagePreview: z.boolean().optional(),
     historyLimit: z.number().int().min(0).optional(),
     dmHistoryLimit: z.number().int().min(0).optional(),
     dms: z.record(z.string(), DmConfigSchema.optional()).optional(),

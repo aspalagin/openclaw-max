@@ -593,6 +593,10 @@
                 "minimum": 0,
                 "description": "Messages, edits, button presses and bot_started older than this many minutes (by MAX event time) are skipped instead of answered, so after a long outage the bot does not reply to hours-old messages (webhook, the queue recovered after a restart and long polling). Default 60; 0 answers any age."
               },
+              "logMessagePreview": {
+                "type": "boolean",
+                "description": "Debug logs of inbound messages include a 50-character text preview, for debugging. Off by default: logs carry the message type, text length and ids, never message text, captions or transcripts."
+              },
               "mediaMaxCount": {
                 "type": "integer",
                 "minimum": 1,

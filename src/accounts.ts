@@ -45,6 +45,8 @@ export interface MaxAccountConfig {
   };
   /** Updates the bot would answer are skipped past this age (default 60; 0 = no limit) */
   maxEventAgeMinutes?: number;
+  /** Debug logs carry a text preview of inbound messages (default false) */
+  logMessagePreview?: boolean;
   mediaMaxMb?: number;
   streamMode?: 'off' | 'partial' | 'block';
   /** Send mark_seen read receipts on inbound messages (default true) */
@@ -309,6 +311,7 @@ export function readMaxAccount(params: {
       webhookPath: section.webhookPath as string | undefined,
       webhookQueue: section.webhookQueue as MaxAccountConfig['webhookQueue'],
       maxEventAgeMinutes: section.maxEventAgeMinutes as number | undefined,
+      logMessagePreview: section.logMessagePreview as boolean | undefined,
       mediaMaxMb: section.mediaMaxMb as number | undefined,
       streamMode: section.streamMode as MaxAccountConfig['streamMode'],
       markSeen: section.markSeen as boolean | undefined,

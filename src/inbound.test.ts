@@ -666,3 +666,86 @@ describe('turn status mode (streaming.mode "progress")', () => {
     expect(captured?.replyOptions.onItemEvent).toBeUndefined();
   });
 });
+
+describe('message text in logs', () => {
+  const SECRET = 'Пароль от сейфа 4242';
+  const CAPTION = 'Подпись к фото про отпуск';
+  const TRANSCRIPT = 'Расшифровка голосового про встречу';
+  let runtime: ReturnType<typeof makeRuntime>;
+
+  function capture() {
+    const lines: string[] = [];
+    const sink = (...args: unknown[]) => lines.push(args.map(String).join(' '));
+    const log = { debug: vi.fn(sink), info: vi.fn(sink), warn: vi.fn(sink), error: vi.fn(sink) };
+    for (const level of ['log', 'info', 'warn', 'error', 'debug'] as const) {
+      vi.spyOn(console, level).mockImplementation(sink);
+    }
+    return { lines, log };
+  }
+
+  async function typicalInbound(accountConfig: Record<string, unknown> = {}) {
+    const { lines, log } = capture();
+    const opts = { ...makeOpts(accountConfig), log };
+    opts.api.getMessages.mockResolvedValue({
+      messages: [{ body: { mid: 'mid.e', text: SECRET } }],
+    });
+    await dispatchUpdate(created({ body: { mid: 'mid.t', seq: 1, text: SECRET } }), opts as never);
+    await dispatchUpdate(
+      created({ body: { mid: 'mid.p', seq: 2, text: CAPTION, attachments: [IMAGE] } }),
+      opts as never,
+    );
+    await dispatchUpdate(
+      created({
+        body: {
+          mid: 'mid.v',
+          seq: 3,
+          attachments: [
+            {
+              type: 'audio',
+              payload: { url: 'https://files.example.test/v.ogg' },
+              transcription: TRANSCRIPT,
+            },
+          ],
+        },
+      }),
+      opts as never,
+    );
+    await dispatchUpdate(
+      {
+        update_type: 'message_edited',
+        timestamp: 1790000000001,
+        message: {
+          sender: SENDER,
+          recipient: DIALOG,
+          timestamp: 1,
+          body: { mid: 'mid.e', seq: 4 },
+        },
+      } as unknown as MaxUpdate,
+      opts as never,
+    );
+    return lines;
+  }
+
+  beforeEach(() => {
+    runtime = makeRuntime();
+    setMaxRuntime(runtime.core as never);
+  });
+
+  it('logs no text, caption or transcript by default, only lengths and ids', async () => {
+    const lines = await typicalInbound();
+
+    expect(runtime.dispatched).toHaveLength(4);
+    expect(lines.some((line) => line.includes('mid.t') && line.includes('textLength=20'))).toBe(
+      true,
+    );
+    for (const text of [SECRET, CAPTION, TRANSCRIPT, 'Пароль', 'Подпись', 'Расшифровка']) {
+      expect(lines.filter((line) => line.includes(text))).toEqual([]);
+    }
+  });
+
+  it('adds a short preview to debug logs with logMessagePreview', async () => {
+    const lines = await typicalInbound({ logMessagePreview: true });
+
+    expect(lines.some((line) => line.includes(`text="${SECRET}"`))).toBe(true);
+  });
+});

@@ -7,7 +7,7 @@
 import type { ResolvedMaxAccount } from './accounts.js';
 import type { MaxMessage, MaxUpdate, MaxUser } from './api.js';
 import { processCallback } from './callbacks.js';
-import { processIncomingMessage } from './inbound.js';
+import { describeMaxLogText, processIncomingMessage } from './inbound.js';
 import type { MaxMonitorOptions } from './monitor-types.js';
 
 /** mark_seen vanished from current MAX docs; keep behind config (default on). */
@@ -73,7 +73,7 @@ export async function dispatchUpdate(update: MaxUpdate, opts: MaxMonitorOptions)
       // Skip edits from the bot itself
       if (opts.botUserId && update.message.sender?.user_id === opts.botUserId) break;
       log?.debug?.(
-        `[${account.accountId}] Message edited: ${update.message?.body?.mid} text="${update.message?.body?.text ?? '<null>'}" hasBody=${!!update.message?.body}`,
+        `[${account.accountId}] Message edited: ${update.message?.body?.mid} ${describeMaxLogText(account, update.message?.body?.text)} hasBody=${!!update.message?.body}`,
       );
       statusSink?.({ lastInboundAt: Date.now() });
       // Mark as read (typing starts once the message reaches the agent)
@@ -102,7 +102,7 @@ export async function dispatchUpdate(update: MaxUpdate, opts: MaxMonitorOptions)
                 editedMessage.body.attachments = fetchedMsg.body.attachments;
               }
               log?.debug?.(
-                `[${account.accountId}] Fetched edited text: "${fetchedMsg.body.text.slice(0, 50)}"`,
+                `[${account.accountId}] Fetched edited text: ${describeMaxLogText(account, fetchedMsg.body.text)}`,
               );
             }
           }

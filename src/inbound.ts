@@ -11,6 +11,7 @@ import {
 import { getAgentScopedMediaLocalRoots } from 'openclaw/plugin-sdk/media-local-roots';
 
 import { admitMaxGroupChat, admitMaxGroupSender, readMaxDmAllowFrom } from './access-policy.js';
+import type { ResolvedMaxAccount } from './accounts.js';
 import type { MaxAttachment, MaxLinkedMessage, MaxMessage, MaxUser } from './api.js';
 import { resolveMaxCommandMenu } from './command-menu.js';
 import { deliverMaxReply } from './deliver.js';
@@ -30,6 +31,22 @@ import { createMaxDraftStream } from './stream-draft.js';
 import { maxTurnAdoptionReplyOptions } from './turn-adoption.js';
 import type { MaxMarkupElement } from './types.js';
 import { createMaxTypingCallbacks } from './typing.js';
+
+/** Characters of message text in debug logs with logMessagePreview on. */
+const LOG_PREVIEW_CHARS = 50;
+
+/**
+ * Message text as logs may show it: its length only, unless the account
+ * enables logMessagePreview (a short preview for debugging).
+ */
+export function describeMaxLogText(
+  account: ResolvedMaxAccount,
+  text: string | null | undefined,
+): string {
+  const length = text?.length ?? 0;
+  if (account.config.logMessagePreview !== true || !text) return `textLength=${length}`;
+  return `text="${text.slice(0, LOG_PREVIEW_CHARS)}" textLength=${length}`;
+}
 
 /** Longest quote of a replied-to message handed to the agent. */
 const MAX_REPLY_QUOTE_CHARS = 1000;
@@ -72,7 +89,7 @@ export async function processIncomingMessage(
   const forward = readForwardedMessage(message.link);
 
   log?.debug?.(
-    `[${account.accountId}] Processing message: mid=${messageId} chatId=${message.recipient.chat_id} chatType=${message.recipient.chat_type} senderId=${message.sender?.user_id} text="${rawText.slice(0, 50)}" attachments=${attachments.length}`,
+    `[${account.accountId}] Processing message: mid=${messageId} chatId=${message.recipient.chat_id} chatType=${message.recipient.chat_type} senderId=${message.sender?.user_id} ${describeMaxLogText(account, rawText)} attachments=${attachments.length}`,
   );
 
   // Skip truly empty messages (no text and no attachment that yields media or
