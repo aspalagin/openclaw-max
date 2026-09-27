@@ -28,6 +28,8 @@ export interface MaxAccountConfig {
   groups?: Record<string, { requireMention?: boolean; [key: string]: unknown }>;
   groupPolicy?: string;
   groupAllowFrom?: Array<string | number>;
+  /** Where core mention patterns apply in groups (core channel mention policy) */
+  mentionPatterns?: { mode?: 'allow' | 'deny'; allowIn?: string[]; denyIn?: string[] };
   /** Update transport; default: "webhook" when webhookUrl is set, otherwise "polling" */
   transport?: 'polling' | 'webhook';
   webhookUrl?: string;
@@ -307,6 +309,7 @@ export function readMaxAccount(params: {
       apiBaseUrl: section.apiBaseUrl as string | undefined,
       httpProxy: section.httpProxy as string | undefined,
       streaming: section.streaming as MaxAccountConfig['streaming'],
+      mentionPatterns: section.mentionPatterns as MaxAccountConfig['mentionPatterns'],
     };
 
     const botToken = readSecretOption(cfg, section.botToken, 'channels.max.botToken');

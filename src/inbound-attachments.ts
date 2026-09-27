@@ -295,7 +295,7 @@ function decodeQuotedPrintable(value: string): string {
 }
 
 /** Non-empty MAX transcription of an audio attachment, if any. */
-function readAudioTranscription(att: MaxAttachment): string | undefined {
+export function readAudioTranscription(att: MaxAttachment): string | undefined {
   const value = att.transcription;
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();

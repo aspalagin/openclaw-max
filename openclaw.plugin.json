@@ -51,6 +51,10 @@
               },
               "systemPrompt": {
                 "type": "string"
+              },
+              "disableAudioPreflight": {
+                "type": "boolean",
+                "description": "Do not transcribe a captionless voice message to look for a configured mention pattern in this group."
               }
             },
             "additionalProperties": false
@@ -202,6 +206,32 @@
                 "additionalProperties": {
                   "$ref": "#/definitions/groupConfig"
                 }
+              },
+              "mentionPatterns": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "allow",
+                      "deny"
+                    ]
+                  },
+                  "allowIn": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "denyIn": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false,
+                "description": "Where core mention patterns (messages.groupChat / agent groupChat mentionPatterns) apply in MAX groups: mode allow (default) or deny, with allowIn / denyIn group chat ids."
               },
               "transport": {
                 "type": "string",

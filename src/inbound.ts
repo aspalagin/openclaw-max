@@ -3,7 +3,7 @@
  * reply dispatch (finalizeInboundContext → dispatchReplyWithBufferedBlockDispatcher).
  */
 
-import { toInboundMediaFacts } from 'openclaw/plugin-sdk/channel-inbound';
+import { matchesMentionPatterns, toInboundMediaFacts } from 'openclaw/plugin-sdk/channel-inbound';
 import {
   createReplyPrefixOptions,
   resolveChannelPreviewStreamMode,
@@ -14,6 +14,12 @@ import { admitMaxGroupChat, readMaxDmAllowFrom } from './access-policy.js';
 import type { MaxAttachment, MaxLinkedMessage, MaxMessage, MaxUser } from './api.js';
 import { resolveMaxCommandMenu } from './command-menu.js';
 import { deliverMaxReply } from './deliver.js';
+import {
+  echoMaxVoiceTranscript,
+  type MaxVoiceMention,
+  resolveMaxMentionRegexes,
+  resolveMaxVoiceMention,
+} from './group-mention.js';
 import { collectInboundAttachments, resolveInboundMediaMaxCount } from './inbound-attachments.js';
 import type { MaxMonitorOptions } from './monitor-types.js';
 import { materializeMaxPresentation } from './presentation.js';
@@ -91,15 +97,41 @@ export async function processIncomingMessage(
   const reply = message.link?.type === 'reply' ? message.link : undefined;
   const replyToId = reply?.message?.mid ?? undefined;
 
+  // Resolve agent route (before the mention check: configured mention
+  // patterns may be the routed agent's own).
+  // chatIdStr stays the delivery address (MAX addresses replies by chat_id).
+  const chatIdStr = String(chatId ?? senderId);
+  // DM routing keys off the sender's user_id, not the dialog's chat_id: in MAX
+  // the two differ, and bindings/allowFrom are expressed in user_id terms, so a
+  // chat_id peer never matches. Groups keep chat_id — it is the group's own id.
+  const routePeerId = isGroup ? chatIdStr : String(senderId ?? chatId);
+  const route = core.channel.routing.resolveAgentRoute({
+    cfg: config,
+    channel: 'max',
+    accountId: account.accountId,
+    peer: {
+      kind: isGroup ? 'group' : 'direct',
+      id: routePeerId,
+    },
+  });
+
   // Check for bot mention in group chats
   let wasMentioned: boolean | undefined;
-  if (isGroup && (opts.botUsername || opts.botUserId)) {
+  const mentionRegexes = isGroup
+    ? resolveMaxMentionRegexes({ cfg: config, agentId: route.agentId, account, chatId: chatIdStr })
+    : [];
+  if (isGroup && (opts.botUsername || opts.botUserId || mentionRegexes.length > 0)) {
     // body.markup marks mentions as user_mention elements; the @botname regex
     // stays as a fallback for clients/messages that send no markup.
     wasMentioned = isBotMentionedInMarkup(message.body?.markup, opts.botUserId, opts.botUsername);
     if (!wasMentioned && opts.botUsername) {
       const mentionPattern = new RegExp(`@${escapeRegExp(opts.botUsername)}\\b`, 'i');
       wasMentioned = mentionPattern.test(rawText);
+    }
+    // Core mention patterns (messages.groupChat / agent groupChat), only when
+    // configured; the sender's own text, not forwarded content.
+    if (!wasMentioned && mentionRegexes.length > 0) {
+      wasMentioned = matchesMentionPatterns(rawText, mentionRegexes);
     }
 
     // Reply to bot's message also counts as mention (like Telegram behavior)
@@ -163,6 +195,7 @@ export async function processIncomingMessage(
   }
 
   // Group policy (disabled / allowlist incl. "*" / open)
+  let voiceMention: MaxVoiceMention | undefined;
   if (isGroup) {
     const admission = admitMaxGroupChat(account, config, chatId);
     if (!admission.admitted) {
@@ -176,24 +209,58 @@ export async function processIncomingMessage(
     const groupCfg = account.config.groups?.[String(chatId)] ?? account.config.groups?.['*'];
     const requireMention = groupCfg?.requireMention ?? true;
     if (requireMention && !wasMentioned) {
-      log?.debug?.(`[${account.accountId}] Skipping group message (not mentioned)`);
-      return;
+      // A captionless voice message may still name the bot (mention patterns
+      // matched against its transcript).
+      voiceMention =
+        mentionRegexes.length > 0 && !rawText.trim() && groupCfg?.disableAudioPreflight !== true
+          ? await resolveMaxVoiceMention({
+              attachments,
+              messageId,
+              chatId,
+              chatIdStr,
+              senderId: String(senderId),
+              groupAllowFrom: groupCfg?.allowFrom,
+              mentionRegexes,
+              cfg: config,
+              api: opts.api,
+              account,
+              log,
+            })
+          : undefined;
+      if (!voiceMention) {
+        log?.debug?.(`[${account.accountId}] Skipping group message (not mentioned)`);
+        return;
+      }
+      wasMentioned = true;
     }
   }
 
   // Process attachments: download media, build descriptions for non-downloadable types
+  // (a voice mention check may have done it already).
   const {
     descriptions: attachmentDescriptions,
     mediaInputs: ownMediaInputs,
     mediaTaken: ownMediaTaken,
-  } = await collectInboundAttachments({
+  } = voiceMention?.attachments ??
+  (await collectInboundAttachments({
     attachments,
     messageId,
     chatId,
     api: opts.api,
     account,
     log,
-  });
+  }));
+  if (voiceMention?.transcript) {
+    // Core's transcript echo, deferred until the message passed the gate.
+    echoMaxVoiceTranscript({
+      cfg: config,
+      accountId: account.accountId,
+      chatId: chatIdStr,
+      transcript: voiceMention.transcript,
+    }).catch((err: unknown) => {
+      log?.debug?.(`[${account.accountId}] Voice transcript echo failed: ${String(err)}`);
+    });
+  }
   // Forwarded attachments pass the same gates and download limits as the
   // sender's own (one media count budget per message); their descriptions
   // stay inside the forwarded block.
@@ -220,23 +287,6 @@ export async function processIncomingMessage(
 
   // Nothing usable came out of the attachments (e.g. a failed sticker download)
   if (!effectiveText && !hasMedia) return;
-
-  // Resolve agent route
-  // chatIdStr stays the delivery address (MAX addresses replies by chat_id).
-  const chatIdStr = String(chatId ?? senderId);
-  // DM routing keys off the sender's user_id, not the dialog's chat_id: in MAX
-  // the two differ, and bindings/allowFrom are expressed in user_id terms, so a
-  // chat_id peer never matches. Groups keep chat_id — it is the group's own id.
-  const routePeerId = isGroup ? chatIdStr : String(senderId ?? chatId);
-  const route = core.channel.routing.resolveAgentRoute({
-    cfg: config,
-    channel: 'max',
-    accountId: account.accountId,
-    peer: {
-      kind: isGroup ? 'group' : 'direct',
-      id: routePeerId,
-    },
-  });
 
   // Build context
   const fromLabel = isGroup ? `chat:${chatIdStr}` : senderName || `user:${senderId}`;

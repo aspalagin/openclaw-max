@@ -5,6 +5,7 @@
 import {
   ChannelPreviewStreamingConfigSchema,
   MarkdownConfigSchema,
+  MentionPatternsPolicySchema,
   ToolPolicySchema,
 } from 'openclaw/plugin-sdk/channel-config-schema';
 import { buildOptionalSecretInputSchema } from 'openclaw/plugin-sdk/secret-input';
@@ -66,6 +67,8 @@ export const MaxGroupSchema = z
     enabled: z.boolean().optional(),
     allowFrom: z.array(z.union([z.string(), z.number()])).optional(),
     systemPrompt: z.string().optional(),
+    /** Skip transcribing a captionless voice message to find a mention pattern. */
+    disableAudioPreflight: z.boolean().optional(),
   })
   .strict();
 
@@ -89,6 +92,11 @@ export const MaxAccountSchemaBase = z
     /** Default "allowlist" (applied where read); named accounts inherit the channel value. */
     groupPolicy: GroupPolicySchema.optional(),
     groups: z.record(z.string(), MaxGroupSchema.optional()).optional(),
+    /**
+     * Where core mention patterns (messages.groupChat / agent groupChat
+     * mentionPatterns) apply in MAX groups: mode allow|deny, allowIn, denyIn.
+     */
+    mentionPatterns: MentionPatternsPolicySchema.optional(),
     /** Update transport; default: "webhook" when webhookUrl is set, otherwise "polling" */
     transport: z.enum(['polling', 'webhook']).optional(),
     webhookUrl: z.string().optional(),
