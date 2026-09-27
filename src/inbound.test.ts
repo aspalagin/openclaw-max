@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MaxUpdate } from './api.js';
 import { dispatchUpdate } from './dispatch.js';
 import { setMaxRuntime } from './runtime.js';
+import { runWithMaxTurnAdoption } from './turn-adoption.js';
 import {
   handleMaxWebhookRequest,
   maxUpdateDedupeKey,
@@ -279,6 +280,29 @@ describe('forwarded messages', () => {
     const body = JSON.parse(send![1].body);
     expect(body.text).toBe('Noted');
     expect(body.link).toBeUndefined();
+  });
+
+  it('passes the journaled update adoption callback to core as turnAdoptionLifecycle', async () => {
+    const seen: unknown[] = [];
+    runtime.core.channel.reply.dispatchReplyWithBufferedBlockDispatcher = vi.fn(
+      async (params: unknown) => {
+        seen.push((params as { replyOptions: Record<string, unknown> }).replyOptions);
+      },
+    ) as never;
+    const onAdopted = vi.fn(async () => {});
+    await runWithMaxTurnAdoption(onAdopted, () =>
+      dispatchUpdate(created({ body: { mid: 'mid.adopt', text: 'hi' } }), makeOpts() as never),
+    );
+    await dispatchUpdate(created({ body: { mid: 'mid.plain', text: 'hi' } }), makeOpts() as never);
+    expect(seen).toHaveLength(2);
+    const [journaled, plain] = seen as Array<{
+      turnAdoptionLifecycle?: { onAdopted: () => Promise<void>; admission?: string };
+    }>;
+    await journaled.turnAdoptionLifecycle?.onAdopted();
+    expect(onAdopted).toHaveBeenCalledTimes(1);
+    // No admission/ownerKey: core groups queued follow-ups as without a lifecycle.
+    expect(journaled.turnAdoptionLifecycle?.admission).toBeUndefined();
+    expect(plain.turnAdoptionLifecycle).toBeUndefined();
   });
 
   it('ignores an edit event without a body instead of throwing', async () => {

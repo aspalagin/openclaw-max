@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { MaxApi, MaxUpdate } from './api.js';
 import { startMaxPolling } from './monitor.js';
+import { maxTurnAdoptionReplyOptions } from './turn-adoption.js';
 import { openMaxUpdateJournal, resetMaxUpdateJournalsForTest } from './update-journal.js';
 import { handleMaxWebhookRequest } from './webhook.js';
 import {
@@ -407,6 +408,44 @@ describe('durable webhook queue', () => {
     });
     expect(await second.recover()).toEqual({ recovered: 1, stale: 0, unreadable: 1 });
     expect(await drain(second, 1)).toEqual(['m1']);
+  });
+
+  it('completes the row when core adopts the turn; a crash before adoption replays it', async () => {
+    const dir = journalDir();
+    const first = createMaxWebhookUpdateQueue({
+      accountId: 'd7',
+      journal: await openMaxUpdateJournal({ accountId: 'd7', dir }),
+    });
+    await first.admit(makeMsgUpdate(1, 'adopted'), 'k1');
+    await first.admit(makeMsgUpdate(2, 'preflight'), 'k2');
+    const hang = deferred();
+    const controller = new AbortController();
+    void first.consume({
+      dispatch: async (u) => {
+        // Core adopts the first turn (and owns its recovery from here on);
+        // the second dies in preflight (media download, gates).
+        if (midOf(u) === 'adopted')
+          await maxTurnAdoptionReplyOptions().turnAdoptionLifecycle?.onAdopted();
+        await hang.promise;
+      },
+      abortSignal: controller.signal,
+      onError: () => {},
+    });
+    await vi.waitFor(() =>
+      expect(readdirSync(dir).filter((n) => n.startsWith('u-'))).toHaveLength(1),
+    );
+    // The gateway crashes mid-turn.
+    restartProcess();
+
+    const second = createMaxWebhookUpdateQueue({
+      accountId: 'd7',
+      journal: await openMaxUpdateJournal({ accountId: 'd7', dir }),
+    });
+    await second.recover();
+    expect(await drain(second, 1)).toEqual(['preflight']);
+    expect(maxTurnAdoptionReplyOptions()).toEqual({});
+    controller.abort();
+    hang.resolve();
   });
 
   it('keeps an entry dispatching in a stopped task out of the next task of the same process', async () => {

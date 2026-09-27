@@ -13,6 +13,7 @@
  */
 
 import type { MaxUpdate } from './api.js';
+import { runWithMaxTurnAdoption } from './turn-adoption.js';
 import type { MaxJournalEntry, MaxUpdateJournal } from './update-journal.js';
 
 /** Updates handled at once across chats; one chat is always sequential. */
@@ -285,13 +286,20 @@ export function createMaxWebhookUpdateQueue(params: {
           const item = lanes.get(lane)?.shift();
           if (!item) return;
           pending -= 1;
+          const { entry } = item;
+          let completion: Promise<void> | undefined;
+          // At core's turn adoption (core then owns crash recovery) or when the
+          // dispatch returns, whichever is first. A failed turn is not replayed.
+          const complete = (): Promise<void> =>
+            (completion ??= entry && journal ? journal.complete(entry) : Promise.resolve());
           try {
-            await dispatch(item.update);
+            await (entry
+              ? runWithMaxTurnAdoption(complete, () => dispatch(item.update))
+              : dispatch(item.update));
           } catch (err) {
             onError(err, item.update);
           }
-          // Handled or failed alike: a failed turn is not replayed (0.7 semantics).
-          if (item.entry) await journal?.complete(item.entry);
+          await complete();
         }
       } finally {
         active.delete(lane);

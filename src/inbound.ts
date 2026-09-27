@@ -27,6 +27,7 @@ import { createMaxProgressDraft } from './progress-draft.js';
 import { getMaxRuntime } from './runtime.js';
 import { sendMaxMessage } from './send.js';
 import { createMaxDraftStream } from './stream-draft.js';
+import { maxTurnAdoptionReplyOptions } from './turn-adoption.js';
 import type { MaxMarkupElement } from './types.js';
 import { createMaxTypingCallbacks } from './typing.js';
 
@@ -528,6 +529,7 @@ export async function processIncomingMessage(
           : {}),
         ...(useBlockStreaming ? { disableBlockStreaming: false } : {}),
         ...(progress ? progress.replyOptions : {}),
+        ...maxTurnAdoptionReplyOptions(),
       },
     });
   } catch (err) {
