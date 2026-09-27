@@ -1,6 +1,6 @@
 # openclaw-max — канал мессенджера MAX для OpenClaw
 
-[English version](README.en.md)
+[English version](README_EN.md)
 
 Плагин канала, который подключает ассистента [OpenClaw](https://openclaw.ai) к мессенджеру [MAX](https://max.ru) через MAX Bot API (`platform-api2.max.ru`). Люди пишут вашему боту в MAX — в личном диалоге или в группе, — и агент OpenClaw отвечает там же: с медиа, кнопками и голосом.
 
