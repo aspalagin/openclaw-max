@@ -7,6 +7,7 @@ import type { ChannelPlugin } from 'openclaw/plugin-sdk/channel-core';
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
 import { DEFAULT_ACCOUNT_ID } from 'openclaw/plugin-sdk/core';
 
+import { describeMaxInheritedOpenAccess } from './access-policy.js';
 import {
   isMaxAccountConfigured,
   MaxSecretConfigError,
@@ -191,6 +192,9 @@ export const maxGatewayAdapter: NonNullable<MaxChannelPlugin['gateway']> = {
     if (account.secretErrors?.botToken) {
       throw new MaxSecretConfigError(account.secretErrors.botToken);
     }
+    // A named account open only through channel-level (or default) policies.
+    const inheritedOpen = describeMaxInheritedOpenAccess(ctx.cfg, account);
+    if (inheritedOpen) ctx.log?.warn(`[${account.accountId}] ${inheritedOpen}`);
     const token = account.token.trim();
     // A bad apiBaseUrl/httpProxy stops the account with a clear error rather
     // than letting it connect directly or to the wrong host.

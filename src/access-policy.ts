@@ -6,8 +6,9 @@
 
 import { isSenderIdAllowed, resolveGroupAllowFromSources } from 'openclaw/plugin-sdk/allow-from';
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
+import { DEFAULT_ACCOUNT_ID } from 'openclaw/plugin-sdk/core';
 
-import type { ResolvedMaxAccount } from './accounts.js';
+import { maxAccountConfigPath, type ResolvedMaxAccount } from './accounts.js';
 import { getMaxRuntime } from './runtime.js';
 
 export type MaxAdmission = { admitted: true } | { admitted: false; reason: string };
@@ -112,4 +113,39 @@ export async function admitMaxDmUser(
     admitted: false,
     reason: `user is not in allowFrom or the pairing store (dmPolicy=${dmPolicy})`,
   };
+}
+
+/**
+ * Start-up warning for a named account that sets no DM or group policy of its
+ * own and inherits an open one (channels.max, or channels.defaults for
+ * groups): the second bot is then open too. Names the account, the policy
+ * and where to set its own; no secrets or user ids. undefined when nothing
+ * open is inherited.
+ */
+export function describeMaxInheritedOpenAccess(
+  cfg: OpenClawConfig | undefined,
+  account: ResolvedMaxAccount,
+): string | undefined {
+  if (!cfg || account.accountId === DEFAULT_ACCOUNT_ID) return undefined;
+  const channel = cfg.channels?.max as Record<string, unknown> | undefined;
+  const accounts = channel?.accounts as Record<string, Record<string, unknown>> | undefined;
+  const own = accounts?.[account.accountId] ?? {};
+  const inherited: string[] = [];
+  const fix: string[] = [];
+  if (!Object.hasOwn(own, 'dmPolicy') && account.config.dmPolicy === 'open') {
+    inherited.push('dmPolicy="open" from channels.max (anyone can message this bot)');
+    fix.push('dmPolicy (e.g. "pairing")');
+  }
+  if (!Object.hasOwn(own, 'groupPolicy') && resolveMaxGroupPolicy(account, cfg) === 'open') {
+    const from = channel?.groupPolicy === 'open' ? 'channels.max' : 'channels.defaults';
+    inherited.push(`groupPolicy="open" from ${from} (any group can add and ping this bot)`);
+    fix.push('groupPolicy (e.g. "allowlist" with groups)');
+  }
+  if (inherited.length === 0) return undefined;
+  const path = maxAccountConfigPath(account.accountId);
+  return (
+    `MAX account "${account.accountId}" has no access policy of its own and inherits ` +
+    `${inherited.join(' and ')}; set ${fix.map((key) => `${path}.${key}`).join(' / ')} ` +
+    'to give this bot its own access rules.'
+  );
 }

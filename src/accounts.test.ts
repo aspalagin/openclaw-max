@@ -7,9 +7,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { describeMaxInheritedOpenAccess } from './access-policy.js';
 import { listMaxAccountIds, resolveDefaultMaxAccountId, resolveMaxAccount } from './accounts.js';
+import { maxGatewayAdapter } from './channel-lifecycle.js';
 
 describe('MAX Account Resolution', () => {
   describe('listMaxAccountIds', () => {
@@ -423,5 +425,74 @@ describe('MAX Account Resolution', () => {
       expect(resolveMaxAccount({ cfg }).config.streaming).toEqual(streaming);
       expect(resolveMaxAccount({ cfg, accountId: 'two' }).config.streaming).toEqual(streaming);
     });
+  });
+});
+
+describe('warning about an inherited open access policy', () => {
+  const cfgWith = (channel: Record<string, unknown>, defaults?: Record<string, unknown>) =>
+    ({
+      channels: {
+        ...(defaults ? { defaults } : {}),
+        max: { botToken: 'tok-main', ...channel },
+      },
+    }) as unknown as OpenClawConfig;
+  const warningFor = (cfg: OpenClawConfig, accountId = 'second') =>
+    describeMaxInheritedOpenAccess(cfg, resolveMaxAccount({ cfg, accountId }));
+
+  it('names the account, the inherited policies and where to set its own', () => {
+    const warning = warningFor(
+      cfgWith({
+        dmPolicy: 'open',
+        allowFrom: ['*', '777001'],
+        groupPolicy: 'open',
+        accounts: { second: { botToken: 'tok-second-secret' } },
+      }),
+    );
+
+    expect(warning).toContain('MAX account "second"');
+    expect(warning).toContain('dmPolicy="open" from channels.max');
+    expect(warning).toContain('groupPolicy="open" from channels.max');
+    expect(warning).toContain('channels.max.accounts.second.dmPolicy');
+    expect(warning).toContain('channels.max.accounts.second.groupPolicy');
+    expect(warning).not.toMatch(/tok-|777001/);
+  });
+
+  it('points at channels.defaults for an inherited open group policy', () => {
+    const warning = warningFor(
+      cfgWith({ accounts: { second: { botToken: 'tok-2' } } }, { groupPolicy: 'open' }),
+    );
+    expect(warning).toContain('groupPolicy="open" from channels.defaults');
+    expect(warning).not.toContain('dmPolicy');
+  });
+
+  it('stays silent for own policies, closed ones and the default account', () => {
+    const own = cfgWith({
+      dmPolicy: 'open',
+      allowFrom: ['*'],
+      groupPolicy: 'open',
+      accounts: { second: { botToken: 'tok-2', dmPolicy: 'open', groupPolicy: 'open' } },
+    });
+    expect(warningFor(own)).toBeUndefined();
+    expect(warningFor(own, 'default')).toBeUndefined();
+    expect(
+      warningFor(cfgWith({ dmPolicy: 'pairing', accounts: { second: { botToken: 'tok-2' } } })),
+    ).toBeUndefined();
+  });
+
+  it('is logged once when the account starts', async () => {
+    const cfg = cfgWith({
+      dmPolicy: 'open',
+      allowFrom: ['*'],
+      // an invalid base URL stops the start right after the warning
+      apiBaseUrl: 'http://stand.example.test',
+      accounts: { second: { botToken: 'tok-2' } },
+    });
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const account = resolveMaxAccount({ cfg, accountId: 'second' });
+
+    await expect(maxGatewayAdapter.startAccount!({ account, cfg, log } as never)).rejects.toThrow();
+
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(String(log.warn.mock.calls[0][0])).toMatch(/^\[second\] MAX account "second"/);
   });
 });
