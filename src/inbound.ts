@@ -10,7 +10,7 @@ import {
 } from 'openclaw/plugin-sdk/channel-outbound';
 import { getAgentScopedMediaLocalRoots } from 'openclaw/plugin-sdk/media-local-roots';
 
-import { admitMaxGroupChat, readMaxDmAllowFrom } from './access-policy.js';
+import { admitMaxGroupChat, admitMaxGroupSender, readMaxDmAllowFrom } from './access-policy.js';
 import type { MaxAttachment, MaxLinkedMessage, MaxMessage, MaxUser } from './api.js';
 import { resolveMaxCommandMenu } from './command-menu.js';
 import { deliverMaxReply } from './deliver.js';
@@ -205,6 +205,15 @@ export async function processIncomingMessage(
       );
       return;
     }
+    // Sender allowlist (groups.<id>.allowFrom / groupAllowFrom): messages,
+    // button presses and commands alike; attachments are not downloaded.
+    const senderAdmission = admitMaxGroupSender(account, chatId, senderId);
+    if (!senderAdmission.admitted) {
+      log?.debug?.(
+        `[${account.accountId}] Blocked group message (${senderAdmission.reason}, chat=${String(chatId)}, sender=${String(senderId)})`,
+      );
+      return;
+    }
 
     // Require mention in groups
     const groupCfg = account.config.groups?.[String(chatId)] ?? account.config.groups?.['*'];
@@ -220,7 +229,6 @@ export async function processIncomingMessage(
               chatId,
               chatIdStr,
               senderId: String(senderId),
-              groupAllowFrom: groupCfg?.allowFrom,
               mentionRegexes,
               cfg: config,
               api: opts.api,

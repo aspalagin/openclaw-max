@@ -1,7 +1,7 @@
 /**
  * Tests for group mentions beyond @username and markup: core's configured
  * mention patterns and captionless voice messages whose transcript (MAX's own
- * or a core preflight transcription) names the bot.
+ * or a core preflight transcription) names the bot; the group sender allowlist.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -329,5 +329,85 @@ describe('voice messages in mention-gated groups', () => {
     expect(runtime.dispatched[0].media).toEqual([
       expect.not.objectContaining({ transcribed: true }),
     ]);
+  });
+});
+
+describe('group sender allowlist (groups.<id>.allowFrom / groupAllowFrom)', () => {
+  let runtime: ReturnType<typeof makeRuntime>;
+  const IMAGE = { type: 'image', payload: { url: 'https://files.example.test/p.jpg' } };
+  const mentioned = (sender = MEMBER) => inGroup({ text: '@test_bot привет' }, sender);
+
+  beforeEach(() => {
+    runtime = makeRuntime();
+    setMaxRuntime(runtime.core as never);
+  });
+
+  it('keeps the old behaviour without sender lists: any member of an admitted group', async () => {
+    await dispatchUpdate(mentioned(OUTSIDER), makeOpts() as never);
+    expect(runtime.dispatched).toHaveLength(1);
+  });
+
+  it('admits only listed senders and downloads nothing for the others', async () => {
+    const opts = makeOpts(PATTERNS, { groupAllowFrom: ['max:1001'] });
+    await dispatchUpdate(
+      inGroup({ text: '@test_bot смотри', attachments: [IMAGE] }, OUTSIDER),
+      opts as never,
+    );
+    await dispatchUpdate(inGroup({ text: '/status @test_bot' }, OUTSIDER), opts as never);
+    expect(runtime.dispatched).toHaveLength(0);
+    expect(runtime.fetchRemoteMedia).not.toHaveBeenCalled();
+
+    await dispatchUpdate(mentioned(MEMBER), opts as never);
+    expect(runtime.dispatched).toHaveLength(1);
+    expect(runtime.dispatched[0].SenderId).toBe('1001');
+  });
+
+  it('admits anyone with "*"', async () => {
+    await dispatchUpdate(
+      mentioned(OUTSIDER),
+      makeOpts(PATTERNS, { groupAllowFrom: ['*'] }) as never,
+    );
+    expect(runtime.dispatched).toHaveLength(1);
+  });
+
+  it("prefers the group's own list; an empty one falls back to groupAllowFrom", async () => {
+    const own = makeOpts(PATTERNS, {
+      groupAllowFrom: [1001],
+      groups: { '-7007': { requireMention: true, allowFrom: [3003] } },
+    });
+    await dispatchUpdate(mentioned(MEMBER), own as never);
+    await dispatchUpdate(mentioned(OUTSIDER), own as never);
+    expect(runtime.dispatched.map((ctx) => ctx.SenderId)).toEqual(['3003']);
+
+    const empty = makeOpts(PATTERNS, {
+      groupAllowFrom: ['1001'],
+      groups: { '-7007': { requireMention: true, allowFrom: [] } },
+    });
+    await dispatchUpdate(mentioned(OUTSIDER), empty as never);
+    expect(runtime.dispatched).toHaveLength(1);
+  });
+
+  it('applies to button presses', async () => {
+    const press = (user: typeof MEMBER) =>
+      ({
+        update_type: 'message_callback',
+        timestamp: 1790000000000,
+        callback: {
+          callback_id: `cb.${user.user_id}`,
+          payload: 'yes',
+          user,
+          timestamp: 1790000000000,
+        },
+        message: {
+          sender: { user_id: 9009, is_bot: true },
+          recipient: GROUP,
+          timestamp: 1,
+          body: { mid: 'mid.k' },
+        },
+      }) as unknown as MaxUpdate;
+    const opts = makeOpts(PATTERNS, { groupAllowFrom: ['1001'] });
+    await dispatchUpdate(press(OUTSIDER), opts as never);
+    await dispatchUpdate(press(MEMBER), opts as never);
+    expect(runtime.dispatched.map((ctx) => ctx.SenderId)).toEqual(['1001']);
   });
 });

@@ -9,7 +9,7 @@
 import { ToolAuthorizationError } from 'openclaw/plugin-sdk/channel-actions';
 import type { ChannelMessageActionContext } from 'openclaw/plugin-sdk/channel-contract';
 
-import { admitMaxDmUser, admitMaxGroupChat, type MaxAdmission } from './access-policy.js';
+import { admitMaxDmUser, admitMaxGroupMessage, type MaxAdmission } from './access-policy.js';
 import type { ResolvedMaxAccount } from './accounts.js';
 import { MaxApi, MaxApiError } from './api.js';
 import { isChatNotFound } from './send.js';
@@ -17,7 +17,7 @@ import { isChatNotFound } from './send.js';
 /**
  * - `admitted` (default): the current chat of the turn, an owner request, or a
  *   chat the inbound policy admits (DM policy with allowFrom and pairing,
- *   group policy with its allowlist);
+ *   group policy with its chat and sender allowlists);
  * - `current`: a non-owner turn acts only in its own chat;
  * - `off`: no plugin check (0.7.x behavior; core policy only).
  */
@@ -63,9 +63,10 @@ export async function assertMaxActionInScope(
     );
   }
   const chat = await failClosed(ctx.action, target, () => classifyChat(api, located));
+  // A group admits the action only for a requester its sender allowlist admits.
   const admission: MaxAdmission =
     chat.kind === 'group'
-      ? admitMaxGroupChat(account, ctx.cfg, chat.chatId)
+      ? admitMaxGroupMessage(account, ctx.cfg, chat.chatId, requesterId)
       : await admitMaxDmUser(account, chat.userId);
   if (!admission.admitted) deny(ctx.action, describeChat(chat), admission.reason);
 }
@@ -74,7 +75,7 @@ function deny(action: string, chat: string, reason: string): never {
   throw new ToolAuthorizationError(
     `MAX ${action} refused: ${chat} is outside the chats this conversation may act in (${reason}). ` +
       'Allowed: the current chat, chats admitted by channels.max dmPolicy/allowFrom/pairing and ' +
-      'groupPolicy/groups, or a request from the owner (channels.max.actionScope).',
+      'groupPolicy/groups/groupAllowFrom, or a request from the owner (channels.max.actionScope).',
   );
 }
 

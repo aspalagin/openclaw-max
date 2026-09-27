@@ -167,6 +167,28 @@ describe.each(ACTIONS)('actionScope for $action', (item) => {
     expect(spies[item.mutation]).not.toHaveBeenCalled();
   });
 
+  it('refuses an admitted group whose sender allowlist excludes the requester', async () => {
+    const err = await refusal(
+      run(item, ADMITTED_GROUP, turn(801, STRANGER), makeCfg({ groupAllowFrom: ['1001'] })),
+    );
+    expect(err).toBeInstanceOf(ToolAuthorizationError);
+    expect(err.message).toContain('group allowFrom/groupAllowFrom');
+    expect(spies[item.mutation]).not.toHaveBeenCalled();
+  });
+
+  it("allows an admitted group for a requester in the group's own allowFrom", async () => {
+    await run(
+      item,
+      ADMITTED_GROUP,
+      turn(801, STRANGER),
+      makeCfg({
+        groupAllowFrom: ['1001'],
+        groups: { [String(ADMITTED_GROUP)]: { allowFrom: [`max:${STRANGER}`] } },
+      }),
+    );
+    expect(spies[item.mutation]).toHaveBeenCalledTimes(1);
+  });
+
   it('allows it for an owner request', async () => {
     await run(item, OTHER_GROUP, { ...turn(ADMITTED_GROUP), senderIsOwner: true });
     expect(spies[item.mutation]).toHaveBeenCalledTimes(1);

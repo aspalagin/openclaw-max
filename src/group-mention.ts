@@ -19,6 +19,7 @@ import {
   formatAudioTranscriptForAgent,
 } from 'openclaw/plugin-sdk/media-understanding-runtime';
 
+import { admitMaxGroupSender } from './access-policy.js';
 import type { ResolvedMaxAccount } from './accounts.js';
 import type { MaxApi, MaxAttachment } from './api.js';
 import {
@@ -62,23 +63,6 @@ export function resolveMaxMentionRegexes(params: {
     conversationId: chatId,
     ...(account.config.mentionPatterns ? { providerPolicy: account.config.mentionPatterns } : {}),
   });
-}
-
-/**
- * Whether a sender may have a voice message transcribed before the mention
- * gate: the group's own allowFrom, else the account's groupAllowFrom; no list
- * means every member of the admitted group.
- */
-export function isMaxVoicePreflightSender(
-  account: ResolvedMaxAccount,
-  groupAllowFrom: unknown,
-  senderId: string,
-): boolean {
-  const list = Array.isArray(groupAllowFrom)
-    ? groupAllowFrom
-    : (account.config.groupAllowFrom ?? []);
-  const entries = list.map((entry) => String(entry).trim().replace(/^max:/i, ''));
-  return entries.length === 0 || entries.includes('*') || entries.includes(senderId);
 }
 
 /**
@@ -135,7 +119,6 @@ export async function resolveMaxVoiceMention(params: {
   chatId: number | undefined;
   chatIdStr: string;
   senderId: string;
-  groupAllowFrom: unknown;
   mentionRegexes: RegExp[];
   cfg: OpenClawConfig;
   api: MaxApi;
@@ -150,7 +133,9 @@ export async function resolveMaxVoiceMention(params: {
   if (platformTranscript) {
     return matchesMentionPatterns(platformTranscript, mentionRegexes) ? {} : undefined;
   }
-  if (!isMaxVoicePreflightSender(account, params.groupAllowFrom, params.senderId)) {
+  // The inbound gate admitted the sender already; the shared rule again, so
+  // no caller transcribes for a sender outside the group's allowlist.
+  if (!admitMaxGroupSender(account, params.chatId, params.senderId).admitted) {
     return undefined;
   }
 

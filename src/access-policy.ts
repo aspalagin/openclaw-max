@@ -1,9 +1,10 @@
 /**
  * Chat admission rules shared by the inbound gate and message-tool action
  * scoping: the DM policy with allowFrom and the pairing store, the group
- * policy with its allowlist.
+ * policy with its allowlist, the group sender allowlist.
  */
 
+import { isSenderIdAllowed, resolveGroupAllowFromSources } from 'openclaw/plugin-sdk/allow-from';
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
 
 import type { ResolvedMaxAccount } from './accounts.js';
@@ -31,6 +32,59 @@ export function admitMaxGroupChat(
     }
   }
   return { admitted: true };
+}
+
+/**
+ * Sender allowlist of a group: its own groups.<id>.allowFrom (else the "*"
+ * entry's), else the account's groupAllowFrom — the first non-empty one, as
+ * core resolves group sender lists. `max:` prefixes are stripped.
+ */
+export function resolveMaxGroupSenderAllowFrom(
+  account: ResolvedMaxAccount,
+  chatId: number | string | undefined,
+): string[] {
+  const groupCfg = account.config.groups?.[String(chatId)] ?? account.config.groups?.['*'];
+  const groupAllowFrom = Array.isArray(groupCfg?.allowFrom)
+    ? (groupCfg.allowFrom as Array<string | number>)
+    : undefined;
+  return resolveGroupAllowFromSources({
+    groupAllowFrom,
+    allowFrom: account.config.groupAllowFrom,
+  }).map((entry) => entry.replace(/^max:/i, ''));
+}
+
+/**
+ * Whether a sender may trigger the bot in a group the group policy admits:
+ * anyone when no sender list is set (unlike core's WhatsApp/Telegram, no
+ * fallback to the DM allowFrom — MAX never applied it to groups), "*" for
+ * anyone, else only the listed user ids. DM pairing approvals don't count.
+ */
+export function admitMaxGroupSender(
+  account: ResolvedMaxAccount,
+  chatId: number | string | undefined,
+  senderId: number | string | undefined,
+): MaxAdmission {
+  const entries = resolveMaxGroupSenderAllowFrom(account, chatId);
+  const allow = {
+    entries,
+    hasWildcard: entries.includes('*'),
+    hasEntries: entries.length > 0,
+  };
+  if (isSenderIdAllowed(allow, senderId != null ? String(senderId) : undefined, true)) {
+    return { admitted: true };
+  }
+  return { admitted: false, reason: 'sender is not in the group allowFrom/groupAllowFrom' };
+}
+
+/** Group policy, then the group's sender allowlist. */
+export function admitMaxGroupMessage(
+  account: ResolvedMaxAccount,
+  config: OpenClawConfig,
+  chatId: number | string | undefined,
+  senderId: number | string | undefined,
+): MaxAdmission {
+  const chat = admitMaxGroupChat(account, config, chatId);
+  return chat.admitted ? admitMaxGroupSender(account, chatId, senderId) : chat;
 }
 
 /** allowFrom from the config plus the approved pairing store, as strings. */
