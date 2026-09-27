@@ -51,6 +51,7 @@ All notable changes to this project are documented in this file.
 - Из JSON-схемы канала и zod-схемы убраны `default` (`dmPolicy`, `groupPolicy`, `mediaMaxCount`, `actionScope`, `notify`, `disableLinkPreview`): gateway записывает умолчания схемы в конфиг, в том числе в `accounts.<id>`, и они перекрывали значение канала (из-за этого наследование `notify`, `disableLinkPreview`, `mediaMaxCount` не работало вживую). Умолчания применяются в коде при чтении и не изменились; `channels.defaults.groupPolicy` ядра теперь учитывается, когда `groupPolicy` не задан ни у аккаунта, ни у канала.
 - Подсказки агенту для инструмента `message` описывают возможности 0.8: `asVoice`, `buffer` с `filename`/`contentType`, `silent`, ограничение локальных файлов корнями медиа и скоупинг действий (`actionScope`). Убран поиск `sticker-emoji-map.json` через `require` (в ESM-сборке не работал, файла в пакете нет) вместе с путём конкретной установки.
 - Диагностика клиента Bot API и отправки (`[MAX API] …`, `[MAX] … resending as plain text` и т. п.) пишется через логгер плагина рантайма (`runtime.logging.getChildLogger`), а не `console`; до инициализации рантайма (CLI) — по-прежнему в консоль. Текст сообщений логов не изменился.
+- Пакет больше не включает каталог `scripts/` (служебные скрипты разработки: проверка циклов, обновление схемы, ручные проверки API); собранный код и установка от них не зависят, в репозитории они остаются.
 
 ### Security
 

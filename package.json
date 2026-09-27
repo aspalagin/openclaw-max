@@ -44,7 +44,6 @@
     "!src/**/*.test.ts",
     "!src/test-setup.ts",
     "!src/__fixtures__/",
-    "scripts/",
     "openclaw.plugin.json",
     "README.md",
     "SKILL.md",

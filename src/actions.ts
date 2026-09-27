@@ -290,7 +290,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
     if (!to) {
       return null;
     }
-    // Strip provider prefix (e.g. "max:188862440" → "188862440")
+    // Strip provider prefix (e.g. "max:123456789" → "123456789")
     if (to.startsWith('max:')) to = to.slice(4);
     const accountId = typeof args.accountId === 'string' ? args.accountId.trim() : undefined;
     return { to, accountId };
@@ -312,7 +312,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       silent: typeof params.silent === 'boolean' ? params.silent : undefined,
     });
 
-    // Strip provider prefix from target (e.g. "max:188862440" → "188862440")
+    // Strip provider prefix from target (e.g. "max:123456789" → "123456789")
     const stripPrefix = (val: string | undefined): string | undefined => {
       if (!val) return val;
       return val.startsWith('max:') ? val.slice(4) : val;
