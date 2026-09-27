@@ -625,3 +625,130 @@ describe('message tool: several attachments and dialog pins', () => {
     expect(JSON.stringify(pinned)).toContain('"pinned":false');
   });
 });
+
+describe('message tool: inline attachment content (buffer)', () => {
+  const cfg = { channels: { max: { botToken: 'token' } } } as OpenClawConfig;
+  const b64 = (text: string) => Buffer.from(text).toString('base64');
+
+  beforeEach(() => vi.restoreAllMocks());
+
+  const mockSends = async () => {
+    const { MaxApi } = await import('./api.js');
+    const send = vi.spyOn(MaxApi.prototype, 'sendMessage').mockImplementation(
+      async () =>
+        ({
+          message: { body: { mid: 'm1' }, recipient: { chat_id: 9, chat_type: 'dialog' } },
+        }) as never,
+    );
+    const upload = vi
+      .spyOn(MaxApi.prototype, 'uploadMedia')
+      .mockImplementation(async (type, _data, _contentType, fileName) => ({
+        token: `tok:${type}:${fileName}`,
+      }));
+    return { send, upload };
+  };
+
+  it('sends a buffer without a path, named and typed by the call', async () => {
+    const { send, upload } = await mockSends();
+    const result = await actions.handleAction({
+      action: 'sendAttachment',
+      params: {
+        target: '-7001',
+        caption: 'Отчёт',
+        buffer: b64('%PDF-1.7 report'),
+        filename: 'report.pdf',
+        contentType: 'application/pdf',
+      },
+      cfg,
+    } as never);
+
+    expect(upload).toHaveBeenCalledTimes(1);
+    const [type, data, contentType, fileName] = upload.mock.calls[0];
+    expect([type, contentType, fileName]).toEqual(['file', 'application/pdf', 'report.pdf']);
+    expect(Buffer.from(data).toString()).toBe('%PDF-1.7 report');
+    expect(send.mock.calls[0][0].text).toBe('Отчёт');
+    expect(send.mock.calls[0][0].attachments).toEqual([
+      { type: 'file', payload: { token: 'tok:file:report.pdf' } },
+    ]);
+    expect(JSON.stringify(result)).toContain('"messageId":"m1"');
+  });
+
+  it('takes the type of a data URL and names the file after it', async () => {
+    const { upload } = await mockSends();
+    await actions.handleAction({
+      action: 'sendAttachment',
+      params: { target: '-7001', buffer: `data:image/png;base64,${b64('png-bytes')}` },
+      cfg,
+    } as never);
+    const [type, data, contentType, fileName] = upload.mock.calls[0];
+    expect([type, contentType, fileName]).toEqual(['image', 'image/png', 'file.png']);
+    expect(Buffer.from(data).toString()).toBe('png-bytes');
+  });
+
+  it('sends buffer items of attachments[] next to paths', async () => {
+    const { send, upload } = await mockSends();
+    await actions.handleAction({
+      action: 'sendAttachment',
+      params: {
+        target: '-7001',
+        attachments: [
+          { url: 'https://cdn.example/1.png' },
+          { buffer: b64('jpeg'), fileName: 'b.jpg', mimeType: 'image/jpeg' },
+        ],
+      },
+      cfg,
+    } as never);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0].attachments).toHaveLength(2);
+    expect(upload.mock.calls.map((c) => c[3])).toContain('b.jpg');
+  });
+
+  it('prefers the path when core passes both, and the path still goes through the guarded loader', async () => {
+    const { upload } = await mockSends();
+    const tempDir = await mkdtemp(join(tmpdir(), 'max-action-buffer-'));
+    const file = join(tempDir, 'real.txt');
+    await writeFile(file, 'from the file');
+    try {
+      await actions.handleAction({
+        action: 'sendAttachment',
+        params: { target: '-7001', path: file, buffer: b64('from the buffer'), filename: 'x.txt' },
+        cfg,
+        mediaLocalRoots: [tempDir],
+      } as never);
+      expect(Buffer.from(upload.mock.calls[0][1]).toString()).toBe('from the file');
+
+      await expect(
+        actions.handleAction({
+          action: 'sendAttachment',
+          params: { target: '-7001', path: '/etc/hostname', buffer: b64('bypass'), filename: 'h' },
+          cfg,
+          mediaLocalRoots: [tempDir],
+        } as never),
+      ).rejects.toThrow(/not under an allowed directory/);
+      expect(upload).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses content over mediaMaxMb and invalid base64 before any request', async () => {
+    const { send, upload } = await mockSends();
+    const small = { channels: { max: { botToken: 'token', mediaMaxMb: 0.00001 } } };
+    await expect(
+      actions.handleAction({
+        action: 'sendAttachment',
+        params: { target: '-7001', buffer: b64('twelve bytes'), filename: 'a.bin' },
+        cfg: small,
+      } as never),
+    ).rejects.toThrow(/over the 10\.\d+-byte media limit \(mediaMaxMb\)/);
+    await expect(
+      actions.handleAction({
+        action: 'sendAttachment',
+        params: { target: '-7001', buffer: 'not base64 at all!', filename: 'a.bin' },
+        cfg,
+      } as never),
+    ).rejects.toThrow('buffer is not valid base64 content');
+    expect(upload).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+});

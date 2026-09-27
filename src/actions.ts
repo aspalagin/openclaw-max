@@ -14,13 +14,16 @@ import { jsonResult } from 'openclaw/plugin-sdk/tool-results';
 
 import { listMaxAccountIds, resolveMaxAccount } from './accounts.js';
 import { assertMaxActionInScope } from './action-scope.js';
+import { sanitizeMaxFileName } from './media-temp.js';
 import { materializeMaxPresentation, MAX_TEXT_LIMIT, readMaxDeliveryPin } from './presentation.js';
 import { getMaxRuntime } from './runtime.js';
 import {
   deleteMaxMessage,
+  describeMaxMediaSource,
   editMaxMessage,
   type MaxLocalMediaAccess,
   type MaxMediaSendOptions,
+  type MaxMediaSource,
   pinMaxMessage,
   readMaxChannelButtons,
   readMaxSendButtons,
@@ -43,6 +46,50 @@ const mediaSourceKeys = ['media', 'filePath', 'path', 'fileUrl', 'url', 'buffer'
  * content for core, not a path, so it is not declared.
  */
 const mediaSourceParams = mediaSourceKeys.filter((key) => key !== 'buffer');
+
+/** `data:<type>;base64,<data>` — a data URL in `buffer`. */
+const DATA_URL_RE = /^data:([^;,]*)(?:;[^,]*)?;base64,/i;
+
+/**
+ * Inline content from `buffer` (base64 or a base64 data URL) with `filename`
+ * and `contentType` (aliases fileName, mimeType) of the same object. The size
+ * limit is checked before decoding, so an oversized payload is refused
+ * without allocating it.
+ */
+function readInlineMedia(
+  source: Record<string, unknown>,
+  maxBytes: number,
+): MaxMediaSource | undefined {
+  const raw = typeof source.buffer === 'string' ? source.buffer : undefined;
+  if (!raw?.trim()) return undefined;
+  const dataUrl = DATA_URL_RE.exec(raw);
+  const base64 = (dataUrl ? raw.slice(dataUrl[0].length) : raw).replace(/\s+/g, '');
+  if (!/^[A-Za-z0-9+/_-]*={0,2}$/.test(base64)) {
+    throw new Error('buffer is not valid base64 content');
+  }
+  const decodedBytes = Math.floor((base64.replace(/=+$/, '').length * 3) / 4);
+  if (decodedBytes > maxBytes) {
+    throw new Error(
+      `buffer is ${decodedBytes} bytes, over the ${maxBytes}-byte media limit (mediaMaxMb)`,
+    );
+  }
+  const buffer = Buffer.from(
+    base64,
+    base64.includes('-') || base64.includes('_') ? 'base64url' : 'base64',
+  );
+  if (buffer.byteLength === 0) throw new Error('buffer is empty');
+  const pick = (...keys: string[]) =>
+    keys
+      .map((key) => source[key])
+      .find((value): value is string => typeof value === 'string' && value.trim() !== '')
+      ?.trim();
+  const contentType = pick('contentType', 'mimeType') ?? (dataUrl?.[1] || undefined);
+  return {
+    buffer,
+    fileName: sanitizeMaxFileName(pick('filename', 'fileName'), contentType),
+    contentType,
+  };
+}
 
 /**
  * Local media access for an action: the roots and host reader core passed
@@ -78,32 +125,29 @@ function readTargetParam(params: Record<string, unknown>, required = true): stri
 /**
  * Media sources in order: the direct media field first, then every
  * structured `attachments[]` item (one source per item). Duplicates dropped.
+ * A path or URL wins over `buffer` (core may fill both; the path goes through
+ * the guarded loader); `buffer` alone is sent as inline content.
  */
-function readMediaSources(params: Record<string, unknown>): string[] {
-  const sources: string[] = [];
-  const add = (value: string | undefined) => {
+function readMediaSources(params: Record<string, unknown>, maxBytes: number): MaxMediaSource[] {
+  const sources: MaxMediaSource[] = [];
+  const add = (value: MaxMediaSource | undefined) => {
     if (value && !sources.includes(value)) sources.push(value);
   };
-
-  for (const key of mediaSourceKeys) {
-    const value = readStringParam(params, key, { trim: false });
-    if (value) {
-      add(value);
-      break;
+  const readPath = (source: Record<string, unknown>): string | undefined => {
+    for (const key of mediaSourceParams) {
+      const value = readStringParam(source, key, { trim: false });
+      if (value) return value;
     }
-  }
+    return undefined;
+  };
+
+  add(readPath(params) ?? readInlineMedia(params, maxBytes));
 
   if (Array.isArray(params.attachments)) {
     for (const item of params.attachments) {
       if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
       const attachment = item as Record<string, unknown>;
-      for (const key of mediaSourceKeys) {
-        const value = typeof attachment[key] === 'string' ? attachment[key] : undefined;
-        if (value) {
-          add(value);
-          break;
-        }
-      }
+      add(readPath(attachment) ?? readInlineMedia(attachment, maxBytes));
     }
   }
 
@@ -118,7 +162,7 @@ function readMediaSources(params: Record<string, unknown>): string[] {
 async function sendMaxMediaSources(
   to: string,
   caption: string,
-  sources: string[],
+  sources: MaxMediaSource[],
   opts: MaxMediaSendOptions,
 ): Promise<{
   messageId: string;
@@ -142,7 +186,7 @@ async function sendMaxMediaSources(
     ...opts,
     onError: (err, failed) => {
       firstError ??= err;
-      errors.push(`${failed.join(', ')}: ${String(err)}`);
+      errors.push(`${failed.map(describeMaxMediaSource).join(', ')}: ${String(err)}`);
     },
   });
   if (messageIds.length === 0 && firstError !== undefined) throw firstError;
@@ -393,7 +437,8 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       }
 
       // Media: direct media fields and every structured attachments[] item.
-      const mediaSources = readMediaSources(params);
+      const mediaMaxBytes = (account.config.mediaMaxMb ?? 20) * 1024 * 1024;
+      const mediaSources = readMediaSources(params, mediaMaxBytes);
 
       if (mediaSources.length) {
         // Local paths only under the allowed roots (resolveActionLocalMedia);
@@ -404,7 +449,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
           ...sendFlags,
           replyToMessageId: replyTo ?? undefined,
           format: 'markdown',
-          mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
+          mediaMaxBytes,
           localMedia: resolveActionLocalMedia(ctx),
         });
         return withPin(result.messageId, result.chatType, mediaResultExtra(result));
@@ -498,7 +543,8 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
         readStringParam(params, 'message') ?? readStringParam(params, 'caption') ?? '';
       const attachType =
         readStringParam(params, 'type') ?? readStringParam(params, 'attachmentType') ?? '';
-      const mediaSources = readMediaSources(params);
+      const mediaMaxBytes = (account.config.mediaMaxMb ?? 20) * 1024 * 1024;
+      const mediaSources = readMediaSources(params, mediaMaxBytes);
 
       if (mediaSources.length) {
         const result = await sendMaxMediaSources(to, caption, mediaSources, {
@@ -506,7 +552,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
           ...sendFlags,
           replyToMessageId: replyTo ?? undefined,
           format: 'markdown',
-          mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
+          mediaMaxBytes,
           localMedia: resolveActionLocalMedia(ctx),
         });
         return jsonResult({
@@ -549,7 +595,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       }
 
       throw new Error(
-        "sendAttachment: unknown type. Use media/filePath for files, or type='location' / type='contact'",
+        "sendAttachment: unknown type. Use media/filePath (or base64 buffer with filename) for files, or type='location' / type='contact'",
       );
     }
 

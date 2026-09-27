@@ -640,6 +640,25 @@ export interface MaxMediaSendOptions extends MaxSendOptions {
   localMedia?: MaxLocalMediaAccess;
 }
 
+/**
+ * Media handed over as content (message tool `buffer`), not as a path or URL:
+ * the name and type come from the call; the bytes never touch the filesystem.
+ */
+export interface MaxInlineMedia {
+  buffer: Buffer;
+  /** Sanitized file name (see sanitizeMaxFileName); its extension picks the MAX type. */
+  fileName: string;
+  contentType?: string;
+}
+
+/** A local path (guarded loader), a URL (guarded download) or inline content. */
+export type MaxMediaSource = string | MaxInlineMedia;
+
+/** Readable label of a source for errors and logs (never the content). */
+export function describeMaxMediaSource(source: MaxMediaSource): string {
+  return typeof source === 'string' ? source : `${source.fileName} (inline)`;
+}
+
 function isRemoteUrl(source: string): boolean {
   return source.startsWith('https://') || source.startsWith('http://');
 }
@@ -660,8 +679,8 @@ function isImageLink(source: string): boolean {
  * resolution. Anything else is downloaded through the guarded fetcher (which
  * refuses such hosts as well) and uploaded.
  */
-async function isPublicImageLink(source: string): Promise<boolean> {
-  if (!isImageLink(source)) return false;
+async function isPublicImageLink(source: MaxMediaSource): Promise<boolean> {
+  if (typeof source !== 'string' || !isImageLink(source)) return false;
   try {
     const { hostname } = new URL(source);
     if (isBlockedHostnameOrIp(hostname)) return false;
@@ -672,7 +691,8 @@ async function isPublicImageLink(source: string): Promise<boolean> {
   }
 }
 
-function mediaKind(source: string): 'image' | 'video' | 'audio' | 'file' {
+function mediaKind(source: MaxMediaSource): 'image' | 'video' | 'audio' | 'file' {
+  if (typeof source !== 'string') return detectMaxMediaType(source.fileName);
   if (!isRemoteUrl(source)) return detectMaxMediaType(source);
   try {
     return detectMaxMediaType(new URL(source).pathname);
@@ -709,19 +729,43 @@ async function loadLocalMaxMedia(
   };
 }
 
-/** Upload a local path (guarded loader) or a remote URL (SSRF-guarded download). */
+/**
+ * Inline content within the media size limit, as an upload-ready file. The
+ * caller decodes it; the limit is checked again here for every path in.
+ */
+function loadInlineMaxMedia(source: MaxInlineMedia, opts: MaxMediaSendOptions): MaxLoadedMedia {
+  const maxBytes = opts.mediaMaxBytes ?? DEFAULT_MEDIA_MAX_BYTES;
+  if (source.buffer.byteLength > maxBytes) {
+    throw new Error(
+      `Inline media ${source.fileName} is ${source.buffer.byteLength} bytes, over the ${maxBytes}-byte limit (mediaMaxMb)`,
+    );
+  }
+  return {
+    buffer: source.buffer,
+    contentType: source.contentType,
+    fileName: sanitizeMaxFileName(source.fileName, source.contentType),
+  };
+}
+
+/**
+ * Upload a local path (guarded loader), a remote URL (SSRF-guarded download)
+ * or inline content (size-checked).
+ */
 async function uploadMaxAttachment(
   api: MaxApi,
-  source: string,
+  source: MaxMediaSource,
   opts: MaxMediaSendOptions,
 ): Promise<MaxAttachment> {
-  const media = isRemoteUrl(source)
-    ? await downloadMaxRemoteMedia(
-        source,
-        opts.mediaMaxBytes ?? DEFAULT_MEDIA_MAX_BYTES,
-        api.mediaProxyUrl(),
-      )
-    : await loadLocalMaxMedia(source, opts);
+  const media =
+    typeof source !== 'string'
+      ? loadInlineMaxMedia(source, opts)
+      : isRemoteUrl(source)
+        ? await downloadMaxRemoteMedia(
+            source,
+            opts.mediaMaxBytes ?? DEFAULT_MEDIA_MAX_BYTES,
+            api.mediaProxyUrl(),
+          )
+        : await loadLocalMaxMedia(source, opts);
   const type = detectMaxMediaType(media.fileName);
   const uploaded = await api.uploadMedia(type, media.buffer, media.contentType, media.fileName);
   return { type, payload: { token: uploaded.token } };
@@ -738,7 +782,7 @@ async function sendMaxAttachmentsMessage(
   api: MaxApi,
   to: string,
   caption: string,
-  sources: string[],
+  sources: MaxMediaSource[],
   opts: MaxMediaSendOptions,
 ): Promise<MaxSendOutcome> {
   const links = await Promise.all(sources.map(isPublicImageLink));
@@ -747,7 +791,7 @@ async function sendMaxAttachmentsMessage(
     for (const [index, source] of sources.entries()) {
       attachments.push(
         allowLinks && links[index]
-          ? { type: 'image', payload: { url: source } }
+          ? { type: 'image', payload: { url: source as string } }
           : await uploadMaxAttachment(api, source, opts),
       );
     }
@@ -779,13 +823,13 @@ async function sendMaxAttachmentsMessage(
  * Send a media message to MAX (with upload).
  * @param to Chat ID or user ID
  * @param caption Text caption
- * @param mediaPath Local file path (under the allowed roots) or URL (public https image links are sent by URL)
+ * @param mediaPath Local file path (under the allowed roots), URL (public https image links are sent by URL) or inline content
  * @param opts Send options
  */
 export async function sendMaxMediaMessage(
   to: string,
   caption: string,
-  mediaPath: string,
+  mediaPath: MaxMediaSource,
   opts: MaxMediaSendOptions = {},
 ): Promise<MaxSendOutcome> {
   const token = resolveToken(opts);
@@ -798,9 +842,9 @@ export async function sendMaxMediaMessage(
  * (up to 12 per message, an album), audio and files one per message. Order is
  * kept.
  */
-export function groupMaxMedia(sources: string[]): string[][] {
-  const groups: string[][] = [];
-  let album: string[] = [];
+export function groupMaxMedia<T extends MaxMediaSource>(sources: T[]): T[][] {
+  const groups: T[][] = [];
+  let album: T[] = [];
   const flush = () => {
     if (album.length) groups.push(album);
     album = [];
@@ -828,8 +872,8 @@ export function groupMaxMedia(sources: string[]): string[][] {
 export async function sendMaxMediaGroup(
   to: string,
   caption: string,
-  sources: string[],
-  opts: MaxMediaSendOptions & { onError?: (err: unknown, sources: string[]) => void } = {},
+  sources: MaxMediaSource[],
+  opts: MaxMediaSendOptions & { onError?: (err: unknown, sources: MaxMediaSource[]) => void } = {},
 ): Promise<{ messageIds: string[] }> {
   const token = resolveToken(opts);
   const api = new MaxApi({ token });

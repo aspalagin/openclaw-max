@@ -967,3 +967,31 @@ describe('pinMaxMessage in dialogs', () => {
     });
   });
 });
+
+describe('inline media (content without a path)', () => {
+  it('uploads inline bytes under their name and refuses them over the size limit', async () => {
+    const upload = vi
+      .spyOn(MaxApi.prototype, 'uploadMedia')
+      .mockResolvedValue({ token: 'up-token' });
+    const send = vi.spyOn(MaxApi.prototype, 'sendMessage').mockResolvedValue({
+      message: { body: { mid: 'mid.inline' } },
+    } as never);
+    const media = {
+      buffer: Buffer.from('12345'),
+      fileName: 'notes.txt',
+      contentType: 'text/plain',
+    };
+
+    const sent = await sendMaxMediaMessage('100', '', media, { token: MOCK_TOKEN });
+    expect(sent.messageId).toBe('mid.inline');
+    expect(upload).toHaveBeenCalledWith('file', media.buffer, 'text/plain', 'notes.txt');
+
+    await expect(
+      sendMaxMediaMessage('100', '', media, { token: MOCK_TOKEN, mediaMaxBytes: 4 }),
+    ).rejects.toThrow('Inline media notes.txt is 5 bytes, over the 4-byte limit (mediaMaxMb)');
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    upload.mockRestore();
+    send.mockRestore();
+  });
+});
