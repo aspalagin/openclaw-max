@@ -69,6 +69,13 @@ export async function processIncomingMessage(
     !hasAgentAttachments(attachments) &&
     !(forward && (forward.text.trim() || hasAgentAttachments(forward.attachments)))
   ) {
+    // A message with no text and no attachments at all is what some clients
+    // reportedly get in long polling for a voice message: leave a trace.
+    if (!attachments.length && !forward && !isCallbackCommand) {
+      log?.info?.(
+        `[${account.accountId}] Skipping empty message ${messageId}: no text, attachments or forward`,
+      );
+    }
     return;
   }
 

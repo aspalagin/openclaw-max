@@ -456,3 +456,134 @@ describe('inbound media count limit', () => {
     );
   });
 });
+
+describe('inbound voice messages', () => {
+  const VOICE = { type: 'audio', payload: { url: 'https://files.example.test/v.ogg' } };
+
+  function voiceRuntime() {
+    const runtime = makeRuntime();
+    // MAX CDNs may answer with a generic type; the explicit kind still marks audio.
+    runtime.fetchRemoteMedia.mockImplementation(async () => ({
+      buffer: new Uint8Array([1, 2, 3]),
+      contentType: 'application/octet-stream',
+      fileName: 'v.ogg',
+    }));
+    setMaxRuntime(runtime.core as never);
+    return runtime;
+  }
+
+  it('hands a voice without a MAX transcript to core STT as an audio fact', async () => {
+    const runtime = voiceRuntime();
+    await dispatchUpdate(
+      created({ body: { mid: 'mid.v1', seq: 1, text: '', attachments: [VOICE] } }),
+      makeOpts() as never,
+    );
+
+    expect(runtime.dispatched).toHaveLength(1);
+    const ctx = runtime.dispatched[0];
+    expect(ctx.media).toEqual([expect.objectContaining({ kind: 'audio', messageId: 'mid.v1' })]);
+    expect((ctx.media as { transcribed?: boolean }[])[0].transcribed).not.toBe(true);
+    // Media-only: body and command text stay empty for core to fill from STT.
+    expect(ctx.BodyForAgent).toBe('');
+    expect(ctx.CommandBody).toBe('');
+  });
+
+  it('uses the MAX transcript and marks the fact transcribed so core skips STT', async () => {
+    const runtime = voiceRuntime();
+    await dispatchUpdate(
+      created({
+        body: {
+          mid: 'mid.v2',
+          seq: 2,
+          text: '',
+          attachments: [{ ...VOICE, transcription: ' Привет, бот ' }],
+        },
+      }),
+      makeOpts() as never,
+    );
+
+    const ctx = runtime.dispatched[0];
+    expect(ctx.BodyForAgent).toBe('[Voice transcript: Привет, бот]');
+    expect(ctx.media).toEqual([expect.objectContaining({ kind: 'audio', transcribed: true })]);
+  });
+
+  it('marks a voice that could not be loaded instead of leaking its signed URL', async () => {
+    const runtime = voiceRuntime();
+    runtime.fetchRemoteMedia.mockRejectedValue(new Error('HTTP 403'));
+    await dispatchUpdate(
+      created({ body: { mid: 'mid.v3', seq: 3, text: '', attachments: [VOICE] } }),
+      makeOpts() as never,
+    );
+
+    const ctx = runtime.dispatched[0];
+    expect(ctx.BodyForAgent).toBe('[Voice message: audio unavailable, no transcript]');
+    expect(String(ctx.BodyForAgent)).not.toContain('https://');
+    expect(ctx.media).toBeUndefined();
+  });
+
+  it('keeps the MAX transcript when the audio cannot be loaded', async () => {
+    const runtime = voiceRuntime();
+    runtime.fetchRemoteMedia.mockRejectedValue(new Error('HTTP 403'));
+    await dispatchUpdate(
+      created({
+        body: { mid: 'mid.v4', seq: 4, text: '', attachments: [{ ...VOICE, transcription: 'да' }] },
+      }),
+      makeOpts() as never,
+    );
+
+    expect(runtime.dispatched[0].BodyForAgent).toBe('[Voice transcript: да]');
+  });
+
+  it('logs an empty message (no text, attachments or forward) and dispatches nothing', async () => {
+    const runtime = voiceRuntime();
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    await dispatchUpdate(created({ body: { mid: 'mid.v5', seq: 5, text: '' } }), {
+      ...makeOpts(),
+      log,
+    } as never);
+
+    expect(runtime.dispatched).toHaveLength(0);
+    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Skipping empty message mid.v5'));
+  });
+
+  it('delivers the same audio fact over the webhook transport', async () => {
+    const runtime = voiceRuntime();
+    const opts = makeOpts();
+    let settled!: Promise<void>;
+    const unregister = registerMaxWebhookTarget({
+      account: opts.account,
+      config: opts.config,
+      path: '/voice-hook',
+      secret: 'hook-secret',
+      onUpdate: (update) => {
+        settled = dispatchUpdate(update, opts as never);
+        return settled;
+      },
+    });
+    const req = Object.assign(
+      new Readable({
+        read() {
+          this.push(
+            JSON.stringify(
+              created({ body: { mid: 'mid.v6', seq: 6, text: '', attachments: [VOICE] } }),
+            ),
+          );
+          this.push(null);
+        },
+      }),
+      {
+        method: 'POST',
+        url: '/voice-hook',
+        headers: { 'content-type': 'application/json', 'x-max-bot-api-secret': 'hook-secret' },
+        socket: { destroyed: false, writableEnded: false },
+      },
+    ) as unknown as IncomingMessage;
+    const res = { statusCode: 200, setHeader: () => res, end: () => undefined };
+    await handleMaxWebhookRequest(req, res as unknown as ServerResponse);
+    await vi.waitFor(() => expect(settled).toBeDefined());
+    await settled;
+    unregister();
+
+    expect(runtime.dispatched[0].media).toEqual([expect.objectContaining({ kind: 'audio' })]);
+  });
+});

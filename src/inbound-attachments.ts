@@ -29,6 +29,9 @@ export function resolveInboundMediaMaxCount(account: ResolvedMaxAccount): number
   return account.config.mediaMaxCount ?? DEFAULT_INBOUND_MEDIA_MAX_COUNT;
 }
 
+/** A voice message whose audio could not be loaded and has no MAX transcript. */
+const VOICE_UNAVAILABLE = '[Voice message: audio unavailable, no transcript]';
+
 /** Longest link-preview description handed to the agent. */
 const MAX_SHARE_DESCRIPTION_CHARS = 300;
 
@@ -68,8 +71,11 @@ export async function collectInboundAttachments(params: {
       }
 
       // MAX may transcribe voice messages itself (AudioAttachment.transcription,
-      // a sibling of payload). The text goes to the agent and the audio fact is
-      // marked transcribed, so core media understanding does not run STT again.
+      // a sibling of payload). The platform transcript wins: the text goes to
+      // the agent and the audio fact is marked transcribed (the SDK contract
+      // for platform transcripts), so core media understanding skips STT.
+      // Without it the fact stays untranscribed and core STT
+      // (tools.media.audio) runs; a failed STT leaves core's marker.
       const transcription = attType === 'audio' ? readAudioTranscription(att) : undefined;
       if (transcription) {
         attachmentDescriptions.push(`[Voice transcript: ${transcription}]`);
@@ -126,23 +132,31 @@ export async function collectInboundAttachments(params: {
           );
           // Only the local copy goes to the agent: MAX download URLs are signed
           // and short-lived, so they are not recorded as the media url.
+          // A MAX audio attachment is a voice message: the explicit kind keeps
+          // core STT selecting it even when the CDN answers with a generic
+          // content type.
           mediaInputs.push({
             path: saved.path,
             contentType: saved.contentType,
             fileName: inboundFileName,
             messageId,
+            ...(attType === 'audio' ? { kind: 'audio' as const } : {}),
             ...(transcription ? { transcribed: true } : {}),
           });
         } catch (err) {
           log?.error?.(`[${account.accountId}] Failed to download ${attType}: ${String(err)}`);
           // Fall back to text description (sticker code already added above)
-          if (attType !== 'sticker') {
+          if (attType === 'audio') {
+            if (!transcription) attachmentDescriptions.push(VOICE_UNAVAILABLE);
+          } else if (attType !== 'sticker') {
             attachmentDescriptions.push(`[${attType}: ${url}]`);
           }
         }
       } else {
         // No URL — text description
-        if (attType === 'sticker') {
+        if (attType === 'audio') {
+          if (!transcription) attachmentDescriptions.push(VOICE_UNAVAILABLE);
+        } else if (attType === 'sticker') {
           const code = payload?.code ?? '';
           attachmentDescriptions.push(`[Sticker${code ? `: ${code}` : ''}]`);
         } else if (attType === 'file') {
