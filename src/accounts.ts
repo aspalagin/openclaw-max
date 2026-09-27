@@ -51,6 +51,8 @@ export interface MaxAccountConfig {
   apiBaseUrl?: string;
   /** HTTP(S) proxy for all MAX traffic of the account; may carry credentials */
   httpProxy?: string;
+  /** Core streaming settings (streaming.mode, streaming.progress) */
+  streaming?: Record<string, unknown>;
 }
 
 export interface ResolvedMaxAccount {
@@ -304,6 +306,7 @@ export function readMaxAccount(params: {
       mediaMaxCount: section.mediaMaxCount as number | undefined,
       apiBaseUrl: section.apiBaseUrl as string | undefined,
       httpProxy: section.httpProxy as string | undefined,
+      streaming: section.streaming as MaxAccountConfig['streaming'],
     };
 
     const botToken = readSecretOption(cfg, section.botToken, 'channels.max.botToken');

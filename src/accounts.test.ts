@@ -410,5 +410,14 @@ describe('MAX Account Resolution', () => {
       expect(account.config.notify).toBe(false);
       expect(account.config).not.toHaveProperty('accounts');
     });
+
+    it('carries core streaming settings on the top-level and named accounts', () => {
+      const streaming = { mode: 'progress', progress: { toolProgress: true } };
+      const cfg = {
+        channels: { max: { ...channel, streaming, accounts: { two: { botToken: 'two-token' } } } },
+      } as unknown as OpenClawConfig;
+      expect(resolveMaxAccount({ cfg }).config.streaming).toEqual(streaming);
+      expect(resolveMaxAccount({ cfg, accountId: 'two' }).config.streaming).toEqual(streaming);
+    });
   });
 });
