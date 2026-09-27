@@ -540,7 +540,9 @@ export async function processIncomingMessage(
               config,
               log,
               statusSink,
-              draft: useEditStreaming ? draft : undefined,
+              // Tool/block payloads mid-turn go as their own messages; the
+              // draft keeps streaming until the final answer replaces it.
+              draft: useEditStreaming && info.kind === 'final' ? draft : undefined,
               localMedia: replyLocalMedia,
             });
           if (progress && info.kind === 'final') {
@@ -573,10 +575,8 @@ export async function processIncomingMessage(
     throw err;
   } finally {
     await progress?.close({ failed: dispatchFailed });
+    await draft.clear();
   }
-
-  // Cleanup draft stream
-  await draft.clear();
 }
 
 /**

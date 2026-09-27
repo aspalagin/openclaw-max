@@ -324,6 +324,60 @@ describe('edit streaming: long and refused finals', () => {
     expect(posts().map((c) => c.body.text)).toEqual(['Second part of the answer']);
   });
 
+  /** Like mockFetch, but the first request waits until the returned release() is called. */
+  function mockSlowFirstFetch(...responses: [number, unknown][]): () => void {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    calls = [];
+    global.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const index = calls.length;
+      calls.push({
+        method: String(init?.method),
+        url: String(url),
+        body: JSON.parse(String(init?.body ?? '{}')),
+      });
+      if (index === 0) await gate;
+      const [status, json] = responses[Math.min(index, responses.length - 1)];
+      return new Response(JSON.stringify(json), { status });
+    }) as typeof fetch;
+    return release;
+  }
+
+  it('waits for the first draft send in flight instead of leaving an orphan draft', async () => {
+    const release = mockSlowFirstFetch(sent('mid.draft'), [200, { success: true }]);
+    const draft = createMaxDraftStream({ account: ACCOUNT, chatId: '70', log: LOG });
+    void draft.update('Draft of the answer, long enough to be sent');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toHaveLength(1);
+
+    const delivered = deliver({ text: 'Final answer' }, { draft });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    release();
+    await delivered;
+
+    expect(calls.map((c) => c.method)).toEqual(['POST', 'PUT']);
+    expect(calls[1].url).toContain('message_id=mid.draft');
+    expect(calls[1].body.text).toBe('Final answer');
+  });
+
+  it('never sends a second draft while the first send is still in flight', async () => {
+    vi.useFakeTimers();
+    try {
+      const release = mockSlowFirstFetch(sent('mid.draft'), [200, { success: true }]);
+      const draft = createMaxDraftStream({ account: ACCOUNT, chatId: '70', log: LOG });
+      void draft.update('Draft of the answer, long enough to be sent');
+      void draft.update('Draft of the answer, long enough to be sent, and more');
+      await vi.advanceTimersByTimeAsync(1500);
+      release();
+      await vi.advanceTimersByTimeAsync(1500);
+
+      expect(calls.map((c) => c.method)).toEqual(['POST', 'PUT']);
+      expect(calls[1].url).toContain('message_id=mid.draft');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps the pressed message when a press answer went into the draft', async () => {
     mockFetch(sent('mid.draft'), [200, { success: true }], sent('mid.2'));
     const draft = await startDraft();

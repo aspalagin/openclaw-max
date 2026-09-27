@@ -40,6 +40,12 @@ export interface MaxDraftStream {
   discard(): Promise<boolean>;
   /** Cancel a pending update and stop streaming. */
   clear(): Promise<void>;
+  /**
+   * The final answer is coming: stop streaming and wait for a send or edit in
+   * flight, so `messageId` is settled (a draft still being sent is not left
+   * behind as a second message).
+   */
+  settle(): Promise<void>;
 }
 
 /** Draft stream for edit-streaming (like Telegram's partial reply approach). */
@@ -57,6 +63,18 @@ export function createMaxDraftStream(params: {
   let draftTimer: ReturnType<typeof setTimeout> | null = null;
   let draftStopped = false;
   let draftFinalized = false;
+  // Sends and edits run one at a time: a deferred update or the final never
+  // races the first send (which would leave a second, orphaned draft).
+  let inflight: Promise<void> = Promise.resolve();
+
+  const stop = async (): Promise<void> => {
+    if (draftTimer) {
+      clearTimeout(draftTimer);
+      draftTimer = null;
+    }
+    draftStopped = true;
+    await inflight;
+  };
 
   const draftUpdate = async (text: string) => {
     if (draftStopped || !text) return;
@@ -87,29 +105,35 @@ export function createMaxDraftStream(params: {
     draftLastText = trimmed;
     draftLastEditAt = now;
 
-    try {
-      if (!draftMid) {
-        // First chunk — send new message
-        // The draft is the message the user is notified about: account defaults apply.
-        const res = await sendMaxMessage(chatId, trimmed, {
-          token: account.token,
-          replyToMessageId: params.replyToId,
-          format: 'markdown',
-          ...resolveMaxSendFlags(account.config),
-        });
-        draftMid = res.messageId || null;
-        statusSink?.({ lastOutboundAt: Date.now() });
-      } else {
-        // Edit existing message
-        await editMaxMessage(draftMid, trimmed, {
-          token: account.token,
-          format: 'markdown',
-        });
+    const run = inflight.then(async () => {
+      // Stopped meanwhile (the final answer took over).
+      if (draftStopped) return;
+      try {
+        if (!draftMid) {
+          // First chunk — send new message
+          // The draft is the message the user is notified about: account defaults apply.
+          const res = await sendMaxMessage(chatId, trimmed, {
+            token: account.token,
+            replyToMessageId: params.replyToId,
+            format: 'markdown',
+            ...resolveMaxSendFlags(account.config),
+          });
+          draftMid = res.messageId || null;
+          statusSink?.({ lastOutboundAt: Date.now() });
+        } else {
+          // Edit existing message
+          await editMaxMessage(draftMid, trimmed, {
+            token: account.token,
+            format: 'markdown',
+          });
+        }
+      } catch (err) {
+        draftStopped = true;
+        log?.debug?.(`[${account.accountId}] MAX draft stream failed: ${String(err)}`);
       }
-    } catch (err) {
-      draftStopped = true;
-      log?.debug?.(`[${account.accountId}] MAX draft stream failed: ${String(err)}`);
-    }
+    });
+    inflight = run;
+    await run;
   };
 
   return {
@@ -124,11 +148,7 @@ export function createMaxDraftStream(params: {
       // Final delivery replaces the draft message with final text. The
       // keyboard (presentation buttons) goes onto the same edit, otherwise
       // the final answer would lose its buttons.
-      if (draftTimer) {
-        clearTimeout(draftTimer);
-        draftTimer = null;
-      }
-      draftStopped = true;
+      await stop();
       if (!draftMid) return false;
       if (finalText === draftLastText && !buttons?.length) {
         draftFinalized = true;
@@ -149,11 +169,7 @@ export function createMaxDraftStream(params: {
       }
     },
     discard: async () => {
-      if (draftTimer) {
-        clearTimeout(draftTimer);
-        draftTimer = null;
-      }
-      draftStopped = true;
+      await stop();
       if (!draftMid) return true;
       try {
         await deleteMaxMessage(draftMid, { token: account.token });
@@ -164,12 +180,7 @@ export function createMaxDraftStream(params: {
         return false;
       }
     },
-    clear: async () => {
-      if (draftTimer) {
-        clearTimeout(draftTimer);
-        draftTimer = null;
-      }
-      draftStopped = true;
-    },
+    clear: stop,
+    settle: stop,
   };
 }

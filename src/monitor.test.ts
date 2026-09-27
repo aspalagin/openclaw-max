@@ -573,15 +573,20 @@ describe('edit streaming (streamMode: partial)', () => {
     const draftText = 'Черновик ответа, достаточно длинный для отправки';
     core.channel.reply.dispatchReplyWithBufferedBlockDispatcher = vi.fn(
       async (params: {
-        dispatcherOptions: { deliver: (payload: Record<string, unknown>) => Promise<void> };
+        dispatcherOptions: {
+          deliver: (payload: Record<string, unknown>, info: { kind: string }) => Promise<void>;
+        };
         replyOptions: { onPartialReply?: (payload: { text?: string }) => void };
       }) => {
         params.replyOptions.onPartialReply?.({ text: draftText });
         await vi.waitFor(() => expect(requests.some((r) => r.method === 'POST')).toBe(true));
-        await params.dispatcherOptions.deliver({
-          text: draftText,
-          channelData: { max: { buttons: [[{ text: 'Ещё', payload: 'more' }]] } },
-        });
+        await params.dispatcherOptions.deliver(
+          {
+            text: draftText,
+            channelData: { max: { buttons: [[{ text: 'Ещё', payload: 'more' }]] } },
+          },
+          { kind: 'final' },
+        );
       },
     ) as never;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

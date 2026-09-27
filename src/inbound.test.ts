@@ -667,6 +667,51 @@ describe('turn status mode (streaming.mode "progress")', () => {
   });
 });
 
+describe('edit streaming draft (streamMode "partial")', () => {
+  type Captured = {
+    replyOptions: { onPartialReply?: (payload: { text?: string }) => void };
+    dispatcherOptions: { deliver: (payload: unknown, info: unknown) => Promise<void> };
+  };
+  const PARTIAL = 'Partial answer that is long enough to be shown';
+  let runtime: ReturnType<typeof makeRuntime>;
+
+  const fetchCalls = () =>
+    (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map(([url, init]) => ({
+      method: String(init.method),
+      url: String(url),
+    }));
+
+  function useTurn(turn: (captured: Captured) => Promise<void>) {
+    runtime = makeRuntime();
+    runtime.core.channel.reply.dispatchReplyWithBufferedBlockDispatcher = vi.fn(
+      async (params: unknown) => {
+        const captured = params as Captured;
+        captured.replyOptions.onPartialReply?.({ text: PARTIAL });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await turn(captured);
+      },
+    ) as never;
+    setMaxRuntime(runtime.core as never);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ message: { body: { mid: 'mid.draft' }, recipient: DIALOG } }),
+    });
+  }
+
+  const hello = () => created({ body: { mid: 'mid.q', seq: 1, text: 'hello' } });
+
+  it('sends a tool payload as its own message and puts the final into the draft', async () => {
+    useTurn(async (captured) => {
+      await captured.dispatcherOptions.deliver({ text: 'Tool output' }, { kind: 'tool' });
+      await captured.dispatcherOptions.deliver({ text: 'Final answer' }, { kind: 'final' });
+    });
+    await dispatchUpdate(hello(), makeOpts({ streamMode: 'partial' }) as never);
+
+    expect(fetchCalls().map((c) => c.method)).toEqual(['POST', 'POST', 'PUT']);
+    expect(fetchCalls()[2].url).toContain('message_id=mid.draft');
+  });
+});
+
 describe('message text in logs', () => {
   const SECRET = 'Пароль от сейфа 4242';
   const CAPTION = 'Подпись к фото про отпуск';

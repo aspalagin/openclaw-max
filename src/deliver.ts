@@ -111,6 +111,8 @@ export async function deliverMaxReply(params: {
   const buttons = readMaxChannelButtons(payload.channelData);
   // channelData.max (notify, silent, disableLinkPreview) beats the account defaults.
   const sendOptions = resolveMaxSendFlags(account.config, { channelData: payload.channelData });
+  // A draft send still in flight settles first, so it is replaced, not orphaned.
+  if (params.draft) await params.draft.settle();
   // Only the first text final replaces the draft: once it carries a final
   // text, later final payloads of the turn go as new messages.
   const draftMid =
