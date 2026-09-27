@@ -545,7 +545,7 @@ export class MaxApi {
   async sendAction(
     chatId: number,
     action: MaxSenderAction,
-    opts?: { timeoutMs?: number; retryAttempts?: number },
+    opts?: { timeoutMs?: number; retryAttempts?: number; signal?: AbortSignal },
   ): Promise<MaxSimpleResult> {
     return this.request(
       'POST',
@@ -554,6 +554,7 @@ export class MaxApi {
       { action },
       opts?.timeoutMs,
       opts?.retryAttempts,
+      opts?.signal,
     );
   }
 

@@ -94,7 +94,7 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
   setup: maxSetupAdapter,
   status: maxStatusAdapter,
   gateway: maxGatewayAdapter,
-  heartbeat: { sendTyping: sendMaxHeartbeatTyping },
+  heartbeat: { sendTyping: sendMaxHeartbeatTyping, sendTypingGuarded: sendMaxHeartbeatTyping },
 
   // Message actions (send, edit, delete)
   actions: maxMessageActions,

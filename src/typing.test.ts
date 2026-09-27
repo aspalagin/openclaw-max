@@ -152,6 +152,38 @@ describe('sendMaxHeartbeatTyping', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it('guarded variant: passes the run signal and rechecks authorization before sending', async () => {
+    const spy = vi.spyOn(MaxApi.prototype, 'sendAction').mockResolvedValue({ success: true });
+    const signal = new AbortController().signal;
+    const assertPlatformSendAuthorized = vi.fn();
+    await sendMaxHeartbeatTyping({ cfg, to: 'max:70', signal, assertPlatformSendAuthorized });
+    expect(assertPlatformSendAuthorized).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith(70, 'typing_on', {
+      retryAttempts: 0,
+      timeoutMs: 5_000,
+      signal,
+    });
+  });
+
+  it('guarded variant: sends nothing once the run is cancelled or unauthorized', async () => {
+    const spy = vi.spyOn(MaxApi.prototype, 'sendAction').mockResolvedValue({ success: true });
+    const aborted = new AbortController();
+    aborted.abort();
+    await sendMaxHeartbeatTyping({ cfg, to: 'max:70', signal: aborted.signal });
+    const denied = () => {
+      throw new Error('run no longer current');
+    };
+    await expect(
+      sendMaxHeartbeatTyping({
+        cfg,
+        to: 'max:70',
+        signal: new AbortController().signal,
+        assertPlatformSendAuthorized: denied,
+      }),
+    ).rejects.toThrow('run no longer current');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it('rejects on a send failure so core can log it and trip its breaker', async () => {
     vi.spyOn(MaxApi.prototype, 'sendAction').mockRejectedValue(new Error('boom'));
     await expect(sendMaxHeartbeatTyping({ cfg, to: 'max:70' })).rejects.toThrow('boom');
