@@ -37,7 +37,8 @@ export type MaxActionTarget = { to: string } | { messageId: string };
  * Throws ToolAuthorizationError (a tool error the agent sees) when the action
  * may not run in its chat under channels.max.actionScope. Operator calls
  * without a conversation (CLI, gateway RPC, Control UI) are not scoped:
- * there is no untrusted chat whose content could have steered them.
+ * there is no untrusted chat whose content could have steered them. A call
+ * without a conversation that core marks senderIsOwner=false is not one.
  */
 export async function assertMaxActionInScope(
   ctx: ChannelMessageActionContext,
@@ -49,7 +50,11 @@ export async function assertMaxActionInScope(
 
   const currentChatId = readCurrentMaxChatId(ctx);
   const requesterId = ctx.requesterSenderId?.trim() || undefined;
-  if (!currentChatId && !requesterId) return;
+  // Core passes the conversation only from a trusted channel turn. Without
+  // one, an explicit senderIsOwner=false still marks a non-owner run (agent
+  // runs started by plugins or hooks, non-admin gateway clients): those are
+  // scoped to admitted chats, not treated as operator calls.
+  if (!currentChatId && !requesterId && ctx.senderIsOwner !== false) return;
 
   const api = new MaxApi({ token: account.token });
   const located = await failClosed(ctx.action, target, () => locateActionChat(api, target));

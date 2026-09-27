@@ -242,7 +242,7 @@ message(action="pin", target="CHAT_ID", messageId="MID")
 - `silent=true` sends without a push notification; MAX channels always notify.
 - `pin=true` or `delivery.pin` pins the sent message. MAX has no pinning in private dialogs: the plugin skips the call and returns `pinned: false` with a reason.
 
-**Scope (`actionScope`).** In a turn started by someone other than the owner, actions work only in the current chat and in chats the inbound policy admits (dialogs with senders in `allowFrom` or paired, groups in `groups` and, when a group has a sender list, only if the requester is on it). The owner's requests are not limited. Operator calls without a conversation (CLI, gateway RPC, Control UI) are not limited. A refused action is a tool error raised before anything changes in MAX; if the plugin cannot determine the chat of a message, it refuses.
+**Scope (`actionScope`).** In a turn started by someone other than the owner, actions work only in the current chat and in chats the inbound policy admits (dialogs with senders in `allowFrom` or paired, groups in `groups` and, when a group has a sender list, only if the requester is on it). The owner's requests are not limited. Operator calls without a conversation (CLI, gateway RPC, Control UI) are not limited; an agent run without a conversation that OpenClaw marks as not the owner's (started by a plugin or a hook) is limited to the admitted chats. A refused action is a tool error raised before anything changes in MAX; if the plugin cannot determine the chat of a message, it refuses.
 
 - `admitted` (default) — as above.
 - `current` — non-owner turns act only in their own chat.

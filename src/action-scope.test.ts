@@ -212,6 +212,17 @@ describe.each(ACTIONS)('actionScope for $action', (item) => {
     await run(item, OTHER_GROUP, {});
     expect(spies[item.mutation]).toHaveBeenCalledTimes(1);
   });
+
+  // Core hands the conversation over only from a trusted channel turn; agent
+  // runs started by plugins or hooks come without one and senderIsOwner=false.
+  it('scopes a non-owner run without a conversation to admitted chats', async () => {
+    const err = await refusal(run(item, OTHER_GROUP, { senderIsOwner: false }));
+    expect(err).toBeInstanceOf(ToolAuthorizationError);
+    expect(spies[item.mutation]).not.toHaveBeenCalled();
+
+    await run(item, ADMITTED_GROUP, { senderIsOwner: false });
+    expect(spies[item.mutation]).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('dialogs follow the DM policy', () => {
