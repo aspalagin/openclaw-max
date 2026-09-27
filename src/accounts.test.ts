@@ -256,4 +256,159 @@ describe('MAX Account Resolution', () => {
       expect(account.accountId).toBe('prod');
     });
   });
+
+  describe('named account inheritance', () => {
+    const channel = {
+      botToken: 'top-token',
+      tokenFile: '/nonexistent/top-token',
+      name: 'Top bot',
+      transport: 'webhook',
+      webhookUrl: 'https://hooks.example.test/max',
+      webhookSecret: 'top-secret',
+      webhookSecretFile: '/nonexistent/top-secret',
+      webhookPath: '/max/top',
+      commands: [{ name: 'help' }],
+      dmPolicy: 'allowlist',
+      allowFrom: ['111'],
+      groupPolicy: 'open',
+      groupAllowFrom: ['222'],
+      groups: { '-100': { requireMention: false } },
+      mediaMaxMb: 5,
+      mediaMaxCount: 3,
+      streamMode: 'partial',
+      markSeen: false,
+      actionScope: 'current',
+      notify: false,
+      disableLinkPreview: true,
+    };
+
+    it('inherits every channel-level option the account does not set', () => {
+      const cfg = {
+        channels: { max: { ...channel, accounts: { two: { botToken: 'two-token' } } } },
+      } as unknown as OpenClawConfig;
+      const { config } = resolveMaxAccount({ cfg, accountId: 'two' });
+      expect(config).toMatchObject({
+        dmPolicy: 'allowlist',
+        allowFrom: ['111'],
+        groupPolicy: 'open',
+        groupAllowFrom: ['222'],
+        groups: { '-100': { requireMention: false } },
+        mediaMaxMb: 5,
+        mediaMaxCount: 3,
+        streamMode: 'partial',
+        markSeen: false,
+        actionScope: 'current',
+        notify: false,
+        disableLinkPreview: true,
+      });
+    });
+
+    it('lets an explicit account value win, including false and whole lists', () => {
+      const cfg = {
+        channels: {
+          max: {
+            ...channel,
+            accounts: {
+              two: {
+                botToken: 'two-token',
+                dmPolicy: 'pairing',
+                allowFrom: ['333'],
+                groups: { '-200': {} },
+                markSeen: true,
+                mediaMaxMb: 20,
+                actionScope: 'off',
+                notify: true,
+                disableLinkPreview: false,
+              },
+            },
+          },
+        },
+      } as unknown as OpenClawConfig;
+      const { config } = resolveMaxAccount({ cfg, accountId: 'two' });
+      expect(config.dmPolicy).toBe('pairing');
+      expect(config.allowFrom).toEqual(['333']);
+      expect(config.groups).toEqual({ '-200': {} });
+      expect(config.markSeen).toBe(true);
+      expect(config.mediaMaxMb).toBe(20);
+      expect(config.actionScope).toBe('off');
+      expect(config.notify).toBe(true);
+      expect(config.disableLinkPreview).toBe(false);
+      // not set on the account: still inherited
+      expect(config.groupPolicy).toBe('open');
+      expect(config.mediaMaxCount).toBe(3);
+    });
+
+    it('never inherits the token, its file, the name or the webhook settings', () => {
+      const cfg = {
+        channels: { max: { ...channel, accounts: { two: {} } } },
+      } as unknown as OpenClawConfig;
+      const account = resolveMaxAccount({ cfg, accountId: 'two' });
+      expect(account.token).toBe('');
+      expect(account.tokenSource).toBe('none');
+      expect(account.name).toBeUndefined();
+      for (const key of [
+        'botToken',
+        'tokenFile',
+        'name',
+        'transport',
+        'webhookUrl',
+        'webhookSecret',
+        'webhookSecretFile',
+        'webhookPath',
+        'commands',
+      ]) {
+        expect(account.config, key).not.toHaveProperty(key);
+      }
+    });
+
+    it('keeps the account’s own token and webhook settings', () => {
+      const cfg = {
+        channels: {
+          max: {
+            ...channel,
+            accounts: {
+              two: {
+                botToken: 'two-token',
+                name: 'Second bot',
+                webhookUrl: 'https://hooks.example.test/two',
+                webhookSecret: 'two-secret',
+              },
+            },
+          },
+        },
+      } as unknown as OpenClawConfig;
+      const account = resolveMaxAccount({ cfg, accountId: 'two' });
+      expect(account.token).toBe('two-token');
+      expect(account.name).toBe('Second bot');
+      expect(account.config.webhookUrl).toBe('https://hooks.example.test/two');
+      expect(account.config.webhookSecret).toBe('two-secret');
+      expect(account.config.webhookPath).toBeUndefined();
+    });
+
+    it('disables every account when the channel is disabled', () => {
+      const cfg = {
+        channels: {
+          max: { enabled: false, accounts: { two: { botToken: 't' }, three: { enabled: true } } },
+        },
+      } as unknown as OpenClawConfig;
+      expect(resolveMaxAccount({ cfg, accountId: 'two' }).enabled).toBe(false);
+      expect(resolveMaxAccount({ cfg, accountId: 'three' }).enabled).toBe(false);
+      const on = { channels: { max: { accounts: { two: { enabled: false } } } } };
+      expect(resolveMaxAccount({ cfg: on as OpenClawConfig, accountId: 'two' }).enabled).toBe(
+        false,
+      );
+    });
+
+    it('leaves the top-level (default) account unchanged', () => {
+      const cfg = {
+        channels: { max: { ...channel, accounts: { two: { botToken: 'two-token' } } } },
+      } as unknown as OpenClawConfig;
+      const account = resolveMaxAccount({ cfg });
+      expect(account.token).toBe('top-token');
+      expect(account.name).toBe('Top bot');
+      expect(account.config.webhookUrl).toBe('https://hooks.example.test/max');
+      expect(account.config.notify).toBe(false);
+      expect(account.config).not.toHaveProperty('accounts');
+    });
+  });
 });

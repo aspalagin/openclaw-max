@@ -81,7 +81,7 @@
                   "open",
                   "disabled"
                 ],
-                "default": "pairing"
+                "description": "Who may message the bot in direct chats (default pairing). Named accounts inherit the channel-level value."
               },
               "allowFrom": {
                 "$ref": "#/definitions/allowList"
@@ -96,7 +96,7 @@
                   "open",
                   "disabled"
                 ],
-                "default": "allowlist"
+                "description": "Which group chats the bot answers in (default allowlist: only chats listed in groups). Named accounts inherit the channel-level value."
               },
               "groups": {
                 "type": "object",
@@ -189,8 +189,7 @@
               "mediaMaxCount": {
                 "type": "integer",
                 "minimum": 1,
-                "default": 12,
-                "description": "Most media attachments (images, stickers, video, audio, files) downloaded per inbound message, forwarded ones included; the agent gets a note about the rest. Size is limited separately by mediaMaxMb. Named accounts inherit the channel-level value."
+                "description": "Most media attachments (images, stickers, video, audio, files) downloaded per inbound message (default 12), forwarded ones included; the agent gets a note about the rest. Size is limited separately by mediaMaxMb. Named accounts inherit the channel-level value."
               },
               "markSeen": {
                 "type": "boolean"
@@ -202,18 +201,15 @@
                   "current",
                   "off"
                 ],
-                "default": "admitted",
-                "description": "Chats message-tool actions (send, sendAttachment, sticker, edit, delete, pin, unpin) may act in. admitted: the current chat, owner requests and chats admitted by dmPolicy/allowFrom/pairing and groupPolicy/groups; current: non-owner turns only in their own chat; off: no plugin check."
+                "description": "Chats message-tool actions (send, sendAttachment, sticker, edit, delete, pin, unpin) may act in. admitted (default): the current chat, owner requests and chats admitted by dmPolicy/allowFrom/pairing and groupPolicy/groups; current: non-owner turns only in their own chat; off: no plugin check. Named accounts inherit the channel-level value."
               },
               "notify": {
                 "type": "boolean",
-                "default": true,
-                "description": "Default push notification for sent messages (MAX notify). false sends silently; an explicit value of the call (core silent flag, channelData.max.notify) wins. MAX channels always notify. Named accounts inherit the channel-level value."
+                "description": "Default push notification for sent messages (MAX notify, default true). false sends silently; an explicit value of the call (core silent flag, channelData.max.notify) wins. MAX channels always notify. Named accounts inherit the channel-level value."
               },
               "disableLinkPreview": {
                 "type": "boolean",
-                "default": false,
-                "description": "Default: send messages without link previews (MAX disable_link_preview); channelData.max.disableLinkPreview overrides it per message. Named accounts inherit the channel-level value."
+                "description": "Default: send messages without link previews (MAX disable_link_preview, default false); channelData.max.disableLinkPreview overrides it per message. Named accounts inherit the channel-level value."
               },
               "actions": {
                 "type": "object",

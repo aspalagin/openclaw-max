@@ -5,10 +5,15 @@
 import { MarkdownConfigSchema, ToolPolicySchema } from 'openclaw/plugin-sdk/channel-config-schema';
 import { z } from 'zod';
 
-// Defaulted policy fields are built with this package's own zod: wrapping the
-// SDK's enum instances in `.optional().default()` breaks as soon as the plugin
-// and the gateway resolve different zod copies (4.4 vs 4.6 → "expected
-// nonoptional"). Values mirror the SDK's DmPolicySchema/GroupPolicySchema.
+// Policy fields are built with this package's own zod: wrapping the SDK's enum
+// instances in `.optional().default()` broke as soon as the plugin and the
+// gateway resolved different zod copies (4.4 vs 4.6 → "expected nonoptional").
+// Values mirror the SDK's DmPolicySchema/GroupPolicySchema.
+//
+// No field carries a schema default: the gateway writes JSON-schema defaults
+// into the runtime config, also under accounts.<id>, and a default there would
+// hide the channel-level value a named account inherits. The effective
+// defaults (pairing, allowlist, …) are applied where the values are read.
 export const DmPolicySchema = z.enum(['pairing', 'allowlist', 'open', 'disabled']);
 export const GroupPolicySchema = z.enum(['open', 'disabled', 'allowlist']);
 
@@ -60,7 +65,9 @@ export const MaxGroupSchema = z
   .strict();
 
 /**
- * MAX account config (base schema for both top-level and accounts.*)
+ * MAX account config (base schema for both top-level and accounts.*).
+ * accounts.<id> inherits every channel-level value it does not set, except
+ * the per-bot keys (token, name, webhook; MAX_ACCOUNT_OWN_KEYS in accounts.ts).
  */
 export const MaxAccountSchemaBase = z
   .object({
@@ -69,10 +76,12 @@ export const MaxAccountSchemaBase = z
     markdown: MarkdownConfigSchema.optional(),
     botToken: z.string().optional(),
     tokenFile: z.string().optional(),
-    dmPolicy: DmPolicySchema.optional().default('pairing'),
+    /** Default "pairing" (applied where read); named accounts inherit the channel value. */
+    dmPolicy: DmPolicySchema.optional(),
     allowFrom: z.array(z.union([z.string(), z.number()])).optional(),
     groupAllowFrom: z.array(z.union([z.string(), z.number()])).optional(),
-    groupPolicy: GroupPolicySchema.optional().default('allowlist'),
+    /** Default "allowlist" (applied where read); named accounts inherit the channel value. */
+    groupPolicy: GroupPolicySchema.optional(),
     groups: z.record(z.string(), MaxGroupSchema.optional()).optional(),
     /** Update transport; default: "webhook" when webhookUrl is set, otherwise "polling" */
     transport: z.enum(['polling', 'webhook']).optional(),
@@ -102,8 +111,8 @@ export const MaxAccountSchemaBase = z
     actionScope: z.enum(['admitted', 'current', 'off']).optional(),
     /**
      * Send defaults; an explicit value of the call (core `silent`,
-     * channelData.max) wins. Named accounts inherit the channel-level value.
-     * notify=false sends without push notifications (channels always notify).
+     * channelData.max) wins. notify=false sends without push notifications
+     * (channels always notify).
      */
     notify: z.boolean().optional(),
     disableLinkPreview: z.boolean().optional(),

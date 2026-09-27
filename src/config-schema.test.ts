@@ -297,10 +297,10 @@ describe('MAX Config Schema', () => {
       );
     });
 
-    it('default dmPolicy/groupPolicy when omitted', () => {
+    it('leaves dmPolicy/groupPolicy unset when omitted (defaults are applied where read)', () => {
       const result = MaxAccountSchema.parse({ botToken: 't' });
-      expect(result.dmPolicy).toBe('pairing');
-      expect(result.groupPolicy).toBe('allowlist');
+      expect(result.dmPolicy).toBeUndefined();
+      expect(result.groupPolicy).toBeUndefined();
     });
   });
 });
@@ -316,5 +316,16 @@ describe('openclaw.plugin.json channel schema', () => {
     expect(properties.webhookSecretFile.type).toBe('string');
     const { MaxAccountSchemaBase } = await import('./config-schema.js');
     expect(Object.keys(properties).sort()).toEqual(Object.keys(MaxAccountSchemaBase.shape).sort());
+  });
+
+  it('carries no defaults: the gateway would write them into accounts.<id> and hide inheritance', async () => {
+    const { readFileSync } = await import('node:fs');
+    const manifest = JSON.parse(
+      readFileSync(new URL('../openclaw.plugin.json', import.meta.url), 'utf8'),
+    );
+    expect(JSON.stringify(manifest.channelConfigs.max.schema)).not.toContain('"default":');
+    const { MaxConfigSchema } = await import('./config-schema.js');
+    const parsed = MaxConfigSchema.parse({ accounts: { two: { botToken: 't' } } });
+    expect(parsed.accounts?.two).toEqual({ botToken: 't' });
   });
 });

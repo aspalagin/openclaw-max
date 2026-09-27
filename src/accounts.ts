@@ -4,6 +4,7 @@
 
 import { lstatSync, readFileSync } from 'node:fs';
 
+import { mergeAccountConfig } from 'openclaw/plugin-sdk/account-core';
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from 'openclaw/plugin-sdk/core';
 
@@ -44,8 +45,32 @@ export interface ResolvedMaxAccount {
   enabled: boolean;
   token: string;
   tokenSource: 'config' | 'env' | 'file' | 'none';
+  /**
+   * Account settings; a named account inherits every channel-level value it
+   * does not set itself, except MAX_ACCOUNT_OWN_KEYS.
+   */
   config: MaxAccountConfig;
 }
+
+/**
+ * Channel-level keys a named account never inherits: they belong to one bot
+ * (token, token file, display name) or to one webhook subscription (transport,
+ * URL, secret, secret file, HTTP path — a shared path would route two bots to
+ * one handler). Top-level-only keys (commands, defaultAccount) are not account
+ * settings at all.
+ */
+export const MAX_ACCOUNT_OWN_KEYS = [
+  'botToken',
+  'tokenFile',
+  'name',
+  'transport',
+  'webhookUrl',
+  'webhookSecret',
+  'webhookSecretFile',
+  'webhookPath',
+  'commands',
+  'defaultAccount',
+] as const;
 
 /**
  * Get the MAX channel section from config.
@@ -163,33 +188,18 @@ export function resolveMaxAccount(params: {
       tokenSource = 'env';
     }
   } else {
-    // Named account
+    // Named account: the account's own values over the channel-level ones
+    // (SDK mergeAccountConfig, as core channels do), minus the per-bot keys.
+    // A channel switched off switches off every account.
     const raw = accounts?.[accountId] ?? {};
     accountConfig = {
-      enabled: raw.enabled !== false,
-      botToken: raw.botToken as string | undefined,
-      tokenFile: raw.tokenFile as string | undefined,
-      name: raw.name as string | undefined,
-      dmPolicy: raw.dmPolicy as string | undefined,
-      allowFrom: raw.allowFrom as Array<string | number> | undefined,
-      groups: raw.groups as MaxAccountConfig['groups'],
-      groupPolicy: raw.groupPolicy as string | undefined,
-      groupAllowFrom: raw.groupAllowFrom as Array<string | number> | undefined,
-      transport: raw.transport as MaxAccountConfig['transport'],
-      webhookUrl: raw.webhookUrl as string | undefined,
-      webhookSecret: raw.webhookSecret as string | undefined,
-      webhookSecretFile: raw.webhookSecretFile as string | undefined,
-      webhookPath: raw.webhookPath as string | undefined,
-      mediaMaxMb: raw.mediaMaxMb as number | undefined,
-      streamMode: raw.streamMode as MaxAccountConfig['streamMode'],
-      markSeen: raw.markSeen as boolean | undefined,
-      actionScope: raw.actionScope as MaxAccountConfig['actionScope'],
-      // Send defaults fall back to the channel-level value.
-      notify: (raw.notify ?? section.notify) as boolean | undefined,
-      disableLinkPreview: (raw.disableLinkPreview ?? section.disableLinkPreview) as
-        boolean | undefined,
-      mediaMaxCount: (raw.mediaMaxCount ?? section.mediaMaxCount) as number | undefined,
-    };
+      ...mergeAccountConfig<Record<string, unknown>>({
+        channelConfig: section,
+        accountConfig: raw,
+        omitKeys: [...MAX_ACCOUNT_OWN_KEYS],
+      }),
+      enabled: section.enabled !== false && raw.enabled !== false,
+    } as MaxAccountConfig;
 
     if (accountConfig.botToken?.trim()) {
       token = accountConfig.botToken.trim();
