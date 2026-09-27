@@ -46,6 +46,7 @@
     "!src/__fixtures__/",
     "openclaw.plugin.json",
     "README.md",
+    "README.ru.md",
     "SKILL.md",
     "LICENSE"
   ],

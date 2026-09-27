@@ -1,313 +1,295 @@
-# openclaw-max – плагин MAX для OpenClaw
+# openclaw-max — MAX messenger channel for OpenClaw
 
-Канал-плагин для подключения AI-ассистента [OpenClaw](https://openclaw.ai) к мессенджеру [MAX](https://max.ru) (ex-VK Teams / ICQ New).
+[Русская версия](README.ru.md)
 
-Версия 0.7.1, изменения — в [CHANGELOG.md](CHANGELOG.md). Проверено на OpenClaw 2026.9.6 и схеме MAX Bot API 0.0.33.
+A channel plugin that connects an [OpenClaw](https://openclaw.ai) assistant to the [MAX](https://max.ru) messenger through the MAX Bot API (`platform-api2.max.ru`). People write to your bot in MAX — in a private dialog or in a group — and the OpenClaw agent answers there, with media, buttons and voice.
 
-## Что это
+It is for OpenClaw users who need their assistant reachable in MAX. You need a MAX bot token (bots are created by organisations on [business.max.ru](https://business.max.ru/self)) and an OpenClaw gateway you run yourself.
 
-Плагин позволяет общаться с OpenClaw-ботом через мессенджер MAX — так же, как через Telegram. Поддерживает:
+Version 0.8.0. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md).
 
-- Приём и отправку текстовых сообщений (MAX-диалект markdown: `++подчёркивание++`, упоминания `max://user/id`)
-- Вложения (фото, видео, аудио, файлы, стикеры, контакты, геолокация)
-- Inline-кнопки: callback / link / message / clipboard / open_app / request_contact / request_geo_location
-- Контракт OpenClaw `presentation`: заголовок, текст, context, divider, таблицы и графики (моноширинно), кнопки и select → inline-клавиатура; нажатия approval/ask_user/command/callback возвращаются в gateway
-- Закрепление сообщений (pin/unpin) и `delivery.pin` для отправляемых сообщений
-- Long polling (с персистентным marker) и Webhook на HTTP-сервере gateway (секрет, мгновенный ACK, дедупликация повторов) — см. «Webhook»
-- Реестр чатов из событий bot_added/bot_started (замена deprecated GET /chats)
-- Ретраи на 429/сетевые сбои и `attachment.not.ready`
-- Мультиаккаунт
-- DM-security и pairing
+## Contents
 
-## TLS: сертификат Минцифры (важно!)
+- [Supported message types](#supported-message-types)
+- [Requirements and compatibility](#requirements-and-compatibility)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Transports: webhook and long polling](#transports-webhook-and-long-polling)
+- [Configuration reference](#configuration-reference)
+- [Access and policies](#access-and-policies)
+- [`message` tool actions and their scope](#message-tool-actions-and-their-scope)
+- [Media and local files](#media-and-local-files)
+- [Voice](#voice)
+- [Commands and menus](#commands-and-menus)
+- [Turn status](#turn-status)
+- [Multiple accounts and inheritance](#multiple-accounts-and-inheritance)
+- [Proxy, API address and the Russian Trusted CA](#proxy-api-address-and-the-russian-trusted-ca)
+- [Secrets and SecretRef](#secrets-and-secretref)
+- [Reliability](#reliability)
+- [MAX API limits](#max-api-limits)
+- [Security](#security)
+- [Privacy](#privacy)
+- [Troubleshooting](#troubleshooting)
+- [Upgrading from 0.7](#upgrading-from-07)
+- [Development](#development)
+- [Acknowledgements, authors and license](#acknowledgements-authors-and-license)
 
-С июля 2026 MAX Bot API живёт на `platform-api2.max.ru` с сертификатом, выпущенным
-Russian Trusted Sub CA (Минцифры), которого нет в стандартном доверенном наборе Node.js.
-Плагин решает это сам: все запросы к API идут через выделенный undici-dispatcher,
-в CA-набор которого добавлены Russian Trusted Root/Sub CA (встроены в пакет,
-`src/russian-trusted-ca.ts`). Доверие ограничено только соединениями плагина —
-процесс-wide trust store не трогается, `NODE_EXTRA_CA_CERTS` не требуется.
+## Supported message types
 
-## Структура проекта
+| Type | Incoming (MAX → agent) | Outgoing (agent → MAX) |
+|---|---|---|
+| Text | Yes; mentions detected from MAX markup, `@username` and core mention patterns | Yes; markdown converted to the MAX dialect (`++underline++`), split at 4000 characters; if MAX rejects the markup, resent once as plain text |
+| Image | Downloaded and passed to the agent as media | Yes; several images and videos go as albums of up to 12; a public https image URL is passed to MAX as a link |
+| Video | Downloaded (size limit `mediaMaxMb`) | Yes |
+| Audio and voice | Downloaded; the MAX transcript is used when present, otherwise OpenClaw core transcribes | Yes; `asVoice` / `audioAsVoice` sends a MAX `audio` attachment |
+| File | Downloaded | Yes, from an allowed local path, a URL or inline `buffer` |
+| Sticker | Sticker code and image | `sticker` action by code |
+| Contact | Name and phones parsed from the VCard, MAX profile | `sendAttachment` with `type="contact"` |
+| Location | Coordinates and a map link | `sendAttachment` with `type="location"` |
+| Share card | Title, description and link | — |
+| Forwarded message | Text and attachments with the original author; the sender's own comment comes first | — |
+| Reply | Quote of the replied-to message (up to 1000 characters) and its author | Yes, as a MAX reply (`replyTo`) |
+| Inline keyboard | Button presses: callbacks, approvals, command menus | 7 button types (callback, link, message, clipboard, open_app, request_contact, request_geo_location); OpenClaw `presentation` blocks rendered as text and keyboards |
+| Edited message | Processed again as a new message | `edit` action; draft streaming edits one message |
+| Deleted message | Ignored (logged at debug level) | `delete` action |
+| Pin | — | `pin` / `unpin` in groups and channels; `delivery.pin` |
+| Bot start (deep link) | Delivered to the agent as `/start` or `/start <payload>` | — |
+| Typing indicator, read receipt | — | `typing_on` for the whole turn; `mark_seen` on incoming messages (`markSeen`) |
 
-```
-openclaw-max/
-├── index.ts                    # Точка входа (defineChannelPluginEntry) → dist/index.js
-├── setup-entry.ts              # Точка входа setup-режима (defineSetupPluginEntry) → dist/setup-entry.js
-├── openclaw.plugin.json        # Манифест плагина
-├── package.json
-├── tsconfig.json
-├── README.md
-├── src/
-│   ├── channel.ts              # maxPlugin: сборка адаптеров канала
-│   ├── channel-config.ts       # Аккаунты, включение/удаление, CLI setup
-│   ├── channel-policy.ts       # DM-политика, группы (requireMention, tools), pairing
-│   ├── channel-directory.ts    # Нормализация целей, directory (self/peers/groups)
-│   ├── channel-outbound.ts     # sendText/sendPayload/sendMedia, presentation, pin
-│   ├── channel-lifecycle.ts    # Старт/стоп аккаунта, статус, probe, аудит групп
-│   ├── channel-agent-prompt.ts # Подсказки агенту (стикеры, location, кнопки…)
-│   ├── monitor.ts              # Точка входа приёма: выбор транспорта
-│   ├── monitor-types.ts        # Опции монитора, статус, подписанные update_type
-│   ├── polling.ts              # Long polling (marker), снятие чужих подписок
-│   ├── webhook-runner.ts       # Webhook-режим: секрет, подписка, сверка, запуск очереди
-│   ├── webhook-queue.ts        # Webhook: очередь апдейтов, обработка в задаче аккаунта
-│   ├── webhook.ts              # Webhook: роут gateway, secret, быстрый ACK, дедупликация
-│   ├── dispatch.ts             # Разбор update'ов по update_type
-│   ├── inbound.ts              # Gate DM/групп, контекст, запуск агента
-│   ├── inbound-attachments.ts  # Скачивание и описание входящих вложений
-│   ├── callbacks.ts            # Нажатия кнопок, approval/ask_user
-│   ├── deliver.ts              # Доставка ответа: чанки, альбомы, pin
-│   ├── stream-draft.ts         # Edit-стриминг (streamMode: partial)
-│   ├── send.ts                 # Send-хелперы (sendWithBody, кнопки, медиа, pin)
-│   ├── actions.ts              # message-tool actions (send/edit/delete/pin/…)
-│   ├── presentation.ts         # Рендер presentation и callback-конверты
-│   ├── api.ts                  # HTTP-клиент MAX API (retry, TLS, upload, лимитер)
-│   ├── types.ts                # TypeScript-типы MAX Bot API
-│   ├── russian-trusted-ca.ts   # Встроенные сертификаты Минцифры
-│   ├── format.ts               # Конвертация markdown в MAX-диалект
-│   ├── media-temp.ts           # Временные файлы медиа, очистка имён
-│   ├── state.ts                # Персист: marker, реестр чатов, секрет webhook
-│   ├── accounts.ts             # Резолвинг аккаунтов из конфига
-│   ├── config-schema.ts        # Zod-схема конфига
-│   ├── model-buttons.ts        # Кнопки выбора модели
-│   ├── onboarding.ts           # Setup wizard
-│   ├── sticker-cache.ts        # Кэш кодов стикеров
-│   └── __fixtures__/           # Снимок схемы MAX (max-schema-<версия>.yaml)
-└── scripts/
-    ├── test-api.mjs            # Проверка токена и API
-    ├── test-send.mjs           # Тест send + edit + delete
-    ├── check-cycles.mjs        # Проверка циклических импортов src/
-    └── update-schema.mjs       # Обновление снимка схемы MAX
-```
+Reactions and polls are not supported.
 
-## Установка
+## Requirements and compatibility
 
-### 1. Создать бота в MAX
+- OpenClaw ≥ 2026.9.6 (`peerDependencies.openclaw`, `openclaw.compat.minGatewayVersion`).
+- Node.js ≥ 22.
+- MAX Bot API as described by schema 0.0.33 and [dev.max.ru/docs-api](https://dev.max.ru/docs-api).
+- For webhook mode: a public HTTPS address on port 443 with a trusted certificate that reaches the gateway's HTTP server.
 
-1. Зайти на [business.max.ru](https://business.max.ru/self) (нужно юрлицо/ИП)
-2. Создать профиль организации и пройти верификацию
-3. Раздел **Чат-боты** → **Создать** (название, лого 500x500, описание)
-4. Дождаться модерации (до 48ч по рабочим дням)
-5. После модерации: **Чат-боты → Интеграция → Получить токен**
+**Verification status.** Text, media, buttons, both transports and incoming voice transcription over webhook are in production use with OpenClaw 2026.9.6. Features new in 0.8.0 are covered by the test suite; these have not yet been verified against the live MAX API: the HTTP proxy and `apiBaseUrl`, SecretRef resolution at gateway start, turn status, command menus, voice replies, and recovery of the durable webhook queue after a real gateway restart.
 
-### 2. Установить плагин
+## Installation
 
-Через ClawHub (рекомендуется):
+From ClawHub:
 
 ```bash
 openclaw plugins install clawhub:@aspalagin/openclaw-max
 ```
 
-Через npm:
+From npm:
 
 ```bash
 openclaw plugins install npm:@aspalagin/openclaw-max
 ```
 
-Вручную из исходников (для разработки):
+> Use the scoped name `@aspalagin/openclaw-max`. The unscoped npm package `openclaw-max` is a different project (see [Acknowledgements](#acknowledgements-authors-and-license)).
 
-```bash
-cd ~/.openclaw/extensions
-git clone https://github.com/aspalagin/openclaw-max openclaw-max
-cd openclaw-max && npm install && npm run build
+Restart the gateway after installing so it loads the plugin. The plugin id in OpenClaw is `openclaw-max`, the channel id is `max`.
+
+To update: `openclaw plugins update openclaw-max` for an npm install, or `openclaw plugins install clawhub:@aspalagin/openclaw-max --force` for a ClawHub install; then restart the gateway. Read [Upgrading from 0.7](#upgrading-from-07) first.
+
+## Quick start
+
+1. **Create a bot.** On [business.max.ru](https://business.max.ru/self) (a registered organisation or sole trader is required) open **Chat bots → Create**, wait for moderation, then copy the token under **Chat bots → Integration**.
+2. **Store the token** in a file readable by the gateway user, for example `/home/you/.openclaw/secrets/max-bot-token` (mode `0600`). The path is used as given: use an absolute path; `~` is not expanded, and a symbolic link is rejected.
+3. **Configure** `~/.openclaw/openclaw.json`:
+
+   ```jsonc
+   {
+     "channels": {
+       "max": {
+         "enabled": true,
+         "tokenFile": "/home/you/.openclaw/secrets/max-bot-token",
+         "dmPolicy": "pairing",
+         // Webhook (recommended by MAX for production); omit both keys for long polling
+         "webhookUrl": "https://bot.example.com/max/webhook",
+         "webhookSecretFile": "/home/you/.openclaw/secrets/max-webhook-secret"
+       }
+     }
+   }
+   ```
+
+4. **Restart the gateway**: `openclaw gateway restart`.
+5. **Check the account**: `openclaw channels status` shows the account, `tokenSource`, `tokenStatus` and `mode`; `openclaw channels status --probe` also calls the MAX API.
+6. **Write to the bot** in MAX. With `dmPolicy: "pairing"` you get a pairing code; approve it with `openclaw pairing approve max <code>` (`openclaw pairing list max` lists pending requests with the sender's user id). Put your user id into `allowFrom` to skip pairing.
+
+The token can also come from `botToken` (a string or a [SecretRef](#secrets-and-secretref)) or from the `MAX_BOT_TOKEN` environment variable (top-level account only). Order: `botToken`, then `tokenFile`, then `MAX_BOT_TOKEN`.
+
+## Transports: webhook and long polling
+
+**Use webhook mode in production.** MAX documents long polling as a development and testing mode, limited in speed and event retention, and asks for webhooks in production ([GET /updates](https://dev.max.ru/docs-api/methods/GET/updates)). Other plugins also report that voice messages may arrive empty or not at all over long polling (notably from Android); MAX does not document this and we have not confirmed it yet — over webhook, voice messages arrive and are transcribed.
+
+`transport` selects the mode: `webhook` when `webhookUrl` is set, otherwise `polling`. `transport: "webhook"` without `webhookUrl` is a config error.
+
+### Webhook
+
+- **MAX requirements:** HTTPS on port 443 with a certificate from a trusted CA; a `200` answer within 30 seconds; MAX retries failed deliveries and removes the subscription after 8 hours of failures. Each request carries the `X-Max-Bot-Api-Secret` header. While a webhook subscription is active, long polling does not work.
+- **Route:** the plugin serves the webhook on the gateway's own HTTP server (no extra port). Path: `webhookPath`, otherwise the path of `webhookUrl`, otherwise `/max/webhook`. Put a reverse proxy or tunnel with a valid certificate in front of the gateway and forward only this path.
+- **Secret:** `webhookSecret`, else `webhookSecretFile`, else generated once and kept in the account state file. Format required by MAX: 5–256 characters `A–Z a–z 0–9 _ -`. The secret is compared in constant time before the body is read; a mismatch gets `401`.
+- **Subscription:** at start the plugin removes this bot's subscriptions to other URLs and subscribes `webhookUrl`. Every 12 minutes it checks that the subscription still exists and recreates it if MAX removed it. On stop the subscription is kept, so events that arrive during a restart are redelivered by MAX.
+- **Processing:** the HTTP handler checks the secret, the body and duplicates, records the event (see [Reliability](#reliability)) and answers; the agent runs in the account task — in order within a chat, up to 4 chats in parallel.
+- **Turning it on:** deploy the plugin and restart the gateway first, then add `webhookUrl` and restart again; check that the log shows `MAX webhook subscribed` and that a message reaches the agent.
+- **Rolling back:** set `transport: "polling"` (or remove `webhookUrl`) and restart; the polling start removes the subscription. If the plugin cannot start, remove it by hand: `curl -X DELETE "https://platform-api2.max.ru/subscriptions?url=<webhookUrl>" -H "Authorization: <token>"`.
+
+### Long polling
+
+The plugin polls `GET /updates` and stores the marker in the account state file after each batch, so a restart continues where it stopped. After an error it waits 2 s, doubling up to 60 s with jitter, honours `Retry-After`, and after `401` retries every 5 minutes. At start, an active webhook subscription of the bot is removed with a warning (MAX does not serve `GET /updates` while it exists).
+
+## Configuration reference
+
+All options live under `channels.max`; the same keys (except `accounts` and `commands`) are accepted under `channels.max.accounts.<id>`. "Own" options belong to one bot and are not inherited by named accounts; everything else is inherited from the channel level (see [Multiple accounts](#multiple-accounts-and-inheritance)).
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `true` | `false` at channel level disables all accounts |
+| `botToken` | string or SecretRef | — | Bot token. Own |
+| `tokenFile` | string | — | Absolute path to a regular file with the token. Own |
+| `name` | string | — | Display name of the account. Own |
+| `transport` | `polling` \| `webhook` | `webhook` if `webhookUrl` is set, else `polling` | Own |
+| `webhookUrl` | string | — | Public HTTPS URL MAX posts to. Own |
+| `webhookSecret` | string or SecretRef | generated | Webhook secret. Own |
+| `webhookSecretFile` | string | — | File with the webhook secret (regular file, not a symlink). Own |
+| `webhookPath` | string | path of `webhookUrl`, else `/max/webhook` | Gateway route path. Own |
+| `webhookQueue.mode` | `durable` \| `memory` | `durable` | Journal accepted webhook events on disk or keep them in memory only |
+| `webhookQueue.maxPending` | integer | `5000` | Accepted but unprocessed events |
+| `webhookQueue.overflow` | `reject` \| `drop` | `reject` | When full: answer `503` so MAX retries, or acknowledge and drop |
+| `maxEventAgeMinutes` | integer ≥ 0 | `60` | Skip messages, edits, button presses and bot starts older than this (by MAX event time); `0` — no limit |
+| `dmPolicy` | `pairing` \| `allowlist` \| `open` \| `disabled` | `pairing` | Who may write in private dialogs |
+| `allowFrom` | array of user ids | `[]` | Allowed private senders; `"*"` — anyone (required with `open`) |
+| `groupPolicy` | `allowlist` \| `open` \| `disabled` | `allowlist` (or core `channels.defaults.groupPolicy`) | Which groups the bot answers in |
+| `groups` | object keyed by chat id or `"*"` | `{}` | Allowed groups and per-group settings, see below |
+| `groupAllowFrom` | array of user ids | — | Senders allowed in admitted groups (when the group has no own `allowFrom`) |
+| `mentionPatterns` | `{ mode: "allow" \| "deny", allowIn, denyIn }` | allow | Where core mention patterns apply in MAX groups |
+| `actionScope` | `admitted` \| `current` \| `off` | `admitted` | Chats the `message` tool may act in |
+| `notify` | boolean | MAX default (notify) | Push notifications for sends; `false` — silent (not possible in channels) |
+| `disableLinkPreview` | boolean | MAX default (previews on) | Link previews for sends |
+| `markSeen` | boolean | `true` | Mark incoming messages as read |
+| `mediaMaxMb` | number | `20` | Size limit for downloaded and uploaded media, MB |
+| `mediaMaxCount` | integer | `12` | Media attachments downloaded per incoming message, forwards included |
+| `streamMode` | `off` \| `partial` \| `block` | `off` | `partial` — one draft message edited while the answer streams; `block` — core block replies |
+| `streaming` | core streaming config | off | `streaming.mode` (`off`, `partial`, `block`, `progress`) wins over `streamMode`; `streaming.progress.*` configures [turn status](#turn-status) |
+| `apiBaseUrl` | string | `https://platform-api2.max.ru` | Bot API base URL; `https` only, `http` just for loopback |
+| `httpProxy` | string or SecretRef | — | HTTP(S) proxy for all MAX traffic; `""` in an account turns an inherited proxy off |
+| `logMessagePreview` | boolean | `false` | Add a 50-character text preview to debug logs |
+| `commands` | array of `{ name, description }` | — | Channel level only: bot commands registered in MAX (up to 32; name ≤ 64 characters without `/`, description ≤ 128) |
+| `accounts` | object | — | Channel level only: named accounts |
+
+Per-group settings (`groups.<chatId>` or `groups["*"]`):
+
+| Key | Default | Description |
+|---|---|---|
+| `requireMention` | `true` | Answer only when the bot is mentioned, replied to or its button is pressed |
+| `allowFrom` | — | Senders allowed in this group (overrides `groupAllowFrom`) |
+| `tools` | — | Core tool policy for this group |
+| `disableAudioPreflight` | `false` | Do not transcribe captionless voice messages to look for a mention |
+
+Accepted by the schema for compatibility with the common channel config shape but **not read by this plugin**: `markdown`, `historyLimit`, `dmHistoryLimit`, `dms`, `textChunkLimit` (text is always split at MAX's 4000 characters), `blockStreaming`, `blockStreamingCoalesce`, `responsePrefix`, `actions`, and `groups.<id>.enabled`, `skills`, `systemPrompt`. OpenClaw core may still apply some of them generically; that has not been verified for MAX.
+
+## Access and policies
+
+**Private dialogs** (`dmPolicy`):
+
+- `pairing` (default) — unknown senders get a pairing code; the owner approves it with `openclaw pairing approve max <code>`. Senders in `allowFrom` need no pairing.
+- `allowlist` — only user ids in `allowFrom`.
+- `open` — anyone; requires `allowFrom: ["*"]`.
+- `disabled` — no private messages.
+
+**Groups** (`groupPolicy`):
+
+- `allowlist` (default) — only chats listed in `groups` (or any chat if `groups` has a `"*"` entry).
+- `open` — any group the bot is in.
+- `disabled` — no group messages.
+
+In an admitted group, a non-empty `groups.<id>.allowFrom` (else `groupAllowFrom`) restricts who can talk to the bot: messages, button presses, commands and voice checks from other members are ignored, and their attachments are not downloaded. `"*"` allows anyone; the `max:` prefix is accepted in ids. The private `allowFrom` list does **not** apply to groups.
+
+**Mentions.** With `requireMention` (default `true`) the bot answers in a group when it is mentioned (`@username` or a MAX mention), when someone replies to its message or presses its button, or when the text matches mention patterns configured in OpenClaw core (`messages.groupChat.mentionPatterns` or the agent's `groupChat.mentionPatterns`). Patterns that core derives from the agent's name are not used in MAX — only explicitly configured ones. `channels.max.mentionPatterns` limits where patterns apply: `{ "mode": "deny" }` turns them off for MAX, `allowIn` / `denyIn` list group ids. A captionless voice message in such a group is checked against the patterns using the MAX transcript or one transcription by core (only for admitted groups and senders).
+
+**Approvals and questions.** Approval buttons can be pressed only by senders listed explicitly in `allowFrom`; for `ask_user` questions a `"*"` entry is enough.
+
+**Finding a user id.** `openclaw pairing list max` shows the id of a sender waiting for pairing. Group chat ids are negative numbers.
+
+A named account that inherits an `open` policy logs a warning at start with the option path to set. Mind that inheritance when adding a second bot.
+
+## `message` tool actions and their scope
+
+Actions: `send`, `sendAttachment`, `sticker`, `edit`, `delete`, `pin`, `unpin`.
+
+Targets: `user:<id>` for a private dialog, a numeric chat id for a group or channel (for example `-70000000000001`). `@username` and max.ru links are not supported by the MAX Bot API and are rejected with a clear error. A bare positive number that MAX answers with `dialog.not.found` is retried once as a user id.
+
+```
+message(action="send", target="user:12345678", message="Hello")
+message(action="send", target="CHAT_ID", message="Choose:",
+        buttons=[[{"text":"Yes","type":"callback","payload":"yes"},
+                  {"text":"More","type":"message"}]])
+message(action="sendAttachment", target="CHAT_ID", path="report.pdf", caption="Report")
+message(action="sendAttachment", target="CHAT_ID", buffer="data:text/plain;base64,SGVsbG8=", filename="hello.txt")
+message(action="send", target="CHAT_ID", path="reply.ogg", asVoice=true)
+message(action="send", target="CHAT_ID", message="Quiet", silent=true)
+message(action="sendAttachment", target="CHAT_ID", type="location", latitude="55.75", longitude="37.62")
+message(action="sendAttachment", target="CHAT_ID", type="contact", contactName="Name", vcfPhone="+70000000000")
+message(action="sticker", target="CHAT_ID", stickerId="CODE")
+message(action="pin", target="CHAT_ID", messageId="MID")
 ```
 
-### 3. Настроить конфиг
+- `attachments=[…]` sends several files; images and videos go as albums of up to 12, audio and files one by one. The result has `messageIds`; failed items are listed in `mediaErrors`.
+- `silent=true` sends without a push notification; MAX channels always notify.
+- `pin=true` or `delivery.pin` pins the sent message. MAX has no pinning in private dialogs: the plugin skips the call and returns `pinned: false` with a reason.
 
-Добавить секцию в `~/.openclaw/openclaw.json`:
+**Scope (`actionScope`).** In a turn started by someone other than the owner, actions work only in the current chat and in chats the inbound policy admits (dialogs with senders in `allowFrom` or paired, groups in `groups` and, when a group has a sender list, only if the requester is on it). The owner's requests are not limited. Operator calls without a conversation (CLI, gateway RPC, Control UI) are not limited. A refused action is a tool error raised before anything changes in MAX; if the plugin cannot determine the chat of a message, it refuses.
+
+- `admitted` (default) — as above.
+- `current` — non-owner turns act only in their own chat.
+- `off` — no check by the plugin (0.7 behaviour).
+
+This stops a prompt injection in one chat from editing, deleting or posting in another.
+
+## Media and local files
+
+- **Incoming** media is downloaded after the access checks, within `mediaMaxMb` (default 20 MB) and `mediaMaxCount` (default 12 per message); the agent gets a note about media that was not loaded. Files are stored by OpenClaw core's media store.
+- **Outgoing local files** are read only through the OpenClaw SDK loader from the directories core allows for the agent: its workspace, the gateway media directories and what the core filesystem policy permits. Paths outside them — including via `..` or symbolic links — fail with `Local media path is not under an allowed directory: …`. To send a file from elsewhere, copy it into the agent workspace first. There is no option to turn this off.
+- **Inline content:** `buffer` (base64 or a data URL) with `filename` and `contentType`; the size limit is checked before decoding. If both a path and `buffer` are given, the path is used.
+- **Remote URLs** are fetched through core's SSRF-guarded downloader into memory. An image URL is passed to MAX as a link only when its host is public https; otherwise the image is downloaded and uploaded.
+
+## Voice
+
+**Incoming voice messages** are passed to OpenClaw core as audio media. If MAX supplied a transcript, the agent gets it as `[Voice transcript: …]` and core does not transcribe again; otherwise core transcribes the audio with the provider configured in `tools.media.audio`. A voice message that could not be downloaded and has no transcript reaches the agent as `[Voice message: audio unavailable, no transcript]`.
+
+**Voice replies.** The channel tells core it accepts audio files (`mp3`, `m4a`, `wav`, `ogg`, `opus`) for TTS. When a reply is marked as voice — core TTS (for example `/tts`), the `[[audio_as_voice]]` directive or `asVoice=true` on `send` / `sendAttachment` — the audio goes out as a MAX `audio` attachment; the Bot API has no separate voice-note type. The reply text is delivered once, as a separate message. If MAX rejects the audio, the same bytes are sent as a file.
+
+## Commands and menus
+
+- `channels.max.commands` registers the bot's command list in MAX (`PATCH /me/commands`) at account start: up to 32 commands.
+- A message starting with `/` is handled as an OpenClaw command.
+- Commands for which core defines choices — `/think`, `/fast`, `/reasoning`, `/verbose`, `/usage`, `/elevated`, `/trace`, `/activation`, `/send`, `/tts`, `/session`, `/subagents`, `/acp`, `/tools` — sent without an argument answer with a menu of buttons; the current choice is marked ✓. A press applies the command exactly like typing `/think high`. Menus and presses are available only to senders allowed to run commands.
+- A bot start from a deep link (`max.ru/<bot>?start=<payload>`) reaches the agent as `/start <payload>`.
+
+## Turn status
+
+With core's progress streaming, one status message shows what the agent is doing (status line, plan, approval requests and, with `toolProgress`, tool lines). It is edited at most once per second, sent without a notification and deleted after the answer is delivered. It is off by default.
+
+```jsonc
+"channels": { "max": { "streaming": { "mode": "progress", "progress": { "toolProgress": true } } } }
+```
+
+Other `streaming.progress` keys (`label`, `labels`, `maxLines`, `maxLineChars`, `commandText`) are core settings. If status sending fails, only the status stops; the turn is not affected.
+
+## Multiple accounts and inheritance
+
+Several MAX bots can run from one gateway. The top-level `channels.max` is the default account; named accounts live under `accounts`:
 
 ```jsonc
 {
   "channels": {
     "max": {
-      // Токен бота из business.max.ru → Чат-боты → Интеграция
-      "botToken": "ваш_токен_бота",
-
-      // Список user_id, которым разрешено писать боту
-      // Узнать свой user_id: написать боту, посмотреть в логах
+      "tokenFile": "/home/you/.openclaw/secrets/max-main-token",
+      "dmPolicy": "allowlist",
       "allowFrom": ["12345678"],
-
-      // Политика DM-доступа:
-      // "allowlist" — только из allowFrom (по умолчанию)
-      // "open" — любой может писать
-      // "pairing" — новые контакты проходят pairing-код
-      "dmPolicy": "allowlist"
-    }
-  }
-}
-```
-
-### 4. Перезапустить gateway
-
-```bash
-openclaw gateway restart
-```
-
-## Настройка — описание полей
-
-| Поле | Тип | Обязательно | Описание |
-|------|-----|-------------|----------|
-| `botToken` | string | да | API-токен бота (или env `MAX_BOT_TOKEN`) |
-| `allowFrom` | string[] | да* | Список разрешённых user_id |
-| `dmPolicy` | string | нет | Политика DM: pairing (по умолчанию) / allowlist / open / disabled |
-| `groupPolicy` | string | нет | Политика групп: allowlist (по умолчанию) / open / disabled |
-| `groups` | object | нет | Пер-групповые настройки (requireMention, tools, …) |
-| `transport` | string | нет | `polling` / `webhook`; по умолчанию `webhook`, если задан `webhookUrl`, иначе `polling` |
-| `webhookUrl` | string | нет | Публичный HTTPS-адрес для MAX; включает webhook-режим (см. «Webhook») |
-| `webhookSecretFile` | string | нет | Файл с секретом вебхука (как `tokenFile`) |
-| `webhookSecret` | string | нет | Секрет вебхука строкой; если не задан ни он, ни файл — генерируется и хранится в state-файле аккаунта |
-| `webhookPath` | string | нет | Путь роута на gateway, если отличается от pathname `webhookUrl` (по умолчанию `/max/webhook`) |
-| `streamMode` | string | нет | off (по умолчанию) / partial / block |
-| `mediaMaxMb` | number | нет | Лимит скачивания медиа, МБ (по умолчанию 20) |
-| `markSeen` | boolean | нет | Слать mark_seen на входящие (по умолчанию true) |
-| `commands` | array | нет | Команды бота `[{name, description}]` — регистрируются через PATCH /me/commands (до 32) |
-
-\* Обязательно при `dmPolicy: "allowlist"`.
-
-## Webhook
-
-По умолчанию плагин получает события long polling'ом. В webhook-режиме MAX сам
-присылает `POST` на публичный адрес, а плагин обслуживает его роутом на
-HTTP-сервере gateway (тот же порт, что и Control UI; отдельный сервер не
-поднимается).
-
-### Требования MAX
-
-- Только HTTPS на порту 443 с сертификатом доверенного CA (самоподписанный не подойдёт).
-- Ответ 200 не позже чем через 30 с. Плагин отвечает сразу после проверки
-  секрета и формы тела, а обработку (агент может думать минутами) ведёт асинхронно.
-- При неудаче MAX повторяет доставку до 10 раз с растущим интервалом, а после
-  8 часов без успеха **сам снимает подписку**. Повторы одного и того же
-  обновления плагин отсекает (LRU по `update_type` + `timestamp` + `mid`/`callback_id`).
-- Каждый запрос несёт заголовок `X-Max-Bot-Api-Secret`; без совпадения — 401.
-- **Пока подписка активна, long polling у MAX не работает.** Поэтому в
-  polling-режиме плагин при старте удаляет найденную подписку (с warning в логе).
-
-### Как устроено
-
-1. При старте аккаунта регистрируется роут `auth: "plugin"`, `match: "exact"` на
-   пути `webhookPath` → pathname `webhookUrl` → `/max/webhook`. Не удалось
-   зарегистрировать (например, путь занят другим плагином) — старт аккаунта падает.
-2. `GET /subscriptions`: подписки этого бота на другие URL удаляются
-   (`DELETE /subscriptions?url=`).
-3. `POST /subscriptions {url, update_types, secret}` — на каждом старте, чтобы
-   секрет и список событий совпадали с текущим конфигом.
-4. При остановке роут снимается, **подписка остаётся**: рестарт gateway не
-   теряет события (MAX повторит недоставленные). Чтобы выключить webhook,
-   переключите `transport: "polling"` — плагин удалит подписку при старте, —
-   или удалите её вручную `DELETE /subscriptions?url=<webhookUrl>`.
-5. Пока аккаунт работает, раз в 12 минут `GET /subscriptions` сверяет, что
-   подписка на `webhookUrl` жива. Если MAX её снял (8 часов недоставки —
-   упал туннель или gateway), плагин пересоздаёт её `POST /subscriptions` и
-   пишет warning; ошибка сети при проверке только логируется. Таймер
-   останавливается вместе с аккаунтом.
-6. **Обработка идёт в задаче аккаунта, а не в HTTP-запросе.** Обработчик роута
-   проверяет секрет, тело и дубликат, сразу отвечает `200 {"ok":true}` и только
-   кладёт апдейт в очередь аккаунта. Задача аккаунта (та же, что держит роут)
-   забирает апдейты и вызывает обработку: в одном чате строго по порядку,
-   разные чаты — параллельно, не больше 4 одновременно. Причина: gateway
-   выдаёт HTTP-обработчику допуск работы только на время запроса; запуск
-   агента из контекста уже завершённого запроса отвергается как
-   `GatewayDrainingError: Gateway is draining` (так было в 0.7.0). При
-   остановке аккаунта начатые апдейты дорабатывают (до 3 с ожидания), а
-   принятые, но не начатые передаются следующему старту аккаунта в этом же
-   процессе — MAX их уже не повторит.
-
-Секрет берётся из `webhookSecret`, иначе из `webhookSecretFile`, иначе
-генерируется один раз и сохраняется в `~/.openclaw/max/state-<account>.json`
-(переживает рестарты). Формат MAX: 5–256 символов `A-Z a-z 0-9 _ -`.
-
-### Пример (эта установка)
-
-Публичный адрес `https://max.kotbanzai.com/max/webhook` проксируется Cloudflare
-Tunnel на `http://127.0.0.1:18789` (наружу открыт только путь `/max/webhook`).
-
-```bash
-umask 077
-head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9_-' | head -c 48 \
-  > /root/.openclaw/secrets/max-webhook-secret
-```
-
-```json
-{
-  "channels": {
-    "max": {
-      "tokenFile": "/root/.openclaw/secrets/gateway-max-bot-token",
-      "transport": "webhook",
-      "webhookUrl": "https://max.kotbanzai.com/max/webhook",
-      "webhookSecretFile": "/root/.openclaw/secrets/max-webhook-secret"
-    }
-  }
-}
-```
-
-### Порядок включения
-
-1. Сначала задеплоить эту версию плагина и **полностью перезапустить gateway**
-   с новым кодом, оставаясь в polling-режиме. Старые версии плагина при
-   `webhookUrl` подписывались, но роут не регистрировали — бот глох.
-2. Затем добавить в конфиг `transport`/`webhookUrl`/`webhookSecretFile`
-   (поля `transport` и `webhookSecretFile` знает только новая схема) и
-   перезапустить канал/gateway. Подписку создаёт сам плагин при старте.
-3. Проверить: `GET /subscriptions` показывает ровно один URL, в логе
-   `MAX webhook subscribed`, сообщение боту доходит до агента.
-
-Пошаговый runbook деплоя 0.7.0 на этой установке (бэкапы, проверки, откаты):
-`/root/.openclaw/workspace-arseniy/deliverables/max-plugin-upgrade-20260926/deploy-runbook.md`
-(рабочий каталог ассистента, вне репозитория).
-
-Откат: `transport: "polling"` (или убрать `webhookUrl`) и перезапуск — подписка
-удаляется при старте polling. Если плагин не стартует, снять подписку руками:
-`curl -X DELETE "https://platform-api2.max.ru/subscriptions?url=<webhookUrl>" -H "Authorization: <token>"`.
-
-## Использование
-
-### Как написать боту
-
-1. Найти бота в MAX по нику (например `@idИНН_bot`)
-2. Нажать **Старт** или отправить любое сообщение
-3. Бот ответит, если ваш `user_id` в `allowFrom`
-
-### Как узнать свой user_id
-
-Написать боту, затем посмотреть в логах OpenClaw:
-
-```bash
-openclaw logs --follow
-# В логах будет: sender.user_id: 12345678
-```
-
-Или запустить тест-скрипт:
-
-```bash
-MAX_BOT_TOKEN=xxx node scripts/test-api.mjs
-# В разделе updates будет виден ваш user_id
-```
-
-### allowFrom и pairing
-
-- **allowlist** (по умолчанию): только user_id из списка могут общаться с ботом
-- **open**: любой пользователь MAX может писать боту
-- **pairing**: новый пользователь получает код, который нужно подтвердить у владельца
-
-## Мультиаккаунт
-
-Можно подключить несколько ботов MAX — например, рабочий и личный:
-
-```jsonc
-{
-  "channels": {
-    "max": {
-      // Аккаунт по умолчанию
-      "botToken": "токен_основного_бота",
-      "allowFrom": ["12345678"],
-
-      // Дополнительные аккаунты
+      "maxEventAgeMinutes": 30,
       "accounts": {
-        "zaya": {
-          "botToken": "токен_второго_бота",
-          "allowFrom": ["87654321"],
-          "dmPolicy": "open"
+        "support": {
+          "tokenFile": "/home/you/.openclaw/secrets/max-support-token",
+          "dmPolicy": "open",
+          "allowFrom": ["*"]
+          // inherits maxEventAgeMinutes, groupPolicy, groups, … from channels.max
         }
       }
     }
@@ -315,110 +297,166 @@ MAX_BOT_TOKEN=xxx node scripts/test-api.mjs
 }
 ```
 
-Обращение к конкретному аккаунту:
+A named account takes every option it does not set from the channel level, including access policies and lists; its own value wins, and lists and `groups` are replaced as a whole. Own options are not inherited: `botToken`, `tokenFile`, `name`, `transport`, `webhookUrl`, `webhookSecret`, `webhookSecretFile`, `webhookPath`. `channels.max.enabled: false` disables every account; `accounts.<id>.enabled: false` disables one. `MAX_BOT_TOKEN` applies to the top-level account only.
 
+Select an account from the CLI with `--account`: `openclaw message send --channel max --account support --target user:87654321 --message "Hi"`.
+
+## Proxy, API address and the Russian Trusted CA
+
+- **`httpProxy`** (for example `http://proxy.example.com:3128`, credentials allowed) routes all MAX traffic of the account through an HTTP(S) proxy: Bot API calls, uploads, and downloads of incoming attachments and remote media. Loopback addresses bypass it. Proxy credentials never appear in logs or errors; the start log shows `http://***@host:port`.
+- **`apiBaseUrl`** points the plugin at another Bot API address, such as a test stand; the path prefix is kept. Only `https` is accepted (`http` only for loopback), so the token is never sent in clear text.
+- An invalid value of either option stops the account at start with an error naming the option.
+- **Russian Trusted CA.** Since July 2026 the Bot API at `platform-api2.max.ru` uses a certificate issued by the Russian Trusted Sub CA of the Ministry of Digital Development (Минцифры), which is not in Node.js's default trust store. The plugin ships the Russian Trusted Root CA and Sub CA certificates (`src/russian-trusted-ca.ts`) and adds them, next to the system CAs, only to its own connections to MAX — also inside a proxy tunnel. The process-wide trust store is not changed and `NODE_EXTRA_CA_CERTS` is not needed.
+
+## Secrets and SecretRef
+
+`botToken`, `webhookSecret` and `httpProxy` accept a plain string or an OpenClaw SecretRef:
+
+```jsonc
+"botToken": { "source": "env", "provider": "default", "id": "MAX_BOT_TOKEN" }
 ```
-openclaw --account zaya send "Привет из второго бота"
-```
 
-## Разработка
+The provider must exist in core's `secrets.providers`. The paths `channels.max.botToken`, `webhookSecret`, `httpProxy` (and their `accounts.<id>` forms) are visible to `openclaw secrets configure`, `apply` and `audit`. The gateway resolves references before the account starts. An account whose reference does not resolve does not start — the error names the option and the reference, without its value and without falling back to `tokenFile` or `MAX_BOT_TOKEN`; other accounts keep running. `openclaw secrets audit` reports a token, webhook secret or proxy written as a plain string in `openclaw.json`.
 
-### Требования
+`tokenFile` and `webhookSecretFile` remain supported. `openclaw channels status` shows `tokenSource` (`config`, `file`, `env`, `none`) and `tokenStatus` (`available`, `configured_unavailable`, `missing`) without the token.
 
-- Node.js 22+
-- OpenClaw 2026.9.6+ (devDependency, SDK-подпути `openclaw/plugin-sdk/*`)
+## Reliability
 
-### Сборка
+- **Durable webhook queue.** Each accepted webhook event is written to `<stateDir>/max/inbox-<account>/` before MAX gets `200`. After a restart or crash, unprocessed events are handled first, in the original order within each chat. An event is finished once core has accepted the agent turn (core resumes an interrupted turn itself). If the event cannot be written or the queue is full (`webhookQueue.maxPending`), MAX gets `503` and retries later (`overflow: "drop"` acknowledges and drops instead). If the state directory is not writable, the queue falls back to memory with a warning. The SDK's own ingress queue is available only to bundled and official plugins in OpenClaw 2026.9.x, so the plugin keeps its own journal with the same contract.
+- **Deduplication.** Keys of handled events (`update_type:timestamp:mid`) are kept for 24 hours, up to 5000, and survive restarts, so MAX redeliveries are dropped. Long polling uses the same keys, so a restart in the middle of a batch does not repeat already handled events.
+- **Event age.** Messages, edits, button presses and bot starts older than `maxEventAgeMinutes` (default 60) are skipped with a warning, so after a long outage the bot does not answer hours-old messages. Chat registry events are always processed.
+- **Delivery errors** are reported to core: nothing sent → the reply is not dispatched; part visible → partial delivery with the visible message ids. After a failed text chunk the rest is not sent.
+- **Long answers** are split at 4000 characters; with `streamMode: "partial"` the first chunk replaces the draft and the rest follow as new messages, buttons on the last one.
+- **Retries:** `429` and network errors are retried; `attachment.not.ready` after an upload is retried; text sends are throttled to MAX's 2 messages per second per chat.
+
+## MAX API limits
+
+From the MAX Bot API documentation:
+
+| Limit | Value |
+|---|---|
+| Message text | 4000 characters (the plugin splits longer text) |
+| Sending | 2 messages per second per dialog, group or channel (the plugin queues sends) |
+| Editing | Only the bot's own messages. In dialogs: messages with an inline keyboard at any age, others within 7 days. In group chats and channels: any age. At most 2 edits per second per chat |
+| Deleting | The bot needs admin rights with permission to delete. In dialogs only the bot's own messages, in groups and channels any. At most 2 deletions per second per chat |
+| Album | Up to 12 images and videos per message; files and audio go separately |
+| Buttons | Text ≤ 128 characters, payload ≤ 1024 bytes, ≤ 30 rows, ≤ 210 buttons |
+| Bot commands | Up to 32 |
+| Webhook | HTTPS on port 443, trusted certificate, `200` within 30 s; subscription removed after 8 hours of failed deliveries |
+| Long polling | Not for production; unavailable while a webhook subscription exists |
+
+## Security
+
+- **Access control by default:** private messages need pairing, groups need an allowlist, group sender lists are enforced.
+- **Action scope:** the `message` tool cannot act in chats the inbound policy does not admit (see [above](#message-tool-actions-and-their-scope)).
+- **Local files:** only from directories OpenClaw allows for the agent; `..` and symbolic links cannot escape them.
+- **Remote media:** fetched through core's SSRF guard; private, loopback, link-local and metadata addresses are not passed to MAX as links.
+- **Webhook:** the secret is checked in constant time before the body is read.
+- **Secrets:** SecretRef support; token, webhook secret and proxy credentials are not logged.
+- **TLS:** the extra Russian CAs are trusted only for the plugin's own connections.
+- **Logs:** no message text by default.
+
+Report vulnerabilities privately as described in [SECURITY.md](https://github.com/aspalagin/openclaw-max/blob/main/SECURITY.md). Supported version: 0.8.x.
+
+## Privacy
+
+What the plugin stores on disk (`<stateDir>` is OpenClaw's state directory, by default `~/.openclaw`):
+
+| Path | Contents | Lifetime |
+|---|---|---|
+| `<stateDir>/max/state-<account>.json` | Long-polling marker; chat registry (chat id, type, title, when the bot was added, removed or stopped); the generated webhook secret, if any | Until deleted |
+| `<stateDir>/max/inbox-<account>/` (directory `0700`, files `0600`) | Webhook events waiting to be processed, including message text and attachment metadata | Deleted once processed |
+| `<stateDir>/max/inbox-<account>/completed.json` | Keys of handled events (`update_type:timestamp:mid`), no content | 24 hours, up to 5000 keys |
+
+`webhookQueue.mode: "memory"` keeps pending webhook events in memory only (the key file stays). Downloaded incoming media and conversation history are stored by OpenClaw core, not by the plugin.
+
+Logs: message type, text length, chat, message and user ids, errors and timings. Message text, captions and transcripts are not logged unless `logMessagePreview: true` (50-character preview at debug level). Tokens, secrets and proxy credentials are never logged.
+
+Network access by the plugin: the MAX Bot API and its upload and CDN hosts (through `httpProxy` if set) and the hosts of remote media URLs the agent sends. When a voice message has no MAX transcript, OpenClaw core sends the audio to the speech-to-text provider configured in `tools.media.audio`.
+
+## Troubleshooting
+
+| Symptom | Likely cause and fix |
+|---|---|
+| The bot does not answer in private messages | `dmPolicy` is `pairing` and the sender is not approved (`openclaw pairing list max`), or `allowlist` without the sender in `allowFrom` |
+| The bot does not answer in a group | The chat is not in `groups` (`groupPolicy: allowlist`); the bot was not mentioned (`requireMention`); the sender is not in `groups.<id>.allowFrom` / `groupAllowFrom`; the bot is not a group administrator — MAX then does not deliver group messages to it (observed with long polling) |
+| `MAX bot token not configured: …` in status | No `botToken`, `tokenFile` or `MAX_BOT_TOKEN`; the message names the option path. A `tokenFile` that is missing, empty or a symlink is ignored |
+| Account does not start, error mentions a SecretRef | The reference did not resolve; check `secrets.providers` and the referenced variable, file or command |
+| Webhook: no events arrive | Check the public URL, certificate and that the reverse proxy forwards the path; after 8 hours of failures MAX removes the subscription — the plugin recreates it within 12 minutes; long polling does not work while a subscription exists |
+| MAX gets `503` from the webhook | The journal could not be written (disk full, permissions) or `webhookQueue.maxPending` was reached |
+| Old messages get no answer after downtime | They are older than `maxEventAgeMinutes` (default 60); set `0` to answer any age |
+| `Local media path is not under an allowed directory` | The file is outside the agent's allowed directories; copy it into the workspace |
+| The `message` tool is refused in another chat | `actionScope`: the chat is not admitted by the inbound policy; add it to the policy or change `actionScope` |
+| `MAX API does not resolve @username …` | Use `user:<id>` or a numeric chat id |
+| `pinned: false` in a private dialog | MAX has no pinning in dialogs |
+| Raw `**` or `_` in a message | MAX rejected the markup and the plugin resent the text as plain text |
+| Account stops at start with a proxy or API URL error | `httpProxy` or `apiBaseUrl` is invalid, or `apiBaseUrl` uses `http` for a non-loopback host |
+| `/think` answers with buttons instead of a text reply | Command menus: send `/think high` to set a value directly |
+| Warning that an account inherits an open policy | A named account without its own `dmPolicy` / `groupPolicy` inherits `open`; set the policy in `accounts.<id>` |
+
+## Upgrading from 0.7
+
+A 0.7 config works without changes. Behaviour that changes and how to get the 0.7 behaviour back:
+
+| Change in 0.8 | 0.7 behaviour |
+|---|---|
+| In a non-owner turn the `message` tool acts only in the current chat and in chats the inbound policy admits | `actionScope: "off"` (stricter: `"current"`) |
+| Local files are sent only from the agent's allowed directories | No switch: copy files into the agent workspace |
+| Messages, edits and presses older than 60 minutes — including MAX redeliveries after downtime — get no answer | `maxEventAgeMinutes: 0` |
+| The webhook answers `200` after writing the event to disk; `503` when that fails or the queue is full | `webhookQueue.overflow: "drop"`, `webhookQueue.mode: "memory"` |
+| Pending webhook events, with message text, are kept in `<stateDir>/max/inbox-<account>/` until processed | `webhookQueue.mode: "memory"` (the key file stays) |
+| Named accounts inherit every channel-level option, including `dmPolicy`, `allowFrom`, `groupPolicy`, `groups` | Set the policies in each account |
+| `channels.max.enabled: false` also disables named accounts | Keep the channel enabled; to run only named accounts, set no token at the top level (`botToken`, `tokenFile`, `MAX_BOT_TOKEN`) |
+| A non-empty `groupAllowFrom` or `groups.<id>.allowFrom` limits who can talk to the bot in an admitted group | Remove the lists or add `"*"` |
+| At most 12 media are downloaded from one incoming message | Raise `mediaMaxCount` |
+| Forwarded messages start an agent turn (they were dropped) | — |
+| `/think`, `/fast`, `/reasoning` and the other menu commands without an argument answer with buttons | — (with an argument they work as before) |
+| Core `messages.groupChat.mentionPatterns`, if configured, now apply in MAX groups | `mentionPatterns: { "mode": "deny" }` |
+| Core `silent` is honoured; the typing indicator follows core `typingMode` and lasts the whole turn | Core settings |
+| After MAX rejects the markup, the answer arrives as plain text (visible `**`, `_`) | — |
+| Debug logs carry no message text | `logMessagePreview: true` |
+| `openclaw secrets audit` flags `botToken`, `webhookSecret` and `httpProxy` written as strings | Move them to a SecretRef, `tokenFile` or `webhookSecretFile` |
+| `streaming.mode` wins over `streamMode` | Keep only one of them |
+| Polling waits 2–60 s after an error (was 3 s), 5 minutes after `401` | — |
+| The published package no longer contains `scripts/` | The scripts stay in the repository |
+
+The full list is in the [changelog](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md).
+
+## Development
 
 ```bash
+git clone https://github.com/aspalagin/openclaw-max.git
 cd openclaw-max
 npm ci
-npm run build          # tsc → dist/index.js, dist/setup-entry.js, dist/src/*.js (без тестов)
+npm run typecheck      # run before build: build also emits on type errors
+npm run build          # dist/index.js, dist/setup-entry.js, dist/secret-contract-api.js, dist/src/*.js
 ```
 
-`build` собирает и при ошибках типов (`--noEmitOnError false`), поэтому перед ним
-запускайте `npm run typecheck`.
-
-### Проверки (как в CI)
+Checks, as in CI:
 
 ```bash
 npm run format:check   # prettier
-npm run lint           # eslint, 0 ошибок и 0 предупреждений
-npm run check:cycles   # циклические импорты между модулями src/
+npm run lint           # eslint
+npm run check:cycles   # import cycles between src/ modules
 npm run typecheck
-npm test               # vitest, включая сверку со схемой MAX
+npm test               # vitest, including conformance with the MAX schema snapshot
 ```
 
-### Схема MAX Bot API
+- `src/__fixtures__/max-schema-0.0.33.yaml` is a snapshot of the MAX Bot API schema; `npm run schema:update [ref]` refreshes it.
+- `npm run test:api` calls the live API with `MAX_BOT_TOKEN` (`GET /me`, `GET /updates`); the helper scripts in `scripts/` are in the repository only, not in the package.
+- Tests must use made-up tokens and ids.
 
-`src/schema-conformance.test.ts` сверяет подписку, типы update/кнопок/вложений и
-тела запросов со снимком `src/__fixtures__/max-schema-<версия>.yaml`
-([max-messenger/api-schema](https://github.com/max-messenger/api-schema)).
-Обновить снимок:
+Questions and proposals: [GitHub Issues](https://github.com/aspalagin/openclaw-max/issues). Contribution rules: [CONTRIBUTING.md](https://github.com/aspalagin/openclaw-max/blob/main/CONTRIBUTING.md).
 
-```bash
-npm run schema:update               # последний коммит репозитория схемы
-npm run schema:update -- <commit>   # конкретный коммит, тег или ветка
-npm test
-```
+## Acknowledgements, authors and license
 
-Скрипт заменяет старый снимок новым (имя по `info.version`) и пишет в заголовок
-файла коммит и дату. Упавший тест сверки означает, что плагин отправляет или ждёт
-то, чего в новой схеме нет: поправить код или тип, затем закоммитить снимок.
+**Acknowledgements.** Since 28 May 2026 (version 0.5.0 sync, commit `d8d24bc`) this plugin contains code derived from the `openclaw-max` 0.5.0 npm package by Evgeniy Bystrov, published under the MIT License (Copyright (c) 2026 Evgeniy Bystrov): [github.com/evgeniyvbystrov/openclaw-max](https://github.com/evgeniyvbystrov/openclaw-max). His copyright notice is kept in [LICENSE](LICENSE). Thank you.
 
-### Тест API (проверка что токен работает)
+**Authors.**
 
-```bash
-# Проверить бота: GET /me + GET /updates
-MAX_BOT_TOKEN=xxx node scripts/test-api.mjs
+- [Petlevoy](https://github.com/petlevoy) — project founder.
+- [Arseniy Palagin](https://github.com/aspalagin) — maintainer.
 
-# С отправкой тестового сообщения в чат
-MAX_BOT_TOKEN=xxx node scripts/test-api.mjs <chat_id>
-```
+Development is carried out with the help of AI agents.
 
-### Тест отправки (send + edit + delete)
-
-```bash
-# Полный цикл: отправить → подождать → отредактировать → подождать → удалить
-MAX_BOT_TOKEN=xxx node scripts/test-send.mjs <chat_id> "Текст сообщения"
-```
-
-## Поддержка
-
-- Вопросы по использованию и предложения: [GitHub Issues](https://github.com/aspalagin/openclaw-max/issues)
-- Сообщения об уязвимостях: [Security policy](SECURITY.md)
-- Правила участия: [CONTRIBUTING.md](CONTRIBUTING.md)
-
-## MAX Bot API — краткая справка
-
-Базовый URL: `https://platform-api2.max.ru` (старый `platform-api.max.ru` отключается 19.07.2026).
-
-| Метод | Endpoint | Описание |
-|-------|----------|----------|
-| GET /me | Информация о боте | user_id, name, username, commands |
-| PATCH /me/commands | Команды бота | commands (полная замена списка, до 32) |
-| GET /updates | Long polling | marker, timeout, types |
-| POST /messages | Отправить | ?chat_id или ?user_id |
-| PUT /messages | Редактировать | ?message_id (до 24ч) |
-| DELETE /messages | Удалить | ?message_id (до 24ч) |
-| POST /answers | Ответ на callback | ?callback_id |
-| GET /chats/{id}/members/me | Членство бота | is_admin (нужно для получения событий групп) |
-| PUT/DELETE /chats/{id}/pin | Закрепить/открепить | message_id |
-| GET /videos/{token} | Playback-ссылки видео | urls может быть null, пока видео обрабатывается |
-| POST /uploads | URL для загрузки медиа | type=image/video/audio/file |
-
-Авторизация: заголовок `Authorization: <token>`
-Лимит: 30 запросов/сек
-Документация: [dev.max.ru/docs-api](https://dev.max.ru/docs-api)
-
-Примечания:
-- `GET /chats` объявлен deprecated (июнь 2026) — плагин собирает чаты в собственный реестр из событий.
-- В группах long polling доставляет события только боту-администратору (проверяется в `openclaw channels status --audit`).
-- Webhook: только HTTPS:443 с доверенным сертификатом; MAX ждёт HTTP 200 не дольше 30с (плагин отвечает мгновенно, обработка асинхронная).
-
-## Авторы
-
-- **[Petlevoy](https://github.com/petlevoy)** - отец проекта
-- **Яков** (@Helpdesk_VP_bot) — архитектура, координация
-- **Банзай** (@KotBanzaiBot) — реализация модулей, типы, тесты
-- **openclaw-max subagent** — интеграция с OpenClaw Plugin SDK
+**License:** MIT, see [LICENSE](LICENSE).
