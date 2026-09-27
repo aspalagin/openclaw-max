@@ -352,6 +352,12 @@ export async function processIncomingMessage(
   const rawTextTrimmed = (rawText || '').trim();
   const isTextSlashCommand = rawTextTrimmed.startsWith('/');
 
+  // groups.<id> (else "*"): systemPrompt joins the group turn's system prompt,
+  // skills limits the skills the turn loads (core GroupSystemPrompt / skillFilter).
+  const groupEntry = isGroup
+    ? (account.config.groups?.[chatIdStr] ?? account.config.groups?.['*'])
+    : undefined;
+
   const ctxPayload = core.channel.reply.finalizeInboundContext({
     Body: body,
     BodyForAgent: bodyForAgent,
@@ -369,6 +375,7 @@ export async function processIncomingMessage(
     SenderId: senderId != null ? String(senderId) : undefined,
     SenderUsername: senderUsername,
     WasMentioned: isGroup ? wasMentioned : undefined,
+    GroupSystemPrompt: groupEntry?.systemPrompt?.trim() || undefined,
     Provider: 'max',
     Surface: 'max',
     MessageSid: messageId,
@@ -553,6 +560,7 @@ export async function processIncomingMessage(
             }
           : {}),
         ...(useBlockStreaming ? { disableBlockStreaming: false } : {}),
+        ...(groupEntry?.skills ? { skillFilter: groupEntry.skills } : {}),
         ...(progress ? progress.replyOptions : {}),
         ...maxTurnAdoptionReplyOptions(),
       },

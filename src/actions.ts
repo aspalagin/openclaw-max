@@ -2,6 +2,7 @@
  * MAX channel message actions adapter — implements message tool actions
  */
 
+import { createActionGate } from 'openclaw/plugin-sdk/channel-actions';
 import type {
   ChannelMessageActionAdapter,
   ChannelMessageActionContext,
@@ -15,7 +16,11 @@ import { jsonResult } from 'openclaw/plugin-sdk/tool-results';
 import { listMaxAccountIds, resolveMaxAccount } from './accounts.js';
 import { assertMaxActionInScope } from './action-scope.js';
 import { sanitizeMaxFileName } from './media-temp.js';
-import { materializeMaxPresentation, MAX_TEXT_LIMIT, readMaxDeliveryPin } from './presentation.js';
+import {
+  materializeMaxPresentation,
+  readMaxDeliveryPin,
+  resolveMaxTextChunkLimit,
+} from './presentation.js';
 import { getMaxRuntime } from './runtime.js';
 import {
   deleteMaxMessage,
@@ -254,14 +259,26 @@ function readContactParams(
   };
 }
 
+const MAX_MESSAGE_ACTIONS = [
+  'send',
+  'edit',
+  'delete',
+  'sticker',
+  'sendAttachment',
+  'pin',
+  'unpin',
+] as const;
+
 export const maxMessageActions: ChannelMessageActionAdapter = {
-  describeMessageTool: ({ cfg }) => {
+  describeMessageTool: ({ cfg, accountId }) => {
     const accounts = listEnabledAccounts(cfg);
     if (accounts.length === 0) {
       return null;
     }
+    // channels.max.actions.<action>: false hides the action from the tool.
+    const gate = createActionGate(resolveMaxAccount({ cfg, accountId }).config.actions);
     return {
-      actions: ['send', 'edit', 'delete', 'sticker', 'sendAttachment', 'pin', 'unpin'],
+      actions: MAX_MESSAGE_ACTIONS.filter((name) => gate(name)),
       // presentation → inline keyboard + MAX markdown (presentation.ts);
       // delivery-pin → PUT /chats/{chatId}/pin on the sent message.
       capabilities: ['presentation', 'delivery-pin'],
@@ -304,6 +321,9 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
     });
     if (!account.token) {
       throw new Error('MAX bot token not configured');
+    }
+    if (!createActionGate(account.config.actions)(action)) {
+      throw new Error(`MAX action "${action}" is disabled by channels.max.actions`);
     }
 
     // Notification and link-preview options of sends: core's `silent` flag
@@ -374,9 +394,10 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
         const rendered = await materializeMaxPresentation({ text: content, presentation });
         const renderedButtons = readMaxChannelButtons(rendered.channelData);
         const text = rendered.text ?? '';
+        const chunkLimit = resolveMaxTextChunkLimit(cfg, account.accountId);
         const chunks =
-          text.length > MAX_TEXT_LIMIT
-            ? getMaxRuntime().channel.text.chunkMarkdownText(text, MAX_TEXT_LIMIT)
+          text.length > chunkLimit
+            ? getMaxRuntime().channel.text.chunkMarkdownText(text, chunkLimit)
             : [text];
         let firstMessageId = '';
         let firstChatType: string | undefined;

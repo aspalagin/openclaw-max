@@ -13,7 +13,7 @@ import { LocalMediaAccessError } from 'openclaw/plugin-sdk/web-media';
 
 import type { ResolvedMaxAccount } from './accounts.js';
 import { MaxApiError } from './api.js';
-import { readMaxDeliveryPin } from './presentation.js';
+import { readMaxDeliveryPin, resolveMaxTextChunkLimit } from './presentation.js';
 import { getMaxRuntime } from './runtime.js';
 import {
   answerMaxCallback,
@@ -161,7 +161,7 @@ export async function deliverMaxReply(params: {
   if (answersCallback) {
     // The text went with the callback answer.
   } else if (payload.text) {
-    const chunkLimit = 4000; // MAX message limit
+    const chunkLimit = resolveMaxTextChunkLimit(config, account.accountId);
     const chunkMode = core.channel.text.resolveChunkMode(config, 'max', account.accountId);
     const chunks = core.channel.text.chunkMarkdownTextWithMode(payload.text, chunkLimit, chunkMode);
 

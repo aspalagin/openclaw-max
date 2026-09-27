@@ -411,3 +411,44 @@ describe('group sender allowlist (groups.<id>.allowFrom / groupAllowFrom)', () =
     expect(runtime.dispatched.map((ctx) => ctx.SenderId)).toEqual(['1001']);
   });
 });
+
+describe('per-group settings (groups.<id>.enabled, systemPrompt, skills)', () => {
+  let runtime: ReturnType<typeof makeRuntime>;
+  const hello = () => inGroup({ text: 'привет' });
+  const replyOptions = () =>
+    (
+      runtime.core.channel.reply.dispatchReplyWithBufferedBlockDispatcher.mock
+        .calls[0] as unknown as [{ replyOptions: Record<string, unknown> }]
+    )[0].replyOptions;
+
+  beforeEach(() => {
+    runtime = makeRuntime();
+    setMaxRuntime(runtime.core as never);
+  });
+
+  it('drops messages of a group with enabled=false under any group policy', async () => {
+    const off = { '-7007': { requireMention: false, enabled: false } };
+    await dispatchUpdate(hello(), makeOpts(PATTERNS, { groups: off }) as never);
+    await dispatchUpdate(
+      hello(),
+      makeOpts(PATTERNS, { groupPolicy: 'open', groups: off }) as never,
+    );
+    expect(runtime.dispatched).toHaveLength(0);
+  });
+
+  it('passes the group system prompt and skill filter to core', async () => {
+    const groups = {
+      '-7007': { requireMention: false, systemPrompt: '  Answer briefly.  ', skills: ['weather'] },
+    };
+    await dispatchUpdate(hello(), makeOpts(PATTERNS, { groups }) as never);
+    expect(runtime.dispatched[0].GroupSystemPrompt).toBe('Answer briefly.');
+    expect(replyOptions().skillFilter).toEqual(['weather']);
+  });
+
+  it('falls back to the "*" entry and leaves skills unrestricted without a list', async () => {
+    const groups = { '*': { requireMention: false, systemPrompt: 'Shared rules.' } };
+    await dispatchUpdate(hello(), makeOpts(PATTERNS, { groups }) as never);
+    expect(runtime.dispatched[0].GroupSystemPrompt).toBe('Shared rules.');
+    expect(replyOptions()).not.toHaveProperty('skillFilter');
+  });
+});

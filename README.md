@@ -167,6 +167,11 @@ All options live under `channels.max`; the same keys (except `accounts` and `com
 | `mediaMaxCount` | integer | `12` | Media attachments downloaded per incoming message, forwards included |
 | `streamMode` | `off` \| `partial` \| `block` | `off` | `partial` — one draft message edited while the answer streams; `block` — core block replies |
 | `streaming` | core streaming config | off | `streaming.mode` (`off`, `partial`, `block`, `progress`) wins over `streamMode`; `streaming.progress.*` configures [turn status](#turn-status) |
+| `textChunkLimit` | integer | `4000` | Characters per outgoing message, account value first; values above MAX's 4000 are capped |
+| `responsePrefix` | string | — | Prefix of agent replies, applied by OpenClaw core (`"auto"` — agent name) |
+| `historyLimit` | integer ≥ 0 | core default | Read by OpenClaw core: recent turns of a group session the embedded agent runtime keeps in the prompt (native CLI runtimes keep their own history) |
+| `dmHistoryLimit`, `dms.<userId>.historyLimit` | integer ≥ 0 | no limit | Read by OpenClaw core: the same for private dialogs with a per-channel session (`session.dmScope`), per user first |
+| `actions` | object `{ <action>: boolean }` | all on | `false` turns a `message` tool action off (`send`, `edit`, `delete`, `sticker`, `sendAttachment`, `pin`, `unpin`): hidden from the tool and refused |
 | `apiBaseUrl` | string | `https://platform-api2.max.ru` | Bot API base URL; `https` only, `http` just for loopback |
 | `httpProxy` | string or SecretRef | — | HTTP(S) proxy for all MAX traffic; `""` in an account turns an inherited proxy off |
 | `logMessagePreview` | boolean | `false` | Add a 50-character text preview to debug logs |
@@ -181,8 +186,11 @@ Per-group settings (`groups.<chatId>` or `groups["*"]`):
 | `allowFrom` | — | Senders allowed in this group (overrides `groupAllowFrom`) |
 | `tools` | — | Core tool policy for this group |
 | `disableAudioPreflight` | `false` | Do not transcribe captionless voice messages to look for a mention |
+| `enabled` | `true` | `false` — ignore this group under any `groupPolicy` |
+| `systemPrompt` | — | Extra system prompt for turns in this group |
+| `skills` | all | Skills a turn in this group may load; `[]` — none |
 
-Accepted by the schema for compatibility with the common channel config shape but **not read by this plugin**: `markdown`, `historyLimit`, `dmHistoryLimit`, `dms`, `textChunkLimit` (text is always split at MAX's 4000 characters), `blockStreaming`, `blockStreamingCoalesce`, `responsePrefix`, `actions`, and `groups.<id>.enabled`, `skills`, `systemPrompt`. OpenClaw core may still apply some of them generically; that has not been verified for MAX.
+Accepted by the schema for compatibility with the common channel config shape but **without effect in MAX** — neither the plugin nor OpenClaw core reads them for this channel: `markdown` (table rendering), `blockStreaming` (use `streamMode` or `streaming.mode: "block"`), `blockStreamingCoalesce` (core reads `streaming.block.coalesce`). They stay in the schema so existing configs keep validating.
 
 ## Access and policies
 
@@ -326,7 +334,7 @@ The provider must exist in core's `secrets.providers`. The paths `channels.max.b
 - **Deduplication.** Keys of handled events (`update_type:timestamp:mid`) are kept for 24 hours, up to 5000, and survive restarts, so MAX redeliveries are dropped. Long polling uses the same keys, so a restart in the middle of a batch does not repeat already handled events.
 - **Event age.** Messages, edits, button presses and bot starts older than `maxEventAgeMinutes` (default 60) are skipped with a warning, so after a long outage the bot does not answer hours-old messages. Chat registry events are always processed.
 - **Delivery errors** are reported to core: nothing sent → the reply is not dispatched; part visible → partial delivery with the visible message ids. After a failed text chunk the rest is not sent.
-- **Long answers** are split at 4000 characters; with `streamMode: "partial"` the first chunk replaces the draft and the rest follow as new messages, buttons on the last one.
+- **Long answers** are split at 4000 characters (or a lower `textChunkLimit`); with `streamMode: "partial"` the first chunk replaces the draft and the rest follow as new messages, buttons on the last one.
 - **Retries:** `429` and network errors are retried; `attachment.not.ready` after an upload is retried; text sends are throttled to MAX's 2 messages per second per chat.
 
 ## MAX API limits

@@ -63,9 +63,12 @@ export const MaxGroupSchema = z
   .object({
     requireMention: z.boolean().optional(),
     tools: ToolPolicySchema.optional(),
+    /** Skills a group turn may load (core skillFilter; [] = none). */
     skills: z.array(z.string()).optional(),
+    /** false: the group is ignored under any groupPolicy. */
     enabled: z.boolean().optional(),
     allowFrom: z.array(z.union([z.string(), z.number()])).optional(),
+    /** Extra system prompt of group turns (core GroupSystemPrompt). */
     systemPrompt: z.string().optional(),
     /** Skip transcribing a captionless voice message to find a mention pattern. */
     disableAudioPreflight: z.boolean().optional(),
@@ -81,6 +84,7 @@ export const MaxAccountSchemaBase = z
   .object({
     name: z.string().optional(),
     enabled: z.boolean().optional(),
+    /** No effect in MAX: neither the plugin nor core reads it for this channel. */
     markdown: MarkdownConfigSchema.optional(),
     /** Plain token or a core SecretRef { source, provider, id } (also webhookSecret, httpProxy) */
     botToken: buildOptionalSecretInputSchema(),
@@ -132,10 +136,17 @@ export const MaxAccountSchemaBase = z
      * Off by default: logs hold message type, length and ids, never text.
      */
     logMessagePreview: z.boolean().optional(),
+    /**
+     * Read by core, not the plugin: the embedded agent runtime keeps this many
+     * recent turns of a group session (historyLimit) or DM session
+     * (dmHistoryLimit, dms.<peer>.historyLimit) in the prompt.
+     */
     historyLimit: z.number().int().min(0).optional(),
     dmHistoryLimit: z.number().int().min(0).optional(),
     dms: z.record(z.string(), DmConfigSchema.optional()).optional(),
+    /** Characters per outgoing message (core resolution), at most MAX's 4000. */
     textChunkLimit: z.number().int().positive().optional(),
+    /** No effect in MAX: use streamMode / streaming.mode "block". */
     blockStreaming: z.boolean().optional(),
     streamMode: z.enum(['off', 'partial', 'block']).optional(),
     /**
@@ -144,7 +155,9 @@ export const MaxAccountSchemaBase = z
      * maxLines, …) that is deleted once the answer landed. Default off.
      */
     streaming: ChannelPreviewStreamingConfigSchema.optional(),
+    /** No effect in MAX: core reads streaming.block.coalesce instead. */
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
+    /** Prefix of agent replies, applied by core ("auto" = agent name). */
     responsePrefix: z.string().optional(),
     mediaMaxMb: z.number().positive().optional(),
     /** Most media attachments downloaded per inbound message (default 12); the rest is noted. */
@@ -174,6 +187,10 @@ export const MaxAccountSchemaBase = z
      * off. Sensitive: credentials are never logged. Accepts a SecretRef.
      */
     httpProxy: buildOptionalSecretInputSchema(),
+    /**
+     * Message-tool actions: false turns one off (hidden from the tool and
+     * refused). Other values, including the legacy policy strings, leave it on.
+     */
     actions: z
       .record(
         z.string(),

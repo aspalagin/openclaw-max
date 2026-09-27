@@ -18,7 +18,7 @@ export function resolveMaxGroupPolicy(account: ResolvedMaxAccount, config: OpenC
   return account.config.groupPolicy ?? config.channels?.defaults?.groupPolicy ?? 'allowlist';
 }
 
-/** Whether a group chat passes the group policy (disabled / allowlist with "*" / open). */
+/** Whether a group chat passes the group policy (disabled / allowlist with "*" / open) and is enabled. */
 export function admitMaxGroupChat(
   account: ResolvedMaxAccount,
   config: OpenClawConfig,
@@ -32,6 +32,9 @@ export function admitMaxGroupChat(
       return { admitted: false, reason: 'chat is not in the groups allowlist' };
     }
   }
+  // groups.<id>.enabled=false (else the "*" entry's) turns the group off under any policy.
+  const groupCfg = account.config.groups?.[String(chatId)] ?? account.config.groups?.['*'];
+  if (groupCfg?.enabled === false) return { admitted: false, reason: 'group enabled=false' };
   return { admitted: true };
 }
 

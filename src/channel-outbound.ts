@@ -13,6 +13,7 @@ import {
   MAX_PRESENTATION_CAPABILITIES,
   MAX_TEXT_LIMIT,
   renderMaxPresentation,
+  resolveMaxTextChunkLimit,
 } from './presentation.js';
 import { getMaxRuntime, loadMaxConfig } from './runtime.js';
 import {
@@ -46,10 +47,12 @@ function resolveOutboundLocalMedia(
   return { mediaLocalRoots: getAgentScopedMediaLocalRoots(cfg) };
 }
 
-/** Direct delivery with 4000-character markdown chunks. */
+/** Direct delivery with markdown chunks of at most 4000 characters. */
 export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
   deliveryMode: 'direct',
-  chunker: (text, limit) => getMaxRuntime().channel.text.chunkMarkdownText(text, limit),
+  // Core passes channels.max.textChunkLimit here; MAX rejects anything longer than 4000.
+  chunker: (text, limit) =>
+    getMaxRuntime().channel.text.chunkMarkdownText(text, Math.min(limit, MAX_TEXT_LIMIT)),
   chunkerMode: 'markdown',
   textChunkLimit: 4000,
 
@@ -118,9 +121,10 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
 
     // MAX caps a message at 4000 characters: split, keyboard on the last
     // chunk, report the first one (delivery.pin pins the first chunk).
+    const chunkLimit = resolveMaxTextChunkLimit(cfg, account.accountId);
     const chunks =
-      effectiveText.length > MAX_TEXT_LIMIT
-        ? getMaxRuntime().channel.text.chunkMarkdownText(effectiveText, MAX_TEXT_LIMIT)
+      effectiveText.length > chunkLimit
+        ? getMaxRuntime().channel.text.chunkMarkdownText(effectiveText, chunkLimit)
         : [effectiveText];
     let firstMessageId = '';
     for (let index = 0; index < chunks.length; index += 1) {

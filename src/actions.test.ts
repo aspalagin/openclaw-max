@@ -41,6 +41,37 @@ describe('MAX Message Actions', () => {
       expect(result?.actions).toContain('delete');
     });
 
+    it('hides actions turned off by channels.max.actions, account value first', () => {
+      const cfg = {
+        channels: {
+          max: {
+            botToken: 'test-token',
+            actions: { delete: false, pin: 'allowlist' },
+            accounts: { work: { botToken: 'work-token', actions: { delete: true, edit: false } } },
+          },
+        },
+      } as unknown as OpenClawConfig;
+      const root = actions.describeMessageTool({ cfg });
+      expect(root.actions).not.toContain('delete');
+      expect(root.actions).toContain('pin');
+      expect(root.actions).toContain('edit');
+      const work = actions.describeMessageTool({ cfg, accountId: 'work' });
+      expect(work.actions).toContain('delete');
+      expect(work.actions).not.toContain('edit');
+    });
+
+    it('rejects a turned-off action before any API call', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      const cfg = {
+        channels: { max: { botToken: 'test-token', actions: { delete: false } } },
+      } as unknown as OpenClawConfig;
+      await expect(
+        actions.handleAction({ action: 'delete', params: { messageId: 'mid.1' }, cfg }),
+      ).rejects.toThrow('MAX action "delete" is disabled by channels.max.actions');
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
     it('should return null for disabled accounts', () => {
       const cfg: OpenClawConfig = {
         channels: {

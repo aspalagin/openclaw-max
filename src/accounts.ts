@@ -25,7 +25,16 @@ export interface MaxAccountConfig {
   name?: string;
   dmPolicy?: string;
   allowFrom?: Array<string | number>;
-  groups?: Record<string, { requireMention?: boolean; [key: string]: unknown }>;
+  groups?: Record<
+    string,
+    {
+      requireMention?: boolean;
+      enabled?: boolean;
+      systemPrompt?: string;
+      skills?: string[];
+      [key: string]: unknown;
+    }
+  >;
   groupPolicy?: string;
   groupAllowFrom?: Array<string | number>;
   /** Where core mention patterns apply in groups (core channel mention policy) */
@@ -65,6 +74,11 @@ export interface MaxAccountConfig {
   httpProxy?: string;
   /** Core streaming settings (streaming.mode, streaming.progress) */
   streaming?: Record<string, unknown>;
+  /**
+   * Message-tool actions; false turns one off (createActionGate). The schema
+   * also accepts legacy policy strings, which leave the action on.
+   */
+  actions?: Record<string, boolean | undefined>;
 }
 
 export interface ResolvedMaxAccount {
@@ -323,6 +337,7 @@ export function readMaxAccount(params: {
       httpProxy: section.httpProxy as string | undefined,
       streaming: section.streaming as MaxAccountConfig['streaming'],
       mentionPatterns: section.mentionPatterns as MaxAccountConfig['mentionPatterns'],
+      actions: section.actions as MaxAccountConfig['actions'],
     };
 
     const botToken = readSecretOption(cfg, section.botToken, 'channels.max.botToken');

@@ -21,7 +21,7 @@
  */
 
 import type { ChannelOutboundAdapter } from 'openclaw/plugin-sdk/channel-contract';
-import type { ReplyPayload } from 'openclaw/plugin-sdk/core';
+import type { OpenClawConfig, ReplyPayload } from 'openclaw/plugin-sdk/core';
 import {
   type MessagePresentation,
   type MessagePresentationBlock,
@@ -33,6 +33,7 @@ import {
   resolveMessagePresentationButtonAction,
   resolveMessagePresentationOptionAction,
 } from 'openclaw/plugin-sdk/interactive-runtime';
+import { resolveTextChunkLimit } from 'openclaw/plugin-sdk/reply-chunking';
 
 import type { MaxSendButton } from './send.js';
 
@@ -47,6 +48,18 @@ export const MAX_KEYBOARD_ROWS = 30;
 export const MAX_KEYBOARD_BUTTONS = 210;
 export const MAX_LINK_URL_LENGTH = 2048;
 export const MAX_TEXT_LIMIT = 4000;
+
+/**
+ * Chunk size of outgoing text: channels.max.textChunkLimit (account first, as
+ * core resolves it) may lower it, never above MAX's 4000-character cap.
+ */
+export function resolveMaxTextChunkLimit(cfg: OpenClawConfig, accountId?: string | null): number {
+  const configured = resolveTextChunkLimit(cfg, 'max', accountId, {
+    fallbackLimit: MAX_TEXT_LIMIT,
+  });
+  return Math.min(configured, MAX_TEXT_LIMIT);
+}
+
 /** Buttons per row we render: within MAX's 7 (3 for link/open_app/request_*). */
 const BUTTONS_PER_ROW = 3;
 const SELECT_OPTIONS_PER_ROW = 2;

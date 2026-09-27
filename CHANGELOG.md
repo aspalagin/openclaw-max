@@ -29,6 +29,7 @@ All notable changes to this project are documented in this file.
 - Опция `maxEventAgeMinutes` (по умолчанию 60, `0` — без ограничения): сообщения, правки, нажатия кнопок и `bot_started` старше этого времени по часам MAX пропускаются с предупреждением в логе. Действует на webhook, восстановленную очередь и long polling.
 - Опция `logMessagePreview` (по умолчанию `false`): превью текста (50 символов) в debug-логах для отладки.
 - Предупреждение при старте именованного аккаунта, который унаследовал открытую политику (`dmPolicy` или `groupPolicy` = `"open"`), с путём опции, которую стоит задать.
+- Ключи схемы, которые 0.7 принимал, но не читал, теперь действуют: `groups.<id>.enabled: false` отключает группу при любой `groupPolicy`, `groups.<id>.systemPrompt` добавляется к системному промпту хода в группе, `groups.<id>.skills` ограничивает навыки хода (`[]` — без навыков); `actions.<действие>: false` скрывает действие инструмента `message` и отклоняет его вызов; `textChunkLimit` задаёт размер части исходящего текста (не больше 4000).
 
 ### Changed
 
@@ -52,6 +53,7 @@ All notable changes to this project are documented in this file.
 - `channels.max.streaming` не действовал у аккаунта верхнего уровня.
 - Ответ агента на нажатие кнопки терял медиа (картинки, файлы, голосовое TTS): текст и клавиатура отвечают на нажатие (`POST /answers`), медиа уходят в чат следом.
 - `groupAllowFrom` и `groups.<id>.allowFrom` были объявлены в схеме, но к сообщениям групп не применялись (см. Security).
+- При `textChunkLimit` больше 4000 ядро делило текст инструмента `message` на части этого размера, и MAX отклонял сообщение: размер части теперь не превышает 4000.
 
 ### Security
 
@@ -84,6 +86,7 @@ All notable changes to this project are documented in this file.
 | `streaming.mode` сильнее `streamMode` | Оставить один из ключей |
 | Пауза polling после ошибки 2–60 с (была 3 с), при `401` — 5 минут | Нет |
 | Опубликованный пакет не содержит `scripts/` | Скрипты — в репозитории |
+| Действуют `groups.<id>.enabled`, `groups.<id>.systemPrompt`, `groups.<id>.skills`, `actions`, `textChunkLimit` (в 0.7 принимались схемой и не читались) | Убрать эти ключи из конфига |
 
 ## 0.7.3 - 2026-09-27
 

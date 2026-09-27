@@ -444,3 +444,36 @@ describe('voice replies', () => {
     ]);
   });
 });
+
+describe('channels.max.textChunkLimit', () => {
+  const chunkLimitFor = async (config: Record<string, unknown>) => {
+    mockFetch(sent('mid.1'));
+    await deliver({ text: 'hello' }, { config });
+    const runtime = (await import('./runtime.js')).getMaxRuntime();
+    const chunk = runtime.channel.text.chunkMarkdownTextWithMode as unknown as ReturnType<
+      typeof vi.fn
+    >;
+    return chunk.mock.calls.at(-1)?.[1];
+  };
+
+  it('splits replies at the configured limit, account value first', async () => {
+    expect(await chunkLimitFor({ channels: {} })).toBe(4000);
+    expect(await chunkLimitFor({ channels: { max: { textChunkLimit: 1500 } } })).toBe(1500);
+    expect(
+      await chunkLimitFor({
+        channels: { max: { textChunkLimit: 1500, accounts: { default: { textChunkLimit: 800 } } } },
+      }),
+    ).toBe(800);
+  });
+
+  it("never goes above MAX's 4000 characters, also in core's outbound chunker", async () => {
+    expect(await chunkLimitFor({ channels: { max: { textChunkLimit: 9000 } } })).toBe(4000);
+
+    const chunkMarkdownText = vi.fn((text: string, _limit: number) => [text]);
+    setMaxRuntime({ channel: { text: { chunkMarkdownText } } } as never);
+    const { maxOutboundAdapter } = await import('./channel-outbound.js');
+    maxOutboundAdapter.chunker?.('hello', 9000);
+    maxOutboundAdapter.chunker?.('hello', 1200);
+    expect(chunkMarkdownText.mock.calls.map((call) => call[1])).toEqual([4000, 1200]);
+  });
+});
