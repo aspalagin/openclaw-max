@@ -17,6 +17,10 @@ jobs:
         with:
           node-version: 24
       - run: npm ci --ignore-scripts
+      # Known vulnerabilities in the runtime dependencies shipped with the
+      # package (undici, zod); dev tools and the host's own openclaw peer are
+      # left out.
+      - run: npm audit --omit=dev --omit=peer
       - run: npm run format:check
       - run: npm run lint
       - run: npm run check:cycles
@@ -26,20 +30,27 @@ jobs:
   # Same checks against the newest published OpenClaw, so SDK drift (removed
   # subpaths, changed helpers) shows up before a gateway upgrade does. The zod
   # floor leg catches schemas that break when plugin and SDK resolve different
-  # zod copies.
+  # zod copies. The beta leg is an early signal only: its failure is reported
+  # on the job but does not fail the workflow.
   openclaw-current:
+    name: openclaw@${{ matrix.openclaw }}, zod ${{ matrix.zod }}
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.openclaw == 'beta' }}
     strategy:
       fail-fast: false
       matrix:
+        openclaw: [latest]
         zod: [locked, "4.4.3"]
+        include:
+          - openclaw: beta
+            zod: locked
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
       - run: npm ci --ignore-scripts
-      - run: npm install --no-save --ignore-scripts openclaw@latest
+      - run: npm install --no-save --ignore-scripts openclaw@${{ matrix.openclaw }}
       - if: matrix.zod != 'locked'
         run: npm install --no-save --ignore-scripts zod@${{ matrix.zod }}
       - run: node -p "'openclaw ' + require('./node_modules/openclaw/package.json').version + ', zod ' + require('./node_modules/zod/package.json').version"

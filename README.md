@@ -448,7 +448,10 @@ npm run lint           # eslint
 npm run check:cycles   # import cycles between src/ modules
 npm run typecheck
 npm test               # vitest, including conformance with the MAX schema snapshot
+npm audit --omit=dev --omit=peer   # runtime dependencies shipped with the package
 ```
+
+CI also runs `typecheck` and the tests against `openclaw@latest` (with the locked and the minimum supported zod) and `openclaw@beta`; a failure on `beta` is reported but does not fail the build.
 
 - `src/__fixtures__/max-schema-0.0.33.yaml` is a snapshot of the MAX Bot API schema; `npm run schema:update [ref]` refreshes it.
 - `npm run test:api` calls the live API with `MAX_BOT_TOKEN` (`GET /me`, `GET /updates`); the helper scripts in `scripts/` are in the repository only, not in the package.
