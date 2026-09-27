@@ -2,7 +2,12 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest version on the `main` branch and the latest npm release.
+| Version | Supported |
+|---|---|
+| 0.8.x | Yes — security fixes land in the latest 0.8 release and on `main` |
+| 0.7.x and older | No — upgrade to 0.8 |
+
+0.8.0 closes several issues present in 0.7.x and older: local files outside the allowed media roots could be sent, `message`-tool actions could act in any chat of the bot, group sender lists (`groupAllowFrom`, `groups.<id>.allowFrom`) were not enforced, and debug logs carried message text. See the [changelog](CHANGELOG.md) for details.
 
 ## Reporting a vulnerability
 
