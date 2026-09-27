@@ -55,7 +55,7 @@ openclaw plugins install npm:@aspalagin/openclaw-max
 }
 ```
 
-Webhook: `"webhookUrl": "https://bot.example.com/max/webhook"` (только HTTPS на порту 443 с доверенным сертификатом) и `"webhookSecretFile"`; без секрета плагин сгенерирует его сам и сохранит в каталоге состояния. Роут поднимается на HTTP-сервере gateway, подписку создаёт плагин. Подробности и порядок включения — README, раздел «Transports».
+Webhook: `"webhookUrl": "https://bot.example.com/max/webhook"` (только HTTPS на порту 443 с доверенным сертификатом) и `"webhookSecretFile"`; без секрета плагин сгенерирует его сам и сохранит в каталоге состояния. Роут поднимается на HTTP-сервере gateway, подписку создаёт плагин. Подробности и порядок включения — README, раздел «Транспорты: webhook и long polling».
 
 ## Примеры
 

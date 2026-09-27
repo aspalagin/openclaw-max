@@ -58,8 +58,8 @@
     "!src/__fixtures__/",
     "assets/icon.png",
     "openclaw.plugin.json",
+    "README.md",
     "README.en.md",
-    "README.ru.md",
     "SKILL.md",
     "LICENSE"
   ],

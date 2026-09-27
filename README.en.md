@@ -1,6 +1,6 @@
 # openclaw-max — MAX messenger channel for OpenClaw
 
-[Русская версия](README.ru.md)
+[Русская версия](README.md)
 
 A channel plugin that connects an [OpenClaw](https://openclaw.ai) assistant to the [MAX](https://max.ru) messenger through the MAX Bot API (`platform-api2.max.ru`). People write to your bot in MAX — in a private dialog or in a group — and the OpenClaw agent answers there, with media, buttons and voice.
 
