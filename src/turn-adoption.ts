@@ -5,8 +5,9 @@
  * turn after a crash by itself. The journal row of the update must therefore
  * be completed at adoption, not only when the dispatch returns: replaying it
  * after a crash mid-turn would run the turn twice (SDK durable ingress rule:
- * "mark the event complete at dispatch adoption"). The queue runs each
- * journaled dispatch with its completion callback; the reply dispatch passes
+ * "mark the event complete at dispatch adoption"). The webhook queue and the
+ * polling loop run each journaled dispatch with its completion callback (for
+ * polling: remembering the dedupe key); the reply dispatch passes
  * it on as the public `turnAdoptionLifecycle` reply option. Without `admission`
  * or `ownerKey` core groups queued follow-ups exactly as without a lifecycle.
  */

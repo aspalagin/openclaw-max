@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MaxApiError, type MaxUpdate } from './api.js';
 import { POLL_AUTH_PAUSE_MS, resolvePollRetryDelayMs, startMaxPollingLoop } from './polling.js';
 import { MaxStateStore } from './state.js';
+import { maxTurnAdoptionReplyOptions } from './turn-adoption.js';
 import type * as UpdateJournal from './update-journal.js';
 import { openMaxUpdateJournal, resetMaxUpdateJournalsForTest } from './update-journal.js';
 
@@ -254,6 +255,55 @@ describe('polling across a restart', () => {
     expect(dispatched).toEqual(['p1', 'p2', 'p3']);
     await second.state.flush();
     expect(second.state.marker).toBe(42);
+  });
+
+  it('does not replay an update whose turn core adopted before a crash', async () => {
+    const dispatched: Array<string | undefined> = [];
+    const batch = { updates: [msg('a1'), msg('a2')], marker: 9 };
+    // Core adopts the turn of a1 (and now owns its crash recovery), then the
+    // process dies mid-turn: the dispatch never returns.
+    dispatchCalls.fn = async (u) => {
+      dispatched.push((u as MaxUpdate).message?.body?.mid);
+      await maxTurnAdoptionReplyOptions().turnAdoptionLifecycle?.onAdopted();
+      await new Promise<never>(() => undefined);
+    };
+    const first = run('adopted-crash', [batch]);
+    await vi.waitFor(() => expect(dispatched).toEqual(['a1']));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    first.abort.abort();
+
+    resetMaxUpdateJournalsForTest(); // new process
+    dispatchCalls.fn = (u) => dispatched.push((u as MaxUpdate).message?.body?.mid);
+    const second = run('adopted-crash', [batch]);
+    await vi.waitFor(() => expect(second.getUpdates).toHaveBeenCalledTimes(2));
+    second.abort.abort();
+    await second.done;
+    expect(dispatched).toEqual(['a1', 'a2']);
+  });
+
+  it('does not replay a webhook leftover whose turn core adopted before a crash', async () => {
+    const journal = await openMaxUpdateJournal({ accountId: 'adopted-leftover' });
+    await journal.append(msg('w1'), 'kw1');
+    resetMaxUpdateJournalsForTest(); // restarted with transport "polling"
+
+    const dispatched: Array<string | undefined> = [];
+    dispatchCalls.fn = async (u) => {
+      dispatched.push((u as MaxUpdate).message?.body?.mid);
+      await maxTurnAdoptionReplyOptions().turnAdoptionLifecycle?.onAdopted();
+      await new Promise<never>(() => undefined);
+    };
+    const first = run('adopted-leftover', []);
+    await vi.waitFor(() => expect(dispatched).toEqual(['w1']));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    first.abort.abort();
+
+    resetMaxUpdateJournalsForTest(); // new process
+    dispatchCalls.fn = (u) => dispatched.push((u as MaxUpdate).message?.body?.mid);
+    const second = run('adopted-leftover', [{ updates: [msg('p1')], marker: 1 }]);
+    await vi.waitFor(() => expect(second.getUpdates).toHaveBeenCalledTimes(2));
+    second.abort.abort();
+    await second.done;
+    expect(dispatched).toEqual(['w1', 'p1']);
   });
 
   it('skips messages older than maxEventAgeMinutes but still handles registry updates', async () => {

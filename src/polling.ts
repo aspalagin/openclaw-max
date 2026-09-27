@@ -20,6 +20,7 @@ import {
   type MaxMonitorOptions,
   type MaxStatusPatch,
 } from './monitor-types.js';
+import { runWithMaxTurnAdoption } from './turn-adoption.js';
 import { type MaxUpdateJournal, openMaxUpdateJournal } from './update-journal.js';
 import { maxUpdateDedupeKey } from './webhook.js';
 import { resolveMaxEventMaxAgeMs, staleMaxUpdateAgeMs } from './webhook-queue.js';
@@ -119,6 +120,9 @@ async function handlePolledUpdate(
     );
     return;
   }
+  let remembered: Promise<void> | undefined;
+  const remember = (): Promise<void> =>
+    (remembered ??= key && journal ? journal.remember(key) : Promise.resolve());
   const staleMs = staleMaxUpdateAgeMs(update, maxAgeMs, Date.now());
   if (staleMs !== undefined) {
     log?.warn(
@@ -126,14 +130,30 @@ async function handlePolledUpdate(
     );
   } else {
     try {
-      await dispatchUpdate(update, opts);
+      await dispatchWithAdoption(remember, update, opts, Boolean(key && journal));
     } catch (err) {
       log?.error(
         `[${account.accountId}] Error dispatching update ${update.update_type}: ${String(err)}`,
       );
     }
   }
-  if (key) await journal?.remember(key);
+  await remember();
+}
+
+/**
+ * Dispatch; with `durable`, `done` also runs at core's turn adoption. Core then
+ * owns the turn and resumes it after a crash by itself: marking the update
+ * handled only when the dispatch returns would replay it after the restart and
+ * run the turn twice (see turn-adoption.ts).
+ */
+function dispatchWithAdoption(
+  done: () => Promise<void>,
+  update: MaxUpdate,
+  opts: MaxMonitorOptions,
+  durable: boolean,
+): Promise<void> {
+  const dispatch = () => dispatchUpdate(update, opts);
+  return durable ? runWithMaxTurnAdoption(done, dispatch) : dispatch();
 }
 
 /**
@@ -162,17 +182,19 @@ async function drainWebhookLeftovers(
       journal.release(entry);
       continue;
     }
+    let completed: Promise<void> | undefined;
+    const complete = (): Promise<void> => (completed ??= journal.complete(entry));
     const staleMs = staleMaxUpdateAgeMs(entry.update, maxAgeMs, Date.now(), entry.receivedAt);
     if (staleMs === undefined) {
       try {
-        await dispatchUpdate(entry.update, opts);
+        await dispatchWithAdoption(complete, entry.update, opts, true);
       } catch (err) {
         log?.error(
           `[${account.accountId}] Error dispatching update ${entry.update.update_type}: ${String(err)}`,
         );
       }
     }
-    await journal.complete(entry);
+    await complete();
   }
 }
 
