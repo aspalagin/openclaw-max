@@ -108,6 +108,7 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
         ...sendFlags,
         mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
         localMedia: resolveOutboundLocalMedia(cfg, ctx),
+        asVoice: ctx.audioAsVoice === true || payload.audioAsVoice === true,
       });
       return {
         channel: 'max',
@@ -186,6 +187,7 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
       ...sendFlags,
       mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
       localMedia: resolveOutboundLocalMedia(cfg, ctx),
+      asVoice: ctx.audioAsVoice === true,
     });
 
     return {

@@ -638,6 +638,13 @@ export interface MaxMediaSendOptions extends MaxSendOptions {
    * media roots apply.
    */
   localMedia?: MaxLocalMediaAccess;
+  /**
+   * Voice delivery (reply `audioAsVoice`, message tool `asVoice`): a single
+   * audio source goes as MAX's audio attachment even when only its MIME type
+   * says audio. MAX has no separate voice type: its clients show that
+   * attachment as a voice message.
+   */
+  asVoice?: boolean;
 }
 
 /**
@@ -748,27 +755,65 @@ function loadInlineMaxMedia(source: MaxInlineMedia, opts: MaxMediaSendOptions): 
 }
 
 /**
- * Upload a local path (guarded loader), a remote URL (SSRF-guarded download)
+ * Load a local path (guarded loader), a remote URL (SSRF-guarded download)
  * or inline content (size-checked).
  */
-async function uploadMaxAttachment(
+async function loadMaxMediaSource(
   api: MaxApi,
   source: MaxMediaSource,
   opts: MaxMediaSendOptions,
-): Promise<MaxAttachment> {
-  const media =
-    typeof source !== 'string'
-      ? loadInlineMaxMedia(source, opts)
-      : isRemoteUrl(source)
-        ? await downloadMaxRemoteMedia(
-            source,
-            opts.mediaMaxBytes ?? DEFAULT_MEDIA_MAX_BYTES,
-            api.mediaProxyUrl(),
-          )
-        : await loadLocalMaxMedia(source, opts);
+): Promise<MaxLoadedMedia> {
+  return typeof source !== 'string'
+    ? loadInlineMaxMedia(source, opts)
+    : isRemoteUrl(source)
+      ? await downloadMaxRemoteMedia(
+          source,
+          opts.mediaMaxBytes ?? DEFAULT_MEDIA_MAX_BYTES,
+          api.mediaProxyUrl(),
+        )
+      : await loadLocalMaxMedia(source, opts);
+}
+
+type MaxUploadType = ReturnType<typeof detectMaxMediaType>;
+
+/**
+ * Upload type by file name; a voice send also takes audio known only by its
+ * MIME type (.oga, audio/webm) as audio.
+ */
+function maxUploadType(media: MaxLoadedMedia, asVoice: boolean): MaxUploadType {
   const type = detectMaxMediaType(media.fileName);
-  const uploaded = await api.uploadMedia(type, media.buffer, media.contentType, media.fileName);
-  return { type, payload: { token: uploaded.token } };
+  if (asVoice && media.contentType?.toLowerCase().startsWith('audio/')) return 'audio';
+  return type;
+}
+
+/**
+ * Upload loaded media. MAX may refuse an audio upload (a format it does not
+ * take as audio): nothing was sent yet, so the same bytes go as a file.
+ */
+async function uploadMaxAttachment(
+  api: MaxApi,
+  media: MaxLoadedMedia,
+  type: MaxUploadType,
+): Promise<MaxAttachment> {
+  try {
+    const uploaded = await api.uploadMedia(type, media.buffer, media.contentType, media.fileName);
+    return { type, payload: { token: uploaded.token } };
+  } catch (err) {
+    if (type !== 'audio' || !(err instanceof MaxApiError)) throw err;
+    console.warn(
+      `[MAX] audio upload of ${media.fileName} refused (${err.code ?? err.status}); sending as a file`,
+    );
+    return uploadMaxAttachment(api, media, 'file');
+  }
+}
+
+/**
+ * MAX refused a message with an audio attachment (400, also an audio still
+ * not processed after the attachment.not.ready retries): nothing was created,
+ * so one resend with the audio as a file cannot duplicate.
+ */
+function isMaxAudioRefusal(err: unknown): boolean {
+  return err instanceof MaxApiError && err.status === 400 && !isChatNotFound(err);
 }
 
 /**
@@ -777,6 +822,8 @@ async function uploadMaxAttachment(
  * message, those links are uploaded and the message is sent once more. MAX
  * processes video/file uploads asynchronously — sendMessage may answer
  * attachment.not.ready for a few seconds; retry the send (not the upload).
+ * Audio goes as MAX's audio attachment (shown as a voice message); if MAX
+ * refuses it, the audio is sent once more as a file, so the reply is not lost.
  */
 async function sendMaxAttachmentsMessage(
   api: MaxApi,
@@ -786,14 +833,33 @@ async function sendMaxAttachmentsMessage(
   opts: MaxMediaSendOptions,
 ): Promise<MaxSendOutcome> {
   const links = await Promise.all(sources.map(isPublicImageLink));
+  // Loaded once per message: a resend reuses the bytes instead of a new read.
+  const loaded = new Map<number, Promise<MaxLoadedMedia>>();
+  const asVoice = opts.asVoice === true && sources.length === 1;
+  let audioAsFile = false;
+  let hasAudio = false;
   const build = async (allowLinks: boolean): Promise<MaxNewMessageBody> => {
     const attachments: MaxAttachment[] = [];
+    hasAudio = false;
     for (const [index, source] of sources.entries()) {
-      attachments.push(
-        allowLinks && links[index]
-          ? { type: 'image', payload: { url: source as string } }
-          : await uploadMaxAttachment(api, source, opts),
+      if (allowLinks && links[index]) {
+        attachments.push({ type: 'image', payload: { url: source as string } });
+        continue;
+      }
+      let media = loaded.get(index);
+      if (!media) {
+        media = loadMaxMediaSource(api, source, opts);
+        loaded.set(index, media);
+      }
+      const loadedMedia = await media;
+      const type = maxUploadType(loadedMedia, asVoice);
+      const attachment = await uploadMaxAttachment(
+        api,
+        loadedMedia,
+        type === 'audio' && audioAsFile ? 'file' : type,
       );
+      if (attachment.type === 'audio') hasAudio = true;
+      attachments.push(attachment);
     }
     if (opts.buttons?.length) {
       attachments.push(buildInlineKeyboard(opts.buttons) as unknown as MaxAttachment);
@@ -809,7 +875,18 @@ async function sendMaxAttachmentsMessage(
       retry: retryWhileAttachmentNotReady,
     });
 
-  if (!links.some(Boolean)) return send(false);
+  if (!links.some(Boolean)) {
+    try {
+      return await send(false);
+    } catch (err) {
+      if (!hasAudio || !isMaxAudioRefusal(err)) throw err;
+      console.warn(
+        `[MAX] message with audio refused (${(err as MaxApiError).code ?? 400}); sending the audio as a file`,
+      );
+      audioAsFile = true;
+      return send(false);
+    }
+  }
   try {
     return await send(true);
   } catch (err) {

@@ -8,7 +8,7 @@ import { isChannelPartialDeliveryError } from 'openclaw/plugin-sdk/channel-inbou
 import { PlatformMessageNotDispatchedError } from 'openclaw/plugin-sdk/error-runtime';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MaxApiError } from './api.js';
+import { MaxApi, MaxApiError } from './api.js';
 import { deliverMaxReply, toMaxDeliveryError } from './deliver.js';
 import { setMaxRuntime } from './runtime.js';
 import { answerMaxCallback, editMaxMessage, isMaxFormatRejection, sendMaxMessage } from './send.js';
@@ -292,5 +292,106 @@ describe('edit streaming: long and refused finals', () => {
     await deliver({ text: 'Draft of the answer, long enough to be sent' }, { draft });
 
     expect(calls.map((c) => c.method)).toEqual(['POST']);
+  });
+});
+
+describe('voice replies', () => {
+  const SPOKEN = 'Ответ, который прозвучит голосом';
+  let voiceFile: string;
+  let localMedia: { mediaLocalRoots: string[] };
+  let uploads: string[];
+
+  beforeEach(async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'max-voice-reply-'));
+    voiceFile = path.join(dir, 'reply.mp3');
+    fs.writeFileSync(voiceFile, Buffer.from('mp3-bytes'));
+    localMedia = { mediaLocalRoots: [dir] };
+    uploads = [];
+    vi.restoreAllMocks();
+    vi.spyOn(MaxApi.prototype, 'uploadMedia').mockImplementation(async (type) => {
+      uploads.push(type);
+      return { token: `tok:${type}` };
+    });
+  });
+
+  async function startDraft() {
+    const draft = createMaxDraftStream({ account: ACCOUNT, chatId: '70', log: LOG });
+    await draft.update('Draft of the answer, long enough to be sent');
+    expect(draft.messageId).toBe('mid.draft');
+    return draft;
+  }
+
+  const texts = () => posts().map((c) => c.body.text);
+
+  it('sends the visible text once and the audio as a voice message without a caption', async () => {
+    mockFetch(sent('mid.text'), sent('mid.voice'));
+
+    await deliver(
+      { text: SPOKEN, mediaUrl: voiceFile, audioAsVoice: true, spokenText: SPOKEN },
+      { localMedia },
+    );
+
+    expect(uploads).toEqual(['audio']);
+    expect(texts()).toEqual([SPOKEN, undefined]);
+    expect(posts()[1].body.attachments).toEqual([
+      { type: 'audio', payload: { token: 'tok:audio' } },
+    ]);
+  });
+
+  it('sends a voice-only reply as audio alone, never the spoken text', async () => {
+    mockFetch(sent('mid.voice'));
+
+    await deliver({ mediaUrl: voiceFile, audioAsVoice: true, spokenText: SPOKEN }, { localMedia });
+
+    expect(posts()).toHaveLength(1);
+    expect(texts()).toEqual([undefined]);
+    expect(uploads).toEqual(['audio']);
+  });
+
+  it('removes a partial stream draft once a voice-only reply is delivered', async () => {
+    mockFetch(sent('mid.draft'), sent('mid.voice'), [200, { success: true }]);
+    const draft = await startDraft();
+
+    await deliver({ mediaUrl: voiceFile, audioAsVoice: true }, { draft, localMedia });
+
+    expect(calls.map((c) => c.method)).toEqual(['POST', 'POST', 'DELETE']);
+    expect(calls[2].url).toContain('message_id=mid.draft');
+  });
+
+  it('keeps a draft that already carries the final text', async () => {
+    mockFetch(sent('mid.draft'), [200, { success: true }], sent('mid.voice'));
+    const draft = await startDraft();
+
+    await deliver({ text: 'The final answer text' }, { draft });
+    await deliver({ mediaUrl: voiceFile, audioAsVoice: true }, { draft, localMedia });
+
+    expect(calls.map((c) => c.method)).toEqual(['POST', 'PUT', 'POST']);
+  });
+
+  it('keeps the draft when the audio could not be sent', async () => {
+    mockFetch(sent('mid.draft'));
+    const draft = await startDraft();
+    vi.mocked(MaxApi.prototype.uploadMedia).mockRejectedValue(new Error('network down'));
+
+    await expect(
+      deliver({ mediaUrl: voiceFile, audioAsVoice: true }, { draft, localMedia }),
+    ).rejects.toThrow('network down');
+    expect(calls.map((c) => c.method)).toEqual(['POST']);
+  });
+
+  it('delivers the audio as a file when MAX refuses the voice message', async () => {
+    mockFetch([400, { code: 'proto.payload', message: 'bad audio' }], sent('mid.file'));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await deliver({ mediaUrl: voiceFile, audioAsVoice: true }, { localMedia });
+
+    expect(uploads).toEqual(['audio', 'file']);
+    expect(posts().map((c) => (c.body.attachments as { type: string }[])[0].type)).toEqual([
+      'audio',
+      'file',
+    ]);
   });
 });

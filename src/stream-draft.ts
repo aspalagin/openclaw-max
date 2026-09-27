@@ -24,6 +24,8 @@ const DRAFT_MIN_CHARS = 30; // Don't send until we have enough text
 export interface MaxDraftStream {
   /** Mid of the draft message once the first partial was sent. */
   readonly messageId: string | null;
+  /** The draft carries a final text (finalize succeeded). */
+  readonly finalized: boolean;
   /** Show a partial reply (throttled; stops on errors or past 4000 chars). */
   update(text: string): Promise<void>;
   /**
@@ -31,7 +33,10 @@ export interface MaxDraftStream {
    * go onto the same edit. Resolves false when MAX refused the edit.
    */
   finalize(text: string, buttons: MaxSendButton[][] | undefined): Promise<boolean>;
-  /** Delete the draft (its final edit was refused); resolves false when that fails too. */
+  /**
+   * Delete the draft and stop streaming (its final edit was refused, or the
+   * reply went as voice only); resolves false when that fails too.
+   */
   discard(): Promise<boolean>;
   /** Cancel a pending update and stop streaming. */
   clear(): Promise<void>;
@@ -51,6 +56,7 @@ export function createMaxDraftStream(params: {
   let draftLastEditAt = 0;
   let draftTimer: ReturnType<typeof setTimeout> | null = null;
   let draftStopped = false;
+  let draftFinalized = false;
 
   const draftUpdate = async (text: string) => {
     if (draftStopped || !text) return;
@@ -110,6 +116,9 @@ export function createMaxDraftStream(params: {
     get messageId() {
       return draftMid;
     },
+    get finalized() {
+      return draftFinalized;
+    },
     update: draftUpdate,
     finalize: async (finalText, buttons) => {
       // Final delivery replaces the draft message with final text. The
@@ -121,7 +130,10 @@ export function createMaxDraftStream(params: {
       }
       draftStopped = true;
       if (!draftMid) return false;
-      if (finalText === draftLastText && !buttons?.length) return true;
+      if (finalText === draftLastText && !buttons?.length) {
+        draftFinalized = true;
+        return true;
+      }
       try {
         await editMaxMessage(draftMid, finalText, {
           token: account.token,
@@ -129,6 +141,7 @@ export function createMaxDraftStream(params: {
           buttons,
         });
         draftLastText = finalText;
+        draftFinalized = true;
         return true;
       } catch (err) {
         log?.warn(`[${account.accountId}] MAX draft final edit failed: ${String(err)}`);
@@ -136,6 +149,11 @@ export function createMaxDraftStream(params: {
       }
     },
     discard: async () => {
+      if (draftTimer) {
+        clearTimeout(draftTimer);
+        draftTimer = null;
+      }
+      draftStopped = true;
       if (!draftMid) return true;
       try {
         await deleteMaxMessage(draftMid, { token: account.token });

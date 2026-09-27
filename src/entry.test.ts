@@ -56,3 +56,13 @@ describe('plugin entry', () => {
     expect(setupEntry.plugin.id).toBe('max');
   });
 });
+
+describe('TTS voice capability', () => {
+  it('asks core for audio-file synthesis and marks MAX audio formats as voice', () => {
+    expect(maxPlugin.capabilities.tts?.voice).toEqual({
+      synthesisTarget: 'audio-file',
+      audioFileFormats: ['mp3', 'm4a', 'wav', 'ogg', 'opus'],
+    });
+    expect(maxPlugin.capabilities.tts?.voice?.transcodesAudio).toBeUndefined();
+  });
+});

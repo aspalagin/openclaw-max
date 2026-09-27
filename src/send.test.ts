@@ -995,3 +995,116 @@ describe('inline media (content without a path)', () => {
     send.mockRestore();
   });
 });
+
+describe('voice messages (MAX audio attachment)', () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  const mockApi = () => {
+    const upload = vi
+      .spyOn(MaxApi.prototype, 'uploadMedia')
+      .mockImplementation(async (type, _data, _contentType, fileName) => ({
+        token: `tok:${type}:${fileName}`,
+      }));
+    const send = vi.spyOn(MaxApi.prototype, 'sendMessage').mockResolvedValue({
+      message: { body: { mid: 'mid.voice' } },
+    } as never);
+    return { upload, send };
+  };
+  const voice = (fileName: string, contentType = 'audio/ogg') => ({
+    buffer: Buffer.from('voice-bytes'),
+    fileName,
+    contentType,
+  });
+
+  it('sends audio as the audio attachment MAX shows as a voice message', async () => {
+    const { upload, send } = mockApi();
+    await sendMaxMediaMessage('100', '', voice('reply.ogg'), { token: MOCK_TOKEN, asVoice: true });
+    expect(upload.mock.calls[0][0]).toBe('audio');
+    expect(send.mock.calls[0][0].attachments).toEqual([
+      { type: 'audio', payload: { token: 'tok:audio:reply.ogg' } },
+    ]);
+  });
+
+  it('takes audio known only by its MIME type as voice only when asked', async () => {
+    const { upload } = mockApi();
+    await sendMaxMediaMessage('100', '', voice('reply.oga'), { token: MOCK_TOKEN, asVoice: true });
+    await sendMaxMediaMessage('100', '', voice('reply.oga'), { token: MOCK_TOKEN });
+    expect(upload.mock.calls.map((call) => call[0])).toEqual(['audio', 'file']);
+  });
+
+  it('uploads the same bytes as a file when MAX refuses the audio upload', async () => {
+    const { MaxApiError } = await import('./api.js');
+    const { upload, send } = mockApi();
+    upload.mockRejectedValueOnce(new MaxApiError('MAX media upload failed: 400', 400, null));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await sendMaxMediaMessage('100', 'Подпись', voice('reply.ogg'), {
+      token: MOCK_TOKEN,
+      asVoice: true,
+    });
+
+    expect(result.messageId).toBe('mid.voice');
+    expect(upload.mock.calls.map((call) => call[0])).toEqual(['audio', 'file']);
+    expect(Buffer.from(upload.mock.calls[1][1]).toString()).toBe('voice-bytes');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0].text).toBe('Подпись');
+    expect(send.mock.calls[0][0].attachments).toEqual([
+      { type: 'file', payload: { token: 'tok:file:reply.ogg' } },
+    ]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('sending as a file'));
+  });
+
+  it('resends the audio once as a file when MAX refuses the message (400)', async () => {
+    const { MaxApiError } = await import('./api.js');
+    const { upload, send } = mockApi();
+    send.mockRejectedValueOnce(
+      new MaxApiError('MAX API 400', 400, { code: 'proto.payload', message: 'bad audio' }),
+    );
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await sendMaxMediaMessage('100', '', voice('reply.mp3', 'audio/mpeg'), {
+      token: MOCK_TOKEN,
+      asVoice: true,
+    });
+
+    expect(result.messageId).toBe('mid.voice');
+    expect(upload.mock.calls.map((call) => call[0])).toEqual(['audio', 'file']);
+    expect(send.mock.calls.map((call) => call[0].attachments?.[0]?.type)).toEqual([
+      'audio',
+      'file',
+    ]);
+  });
+
+  it('does not resend after a failure that may have delivered (5xx)', async () => {
+    const { MaxApiError } = await import('./api.js');
+    const { upload, send } = mockApi();
+    send.mockRejectedValueOnce(new MaxApiError('MAX API 502', 502, null));
+
+    await expect(
+      sendMaxMediaMessage('100', '', voice('reply.ogg'), { token: MOCK_TOKEN, asVoice: true }),
+    ).rejects.toThrow('MAX API 502');
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads a local voice file only through the guarded loader under the allowed roots', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'max-voice-root-'));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'max-voice-outside-'));
+    const inside = path.join(root, 'reply.mp3');
+    const foreign = path.join(outside, 'secret.mp3');
+    fs.writeFileSync(inside, Buffer.from('mp3-bytes'));
+    fs.writeFileSync(foreign, Buffer.from('mp3-bytes'));
+    const { upload } = mockApi();
+    const opts = { token: MOCK_TOKEN, asVoice: true, localMedia: { mediaLocalRoots: [root] } };
+
+    await sendMaxMediaMessage('100', '', inside, opts);
+    await expect(sendMaxMediaMessage('100', '', foreign, opts)).rejects.toThrow(
+      /not under an allowed directory/,
+    );
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(upload.mock.calls[0][0]).toBe('audio');
+  });
+});

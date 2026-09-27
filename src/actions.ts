@@ -233,6 +233,13 @@ function readLocationParams(
   return { latitude: lat, longitude: lng };
 }
 
+/** Voice delivery of audio: core's `asVoice` (or its `audioAsVoice` alias), boolean or "true". */
+function readAsVoiceParam(params: Record<string, unknown>): boolean {
+  return [params.asVoice, params.audioAsVoice].some(
+    (value) => value === true || (typeof value === 'string' && value.trim() === 'true'),
+  );
+}
+
 /** Contact card fields: contactId (MAX user id) and vcfPhone/phone next to the given name. */
 function readContactParams(
   params: Record<string, unknown>,
@@ -451,6 +458,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
           format: 'markdown',
           mediaMaxBytes,
           localMedia: resolveActionLocalMedia(ctx),
+          asVoice: readAsVoiceParam(params),
         });
         return withPin(result.messageId, result.chatType, mediaResultExtra(result));
       }
@@ -554,6 +562,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
           format: 'markdown',
           mediaMaxBytes,
           localMedia: resolveActionLocalMedia(ctx),
+          asVoice: readAsVoiceParam(params),
         });
         return jsonResult({
           ok: true,

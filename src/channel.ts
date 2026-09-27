@@ -65,6 +65,16 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
     unsend: true,
     reply: true,
     polls: false,
+    // TTS replies: core keeps its normal audio-file synthesis (MP3 unless the
+    // provider is set otherwise) and marks audio in these formats as voice.
+    // MAX documents MP3/WAV/M4A for audio and records its own voice messages
+    // as Ogg/Opus; no transcoding on either side.
+    tts: {
+      voice: {
+        synthesisTarget: 'audio-file',
+        audioFileFormats: ['mp3', 'm4a', 'wav', 'ogg', 'opus'],
+      },
+    },
   },
 
   reload: { configPrefixes: ['channels.max'] },

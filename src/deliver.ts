@@ -84,6 +84,8 @@ export async function deliverMaxReply(params: {
     replyToId?: string;
     channelData?: unknown;
     delivery?: unknown;
+    /** Voice reply (TTS, [[audio_as_voice]]): the audio goes as a MAX voice message. */
+    audioAsVoice?: boolean;
   };
   account: ResolvedMaxAccount;
   chatId: string;
@@ -195,12 +197,17 @@ export async function deliverMaxReply(params: {
   // Images/videos go as albums (up to 12 per message); public https image
   // links are sent by URL, other remote media is downloaded (SSRF-guarded)
   // and uploaded, local files are read only under the agent's media roots.
+  // Voice replies: the text (if any) went above as its own message(s), the
+  // audio follows without a caption; the text is never taken from the
+  // spoken text, so it reaches the chat once.
+  const asVoice = payload.audioAsVoice === true;
   if (mediaList.length) {
     const sent = await sendMaxMediaGroup(chatId, '', mediaList, {
       token: account.token,
       replyToMessageId: params.replyToId,
       mediaMaxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
       localMedia: params.localMedia,
+      asVoice,
       ...sendOptions,
       onError: (err, failed) => {
         log?.error(
@@ -211,6 +218,13 @@ export async function deliverMaxReply(params: {
     });
     for (const id of sent.messageIds) noteDelivered(id);
     if (sent.messageIds.length) statusSink?.({ lastOutboundAt: Date.now() });
+    // A voice-only reply (no visible text) leaves a partial stream draft of
+    // the same answer behind: once the audio is delivered the draft goes; a
+    // draft that already carries a final text stays.
+    const draft = params.draft;
+    if (asVoice && !payload.text && sent.messageIds.length && draft?.messageId) {
+      if (!draft.finalized) await draft.discard();
+    }
   }
 
   const pin = readMaxDeliveryPin(payload.delivery);

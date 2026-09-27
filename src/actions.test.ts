@@ -752,3 +752,90 @@ describe('message tool: inline attachment content (buffer)', () => {
     expect(send).not.toHaveBeenCalled();
   });
 });
+
+describe('message tool: asVoice', () => {
+  const cfg = { channels: { max: { botToken: 'token' } } } as OpenClawConfig;
+  const voiceBuffer = Buffer.from('ogg-voice').toString('base64');
+
+  beforeEach(() => vi.restoreAllMocks());
+
+  const mockSends = async () => {
+    const { MaxApi } = await import('./api.js');
+    const send = vi.spyOn(MaxApi.prototype, 'sendMessage').mockImplementation(
+      async () =>
+        ({
+          message: { body: { mid: 'm-voice' }, recipient: { chat_id: 9, chat_type: 'dialog' } },
+        }) as never,
+    );
+    const upload = vi
+      .spyOn(MaxApi.prototype, 'uploadMedia')
+      .mockImplementation(async (type, _data, _contentType, fileName) => ({
+        token: `tok:${type}:${fileName}`,
+      }));
+    return { send, upload };
+  };
+
+  it('send with asVoice goes as a voice message, the text as its caption', async () => {
+    const { send, upload } = await mockSends();
+    await actions.handleAction({
+      action: 'send',
+      params: {
+        target: '-7001',
+        message: 'Голосом',
+        buffer: voiceBuffer,
+        filename: 'answer.oga',
+        contentType: 'audio/ogg',
+        asVoice: true,
+      },
+      cfg,
+    } as never);
+
+    expect(upload.mock.calls[0][0]).toBe('audio');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0].text).toBe('Голосом');
+    expect(send.mock.calls[0][0].attachments?.[0]?.type).toBe('audio');
+  });
+
+  it('sendAttachment takes the audioAsVoice alias; without it such audio stays a file', async () => {
+    const { upload } = await mockSends();
+    const params = {
+      target: '-7001',
+      buffer: voiceBuffer,
+      filename: 'answer.oga',
+      contentType: 'audio/ogg',
+    };
+    await actions.handleAction({
+      action: 'sendAttachment',
+      params: { ...params, audioAsVoice: 'true' },
+      cfg,
+    } as never);
+    await actions.handleAction({ action: 'sendAttachment', params, cfg } as never);
+
+    expect(upload.mock.calls.map((call) => call[0])).toEqual(['audio', 'file']);
+  });
+
+  it('falls back to a file when MAX refuses the voice message', async () => {
+    const { MaxApiError } = await import('./api.js');
+    const { send, upload } = await mockSends();
+    send.mockRejectedValueOnce(
+      new MaxApiError('MAX API 400', 400, { code: 'proto.payload', message: 'bad audio' }),
+    );
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await actions.handleAction({
+      action: 'send',
+      params: {
+        target: '-7001',
+        message: '',
+        buffer: voiceBuffer,
+        filename: 'answer.mp3',
+        asVoice: true,
+      },
+      cfg,
+    } as never);
+
+    expect(upload.mock.calls.map((call) => call[0])).toEqual(['audio', 'file']);
+    expect(send.mock.calls[1][0].attachments?.[0]?.type).toBe('file');
+    expect(JSON.stringify(result)).toContain('"messageId":"m-voice"');
+  });
+});
