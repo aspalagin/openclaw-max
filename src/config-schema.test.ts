@@ -328,6 +328,34 @@ describe('openclaw.plugin.json channel schema', () => {
     const parsed = MaxConfigSchema.parse({ accounts: { two: { botToken: 't' } } });
     expect(parsed.accounts?.two).toEqual({ botToken: 't' });
   });
+
+  it('labels every channel, account and group option in uiHints', async () => {
+    const { readFileSync } = await import('node:fs');
+    const manifest = JSON.parse(
+      readFileSync(new URL('../openclaw.plugin.json', import.meta.url), 'utf8'),
+    );
+    const hints = manifest.channelConfigs.max.uiHints as Record<string, { label?: string }>;
+    const { MaxAccountSchemaBase, MaxGroupSchema } = await import('./config-schema.js');
+    const keys = [
+      ...['accounts', 'commands', 'defaultAccount'],
+      ...Object.keys(MaxAccountSchemaBase.shape).flatMap((key) => [key, `accounts.*.${key}`]),
+      ...Object.keys(MaxGroupSchema.shape).flatMap((key) => [
+        `groups.*.${key}`,
+        `accounts.*.groups.*.${key}`,
+      ]),
+    ];
+    expect(keys.filter((key) => !hints[key]?.label)).toEqual([]);
+    expect(Object.keys(hints).filter((key) => !keys.includes(key))).toEqual([]);
+  });
+
+  it('ships a 512x512 PNG icon at assets/icon.png', async () => {
+    const { readFileSync } = await import('node:fs');
+    const png = readFileSync(new URL('../assets/icon.png', import.meta.url));
+    expect(png.subarray(1, 4).toString('latin1')).toBe('PNG');
+    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([512, 512]);
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    expect(pkg.files).toContain('assets/icon.png');
+  });
 });
 
 describe('webhook queue options', () => {

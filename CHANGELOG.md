@@ -33,6 +33,7 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- Карточка пакета: иконка `assets/icon.png` (исходник `assets/icon.svg`), подписи и пояснения всех опций канала, `accounts.*` и `groups.*` в `uiHints` манифеста с пометками чувствительных и расширенных опций, описание с перечнем возможностей, ключевые слова и автор в `package.json`.
 - Единое наследование: именованный аккаунт (`accounts.<id>`) берёт с уровня канала каждую опцию, которую не задал сам, включая политики доступа и списки; явное значение аккаунта сильнее, списки и `groups` заменяются целиком (штатный `mergeAccountConfig`). Не наследуются опции одного бота: `botToken`, `tokenFile`, `name`, `transport`, `webhookUrl`, `webhookSecret`, `webhookSecretFile`, `webhookPath`. `channels.max.enabled: false` выключает и именованные аккаунты.
 - Из JSON- и zod-схемы убраны `default`: gateway записывал умолчания схемы в `accounts.<id>`, и они перекрывали значение канала. Умолчания применяются в коде и не изменились; `channels.defaults.groupPolicy` ядра учитывается, если `groupPolicy` не задан ни у аккаунта, ни у канала.
 - Индикатор набора держится весь ход (продление каждые 4 с штатным `createTypingCallbacks`, остановка ядром при завершении, ошибке и отмене) и подчиняется `typingMode` ядра: `typingMode: "never"` выключает его.

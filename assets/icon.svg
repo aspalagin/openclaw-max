@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- openclaw-max icon: two opposite arrows, a relay between OpenClaw and a chat. -->
+  <rect width="512" height="512" rx="112" fill="#1E293B"/>
+  <g fill="none" stroke-width="52" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M112 176H384M316 108L384 176L316 244" stroke="#FFFFFF"/>
+    <path d="M400 336H128M196 268L128 336L196 404" stroke="#F97316"/>
+  </g>
+</svg>

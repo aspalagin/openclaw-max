@@ -1,16 +1,28 @@
 {
   "name": "@aspalagin/openclaw-max",
   "version": "0.8.0",
-  "description": "MAX messenger channel plugin for OpenClaw",
+  "description": "MAX messenger (max.ru) channel for OpenClaw: private and group chats over webhook or long polling; media, voice messages with transcription and voice replies; inline keyboards and command menus; message edits and pins; several bot accounts",
   "keywords": [
     "openclaw",
     "openclaw-plugin",
+    "openclaw-channel",
     "max",
+    "max.ru",
     "max-messenger",
+    "max-bot-api",
     "messenger",
+    "chatbot",
+    "bot",
+    "webhook",
+    "long-polling",
+    "voice-messages",
     "ai-agent"
   ],
   "license": "MIT",
+  "author": {
+    "name": "Arseniy Palagin",
+    "url": "https://github.com/aspalagin"
+  },
   "engines": {
     "node": ">=22"
   },
@@ -44,6 +56,7 @@
     "!src/**/*.test.ts",
     "!src/test-setup.ts",
     "!src/__fixtures__/",
+    "assets/icon.png",
     "openclaw.plugin.json",
     "README.md",
     "README.ru.md",

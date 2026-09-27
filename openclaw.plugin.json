@@ -1,7 +1,7 @@
 {
   "id": "openclaw-max",
   "name": "MAX",
-  "description": "MAX messenger channel plugin (max.ru Bot API via platform-api2.max.ru, long polling or webhook)",
+  "description": "MAX messenger (max.ru) channel for OpenClaw: private and group chats over webhook or long polling; media, voice messages with transcription and voice replies; inline keyboards and command menus; message edits and pins; several bot accounts",
   "version": "0.8.0",
   "categories": [
     "channels"
@@ -789,51 +789,443 @@
         }
       },
       "uiHints": {
+        "name": {
+          "label": "Account name",
+          "help": "Display name of the account. Own: not inherited by named accounts."
+        },
+        "enabled": {
+          "label": "Enabled",
+          "help": "false at channel level disables all accounts; in an account, disables that account."
+        },
+        "markdown": {
+          "label": "Markdown (no effect)",
+          "help": "Accepted for compatibility with the common channel config; has no effect in MAX.",
+          "advanced": true
+        },
         "botToken": {
           "label": "Bot token",
-          "help": "MAX Bot API token or a SecretRef to it.",
+          "help": "MAX Bot API token or a SecretRef to it. Own.",
           "sensitive": true
+        },
+        "tokenFile": {
+          "label": "Token file",
+          "help": "Absolute path to a regular file with the bot token. Own.",
+          "placeholder": "/path/to/max-bot-token",
+          "advanced": true
+        },
+        "dmPolicy": {
+          "label": "DM policy",
+          "help": "Who may write in private dialogs: pairing (default), allowlist, open or disabled."
+        },
+        "allowFrom": {
+          "label": "Allowed DM senders",
+          "help": "MAX user ids allowed in private dialogs; \"*\" allows anyone (required with open)."
+        },
+        "groupAllowFrom": {
+          "label": "Allowed group senders",
+          "help": "User ids allowed in admitted groups when the group has no own allowFrom."
+        },
+        "groupPolicy": {
+          "label": "Group policy",
+          "help": "Which groups the bot answers in: allowlist (default), open or disabled."
+        },
+        "groups": {
+          "label": "Groups",
+          "help": "Allowed groups and per-group settings, keyed by chat id or \"*\"."
+        },
+        "mentionPatterns": {
+          "label": "Mention pattern scope",
+          "help": "Where core mention patterns apply in MAX groups: mode allow|deny, allowIn, denyIn.",
+          "advanced": true
+        },
+        "transport": {
+          "label": "Transport",
+          "help": "polling or webhook; default webhook when webhookUrl is set, else polling. Own."
+        },
+        "webhookUrl": {
+          "label": "Webhook URL",
+          "help": "Public HTTPS URL MAX posts updates to. Own.",
+          "placeholder": "https://bot.example.com/max/webhook"
         },
         "webhookSecret": {
           "label": "Webhook secret",
+          "help": "Secret MAX sends with every webhook call; generated when unset. Plain value or SecretRef. Own.",
           "sensitive": true,
           "advanced": true
         },
-        "accounts.*.botToken": {
-          "label": "Bot token",
-          "help": "MAX Bot API token or a SecretRef to it.",
-          "sensitive": true
-        },
-        "accounts.*.webhookSecret": {
-          "label": "Webhook secret",
-          "sensitive": true,
+        "webhookSecretFile": {
+          "label": "Webhook secret file",
+          "help": "File with the webhook secret (regular file, not a symlink). Own.",
           "advanced": true
+        },
+        "webhookPath": {
+          "label": "Webhook path",
+          "help": "Gateway route path; default: the path of webhookUrl, else /max/webhook. Own.",
+          "placeholder": "/max/webhook",
+          "advanced": true
+        },
+        "historyLimit": {
+          "label": "Group history limit",
+          "help": "Read by OpenClaw core: recent turns of a group session the embedded agent runtime keeps in the prompt.",
+          "advanced": true
+        },
+        "dmHistoryLimit": {
+          "label": "DM history limit",
+          "help": "Read by OpenClaw core: recent turns of a private-dialog session kept in the prompt.",
+          "advanced": true
+        },
+        "dms": {
+          "label": "Per-user DM settings",
+          "help": "dms.<userId>.historyLimit, read by OpenClaw core before dmHistoryLimit.",
+          "advanced": true
+        },
+        "textChunkLimit": {
+          "label": "Text chunk limit",
+          "help": "Characters per outgoing message; values above MAX's 4000 (the default) are capped.",
+          "advanced": true
+        },
+        "blockStreaming": {
+          "label": "Block streaming (no effect)",
+          "help": "Accepted for compatibility; has no effect in MAX. Use streamMode or streaming.mode \"block\".",
+          "advanced": true
+        },
+        "streamMode": {
+          "label": "Stream mode",
+          "help": "off (default); partial: one draft edited while the answer streams; block: core block replies."
+        },
+        "streaming": {
+          "label": "Streaming",
+          "help": "Core streaming config; streaming.mode (off, partial, block, progress) wins over streamMode; streaming.progress configures turn status.",
+          "advanced": true
+        },
+        "blockStreamingCoalesce": {
+          "label": "Block streaming coalesce (no effect)",
+          "help": "Accepted for compatibility; has no effect in MAX. Core reads streaming.block.coalesce.",
+          "advanced": true
+        },
+        "responsePrefix": {
+          "label": "Response prefix",
+          "help": "Prefix of agent replies, applied by OpenClaw core (\"auto\": agent name).",
+          "advanced": true
+        },
+        "mediaMaxMb": {
+          "label": "Media size limit, MB",
+          "help": "Size limit for downloaded and uploaded media (default 20)."
+        },
+        "webhookQueue": {
+          "label": "Webhook queue",
+          "help": "mode durable (default) or memory, maxPending (5000), overflow reject (default) or drop.",
+          "advanced": true
+        },
+        "maxEventAgeMinutes": {
+          "label": "Max event age, minutes",
+          "help": "Skip messages, edits, button presses and bot starts older than this (default 60); 0: no limit.",
+          "advanced": true
+        },
+        "logMessagePreview": {
+          "label": "Log message preview",
+          "help": "Add a 50-character text preview to debug logs (default false).",
+          "advanced": true
+        },
+        "mediaMaxCount": {
+          "label": "Media per message",
+          "help": "Media attachments downloaded per incoming message, forwards included (default 12).",
+          "advanced": true
+        },
+        "markSeen": {
+          "label": "Mark as read",
+          "help": "Mark incoming messages as read (default true)."
+        },
+        "actionScope": {
+          "label": "Action scope",
+          "help": "Chats the message tool may act in: admitted (default), current or off.",
+          "advanced": true
+        },
+        "notify": {
+          "label": "Notify",
+          "help": "Push notifications for sends; false: silent (not possible in channels)."
+        },
+        "disableLinkPreview": {
+          "label": "Disable link previews",
+          "help": "Send messages without link previews."
         },
         "apiBaseUrl": {
           "label": "API base URL",
+          "help": "Bot API base URL; https only, http just for loopback.",
           "placeholder": "https://platform-api2.max.ru",
           "advanced": true
         },
         "httpProxy": {
           "label": "HTTP proxy",
+          "help": "HTTP(S) proxy for all MAX traffic; \"\" in an account turns an inherited proxy off. Plain value or SecretRef.",
           "placeholder": "http://user:pass@proxy.example:3128",
           "sensitive": true,
           "advanced": true
         },
+        "actions": {
+          "label": "Message tool actions",
+          "help": "false turns an action off: send, edit, delete, sticker, sendAttachment, pin, unpin.",
+          "advanced": true
+        },
+        "groups.*.requireMention": {
+          "label": "Require mention",
+          "help": "Answer only when the bot is mentioned, replied to or its button is pressed (default true)."
+        },
+        "groups.*.tools": {
+          "label": "Tool policy",
+          "help": "Core tool policy for this group.",
+          "advanced": true
+        },
+        "groups.*.skills": {
+          "label": "Skills",
+          "help": "Skills a turn in this group may load; [] for none.",
+          "advanced": true
+        },
+        "groups.*.enabled": {
+          "label": "Enabled",
+          "help": "false: ignore this group under any groupPolicy."
+        },
+        "groups.*.allowFrom": {
+          "label": "Allowed senders",
+          "help": "Senders allowed in this group (overrides groupAllowFrom)."
+        },
+        "groups.*.systemPrompt": {
+          "label": "System prompt",
+          "help": "Extra system prompt for turns in this group.",
+          "advanced": true
+        },
+        "groups.*.disableAudioPreflight": {
+          "label": "Disable audio preflight",
+          "help": "Do not transcribe captionless voice messages to look for a mention (default false).",
+          "advanced": true
+        },
+        "accounts": {
+          "label": "Accounts",
+          "help": "Named bot accounts; each inherits channel-level options except its own token, name and webhook."
+        },
+        "commands": {
+          "label": "Bot commands",
+          "help": "Commands registered in MAX (up to 32; name up to 64 characters without /, description up to 128).",
+          "advanced": true
+        },
+        "defaultAccount": {
+          "label": "Default account",
+          "help": "Accepted by the schema; the plugin always treats channel-level options as the \"default\" account.",
+          "advanced": true
+        },
+        "accounts.*.name": {
+          "label": "Account name",
+          "help": "Display name of the account. Own: not inherited by named accounts."
+        },
+        "accounts.*.enabled": {
+          "label": "Enabled",
+          "help": "false disables this account; a channel switched off switches off every account."
+        },
+        "accounts.*.markdown": {
+          "label": "Markdown (no effect)",
+          "help": "Accepted for compatibility with the common channel config; has no effect in MAX.",
+          "advanced": true
+        },
+        "accounts.*.botToken": {
+          "label": "Bot token",
+          "help": "MAX Bot API token or a SecretRef to it. Own.",
+          "sensitive": true
+        },
+        "accounts.*.tokenFile": {
+          "label": "Token file",
+          "help": "Absolute path to a regular file with the bot token. Own.",
+          "placeholder": "/path/to/max-bot-token",
+          "advanced": true
+        },
+        "accounts.*.dmPolicy": {
+          "label": "DM policy",
+          "help": "Who may write in private dialogs: pairing (default), allowlist, open or disabled."
+        },
+        "accounts.*.allowFrom": {
+          "label": "Allowed DM senders",
+          "help": "MAX user ids allowed in private dialogs; \"*\" allows anyone (required with open)."
+        },
+        "accounts.*.groupAllowFrom": {
+          "label": "Allowed group senders",
+          "help": "User ids allowed in admitted groups when the group has no own allowFrom."
+        },
+        "accounts.*.groupPolicy": {
+          "label": "Group policy",
+          "help": "Which groups the bot answers in: allowlist (default), open or disabled."
+        },
+        "accounts.*.groups": {
+          "label": "Groups",
+          "help": "Allowed groups and per-group settings, keyed by chat id or \"*\"."
+        },
+        "accounts.*.mentionPatterns": {
+          "label": "Mention pattern scope",
+          "help": "Where core mention patterns apply in MAX groups: mode allow|deny, allowIn, denyIn.",
+          "advanced": true
+        },
+        "accounts.*.transport": {
+          "label": "Transport",
+          "help": "polling or webhook; default webhook when webhookUrl is set, else polling. Own."
+        },
+        "accounts.*.webhookUrl": {
+          "label": "Webhook URL",
+          "help": "Public HTTPS URL MAX posts updates to. Own.",
+          "placeholder": "https://bot.example.com/max/webhook"
+        },
+        "accounts.*.webhookSecret": {
+          "label": "Webhook secret",
+          "help": "Secret MAX sends with every webhook call; generated when unset. Plain value or SecretRef. Own.",
+          "sensitive": true,
+          "advanced": true
+        },
+        "accounts.*.webhookSecretFile": {
+          "label": "Webhook secret file",
+          "help": "File with the webhook secret (regular file, not a symlink). Own.",
+          "advanced": true
+        },
+        "accounts.*.webhookPath": {
+          "label": "Webhook path",
+          "help": "Gateway route path; default: the path of webhookUrl, else /max/webhook. Own.",
+          "placeholder": "/max/webhook",
+          "advanced": true
+        },
+        "accounts.*.historyLimit": {
+          "label": "Group history limit",
+          "help": "Read by OpenClaw core: recent turns of a group session the embedded agent runtime keeps in the prompt.",
+          "advanced": true
+        },
+        "accounts.*.dmHistoryLimit": {
+          "label": "DM history limit",
+          "help": "Read by OpenClaw core: recent turns of a private-dialog session kept in the prompt.",
+          "advanced": true
+        },
+        "accounts.*.dms": {
+          "label": "Per-user DM settings",
+          "help": "dms.<userId>.historyLimit, read by OpenClaw core before dmHistoryLimit.",
+          "advanced": true
+        },
+        "accounts.*.textChunkLimit": {
+          "label": "Text chunk limit",
+          "help": "Characters per outgoing message; values above MAX's 4000 (the default) are capped.",
+          "advanced": true
+        },
+        "accounts.*.blockStreaming": {
+          "label": "Block streaming (no effect)",
+          "help": "Accepted for compatibility; has no effect in MAX. Use streamMode or streaming.mode \"block\".",
+          "advanced": true
+        },
+        "accounts.*.streamMode": {
+          "label": "Stream mode",
+          "help": "off (default); partial: one draft edited while the answer streams; block: core block replies."
+        },
+        "accounts.*.streaming": {
+          "label": "Streaming",
+          "help": "Core streaming config; streaming.mode (off, partial, block, progress) wins over streamMode; streaming.progress configures turn status.",
+          "advanced": true
+        },
+        "accounts.*.blockStreamingCoalesce": {
+          "label": "Block streaming coalesce (no effect)",
+          "help": "Accepted for compatibility; has no effect in MAX. Core reads streaming.block.coalesce.",
+          "advanced": true
+        },
+        "accounts.*.responsePrefix": {
+          "label": "Response prefix",
+          "help": "Prefix of agent replies, applied by OpenClaw core (\"auto\": agent name).",
+          "advanced": true
+        },
+        "accounts.*.mediaMaxMb": {
+          "label": "Media size limit, MB",
+          "help": "Size limit for downloaded and uploaded media (default 20)."
+        },
+        "accounts.*.webhookQueue": {
+          "label": "Webhook queue",
+          "help": "mode durable (default) or memory, maxPending (5000), overflow reject (default) or drop.",
+          "advanced": true
+        },
+        "accounts.*.maxEventAgeMinutes": {
+          "label": "Max event age, minutes",
+          "help": "Skip messages, edits, button presses and bot starts older than this (default 60); 0: no limit.",
+          "advanced": true
+        },
+        "accounts.*.logMessagePreview": {
+          "label": "Log message preview",
+          "help": "Add a 50-character text preview to debug logs (default false).",
+          "advanced": true
+        },
+        "accounts.*.mediaMaxCount": {
+          "label": "Media per message",
+          "help": "Media attachments downloaded per incoming message, forwards included (default 12).",
+          "advanced": true
+        },
+        "accounts.*.markSeen": {
+          "label": "Mark as read",
+          "help": "Mark incoming messages as read (default true)."
+        },
+        "accounts.*.actionScope": {
+          "label": "Action scope",
+          "help": "Chats the message tool may act in: admitted (default), current or off.",
+          "advanced": true
+        },
+        "accounts.*.notify": {
+          "label": "Notify",
+          "help": "Push notifications for sends; false: silent (not possible in channels)."
+        },
+        "accounts.*.disableLinkPreview": {
+          "label": "Disable link previews",
+          "help": "Send messages without link previews."
+        },
         "accounts.*.apiBaseUrl": {
           "label": "API base URL",
+          "help": "Bot API base URL; https only, http just for loopback.",
           "placeholder": "https://platform-api2.max.ru",
           "advanced": true
         },
         "accounts.*.httpProxy": {
           "label": "HTTP proxy",
+          "help": "HTTP(S) proxy for all MAX traffic; \"\" in an account turns an inherited proxy off. Plain value or SecretRef.",
           "placeholder": "http://user:pass@proxy.example:3128",
           "sensitive": true,
+          "advanced": true
+        },
+        "accounts.*.actions": {
+          "label": "Message tool actions",
+          "help": "false turns an action off: send, edit, delete, sticker, sendAttachment, pin, unpin.",
+          "advanced": true
+        },
+        "accounts.*.groups.*.requireMention": {
+          "label": "Require mention",
+          "help": "Answer only when the bot is mentioned, replied to or its button is pressed (default true)."
+        },
+        "accounts.*.groups.*.tools": {
+          "label": "Tool policy",
+          "help": "Core tool policy for this group.",
+          "advanced": true
+        },
+        "accounts.*.groups.*.skills": {
+          "label": "Skills",
+          "help": "Skills a turn in this group may load; [] for none.",
+          "advanced": true
+        },
+        "accounts.*.groups.*.enabled": {
+          "label": "Enabled",
+          "help": "false: ignore this group under any groupPolicy."
+        },
+        "accounts.*.groups.*.allowFrom": {
+          "label": "Allowed senders",
+          "help": "Senders allowed in this group (overrides groupAllowFrom)."
+        },
+        "accounts.*.groups.*.systemPrompt": {
+          "label": "System prompt",
+          "help": "Extra system prompt for turns in this group.",
+          "advanced": true
+        },
+        "accounts.*.groups.*.disableAudioPreflight": {
+          "label": "Disable audio preflight",
+          "help": "Do not transcribe captionless voice messages to look for a mention (default false).",
           "advanced": true
         }
       },
       "label": "MAX",
-      "description": "MAX messenger channel (max.ru Bot API)."
+      "description": "MAX messenger channel (max.ru Bot API): private and group chats over webhook or long polling."
     }
   },
   "configSchema": {
