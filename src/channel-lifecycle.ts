@@ -39,6 +39,7 @@ export const maxStatusAdapter: NonNullable<MaxChannelPlugin['status']> = {
     // compares them with the live runtime and treats a missing value as stale.
     ...(snapshot.lifecycle !== undefined ? { lifecycle: snapshot.lifecycle } : {}),
     ...(typeof snapshot.connected === 'boolean' ? { connected: snapshot.connected } : {}),
+    ...(snapshot.mode ? { mode: snapshot.mode } : {}),
     lastStartAt: snapshot.lastStartAt ?? null,
     lastStopAt: snapshot.lastStopAt ?? null,
     lastError: snapshot.lastError ?? null,
@@ -67,6 +68,8 @@ export const maxStatusAdapter: NonNullable<MaxChannelPlugin['status']> = {
     running: runtime?.running ?? false,
     ...(runtime?.lifecycle !== undefined ? { lifecycle: runtime.lifecycle } : {}),
     ...(typeof runtime?.connected === 'boolean' ? { connected: runtime.connected } : {}),
+    // Transport the running task reported ("webhook" or "polling").
+    ...(runtime?.mode ? { mode: runtime.mode } : {}),
     lastStartAt: runtime?.lastStartAt ?? null,
     lastStopAt: runtime?.lastStopAt ?? null,
     lastError: runtime?.lastError ?? null,

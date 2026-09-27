@@ -135,3 +135,30 @@ describe('status of an account without a token', () => {
     }
   });
 });
+
+describe('status transport mode', () => {
+  const account = () =>
+    resolveMaxAccount({ cfg: maxCfg({ botToken: 'tok-mode' }), accountId: 'default' });
+
+  it('carries the runtime mode into the account snapshot and the channel summary', async () => {
+    const snapshot = await maxStatusAdapter.buildAccountSnapshot!({
+      account: account(),
+      cfg: {} as never,
+      runtime: { accountId: 'default', running: true, mode: 'webhook' },
+    } as never);
+    expect(snapshot.mode).toBe('webhook');
+    const summary = await maxStatusAdapter.buildChannelSummary!({ snapshot } as never);
+    expect(summary.mode).toBe('webhook');
+  });
+
+  it('leaves mode out while the runtime has not reported one', async () => {
+    const snapshot = await maxStatusAdapter.buildAccountSnapshot!({
+      account: account(),
+      cfg: {} as never,
+      runtime: { accountId: 'default', running: false },
+    } as never);
+    expect(snapshot).not.toHaveProperty('mode');
+    const summary = await maxStatusAdapter.buildChannelSummary!({ snapshot } as never);
+    expect(summary).not.toHaveProperty('mode');
+  });
+});
