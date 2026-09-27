@@ -423,6 +423,7 @@ describe('message tool', () => {
       params: { target: '-7002', presentation: CARD, delivery: { pin: true } },
       cfg: { channels: { max: { botToken: 'tok' } } },
       accountId: undefined,
+      senderIsOwner: true,
     } as never);
 
     const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;

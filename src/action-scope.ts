@@ -16,9 +16,9 @@ import { MaxApi, MaxApiError } from './api.js';
 import { isChatNotFound } from './send.js';
 
 /**
- * - `admitted` (default): the current chat of the turn, an owner request, or a
- *   chat the inbound policy admits (DM policy with allowFrom and pairing,
- *   group policy with its chat and sender allowlists);
+ * - `admitted` (default): the current chat of the turn, an owner request
+ *   (senderIsOwner=true), or a chat the inbound policy admits (DM policy with
+ *   allowFrom and pairing, group policy with its chat and sender allowlists);
  * - `current`: a non-owner turn acts only in its own chat;
  * - `off`: no plugin check (0.7.x behavior; core policy only).
  */
@@ -36,10 +36,11 @@ export type MaxActionTarget = { to: string } | { messageId: string };
 
 /**
  * Throws ToolAuthorizationError (a tool error the agent sees) when the action
- * may not run in its chat under channels.max.actionScope. Operator calls
- * without a conversation (CLI, gateway RPC, Control UI) are not scoped:
- * there is no untrusted chat whose content could have steered them. A call
- * without a conversation that core marks senderIsOwner=false is not one.
+ * may not run in its chat under channels.max.actionScope. Only a call core
+ * marks senderIsOwner=true is not scoped (CLI `openclaw message`, an admin's
+ * Control UI chat, the owner's turn). Every other call, the flag missing
+ * included (heartbeat, subagents, scheduled runs without message authority),
+ * is held to the chats the inbound policy admits.
  */
 export async function assertMaxActionInScope(
   ctx: ChannelMessageActionContext,
@@ -51,11 +52,6 @@ export async function assertMaxActionInScope(
 
   const turnChatId = readCurrentMaxChatId(ctx);
   const requesterId = ctx.requesterSenderId?.trim() || undefined;
-  // Core passes the conversation only from a trusted channel turn. Without
-  // one, an explicit senderIsOwner=false still marks a non-owner run (agent
-  // runs started by plugins or hooks, non-admin gateway clients): those are
-  // scoped to admitted chats, not treated as operator calls.
-  if (!turnChatId && !requesterId && ctx.senderIsOwner !== false) return;
   // The turn's chat is current only for the account the turn came in on:
   // another bot of the same group is held to its own policy.
   const turnAccountId = ctx.requesterAccountId?.trim();

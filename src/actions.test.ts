@@ -10,8 +10,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { maxMessageActions } from './actions.js';
 
+// The actions run as an owner call (CLI passes senderIsOwner=true);
+// actionScope has its own tests in action-scope.test.ts.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const actions = maxMessageActions as any;
+const actions: any = {
+  ...maxMessageActions,
+  handleAction: (ctx: object) =>
+    maxMessageActions.handleAction!({ senderIsOwner: true, ...ctx } as never),
+};
 
 describe('MAX Message Actions', () => {
   beforeEach(() => {

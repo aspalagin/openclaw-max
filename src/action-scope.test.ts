@@ -208,8 +208,9 @@ describe.each(ACTIONS)('actionScope for $action', (item) => {
     expect(spies[item.mutation]).toHaveBeenCalledTimes(1);
   });
 
-  it('does not scope operator calls without a conversation (CLI, gateway RPC)', async () => {
-    await run(item, OTHER_GROUP, {});
+  // CLI `openclaw message` passes senderIsOwner=true by default.
+  it('does not scope an owner call without a conversation (CLI)', async () => {
+    await run(item, OTHER_GROUP, { senderIsOwner: true });
     expect(spies[item.mutation]).toHaveBeenCalledTimes(1);
   });
 
@@ -222,6 +223,34 @@ describe.each(ACTIONS)('actionScope for $action', (item) => {
 
     await run(item, ADMITTED_GROUP, { senderIsOwner: false });
     expect(spies[item.mutation]).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Runs without a trusted turn: core passes no conversation and no requester,
+// and the owner flag may be missing. Only senderIsOwner=true skips the scope.
+describe.each([
+  ['heartbeat (no owner flag)', { sessionKey: 'agent:main:main' }],
+  ['subagent (not the owner)', { sessionKey: 'agent:main:subagent:s1', senderIsOwner: false }],
+  ['scheduled run without message authority', { requesterAccountId: 'default' }],
+])('a %s', (_label, context) => {
+  it.each(ACTIONS)('acts with $action in an admitted chat', async (item) => {
+    await run(item, ADMITTED_GROUP, context);
+    expect(spies[item.mutation]).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(ACTIONS)('is refused $action in a chat the policy does not admit', async (item) => {
+    const err = await refusal(run(item, OTHER_GROUP, context));
+    expect(err).toBeInstanceOf(ToolAuthorizationError);
+    expect(err.message).toContain('groups allowlist');
+    expect(spies[item.mutation]).not.toHaveBeenCalled();
+  });
+
+  it('is refused a group whose sender allowlist it cannot pass (no requester)', async () => {
+    const err = await refusal(
+      run(ACTIONS[0], ADMITTED_GROUP, context, makeCfg({ groupAllowFrom: ['1001'] })),
+    );
+    expect(err).toBeInstanceOf(ToolAuthorizationError);
+    expect(spies.send).not.toHaveBeenCalled();
   });
 });
 

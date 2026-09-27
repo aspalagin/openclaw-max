@@ -242,7 +242,7 @@ message(action="pin", target="CHAT_ID", messageId="MID")
 - `silent=true` sends without a push notification; MAX channels always notify.
 - `pin=true` or `delivery.pin` pins the sent message. MAX has no pinning in private dialogs: the plugin skips the call and returns `pinned: false` with a reason.
 
-**Scope (`actionScope`).** In a turn started by someone other than the owner, actions work only in the current chat and in chats the inbound policy admits (dialogs with senders in `allowFrom` or paired, groups in `groups` and, when a group has a sender list, only if the requester is on it). The owner's requests are not limited. Operator calls without a conversation (CLI, gateway RPC, Control UI) are not limited; an agent run without a conversation that OpenClaw marks as not the owner's (started by a plugin or a hook) is limited to the admitted chats. A refused action is a tool error raised before anything changes in MAX; if the plugin cannot determine the chat of a message, it refuses.
+**Scope (`actionScope`).** In a turn started by someone other than the owner, actions work only in the current chat and in chats the inbound policy admits (dialogs with senders in `allowFrom` or paired, groups in `groups` and, when a group has a sender list, only if the requester is on it). Only calls OpenClaw marks as the owner's (`senderIsOwner: true`) are not limited: the owner's own turns, `openclaw message` from the CLI, an admin's chat in the Control UI. Every other call — including runs without a conversation whose owner mark is missing or false, as heartbeat, subagent, scheduled and plugin- or hook-started runs may be — is limited to the admitted chats; in a group with a sender list it is refused, as there is no requester to check. Core deliveries (agent replies, reminders, automation announcements) do not go through the `message` tool and are not affected. A refused action is a tool error raised before anything changes in MAX; if the plugin cannot determine the chat of a message, it refuses.
 
 - `admitted` (default) — as above.
 - `current` — non-owner turns act only in their own chat.
@@ -409,6 +409,7 @@ A 0.7 config works without changes. Behaviour that changes and how to get the 0.
 | Change in 0.8 | 0.7 behaviour |
 |---|---|
 | In a non-owner turn the `message` tool acts only in the current chat and in chats the inbound policy admits | `actionScope: "off"` (stricter: `"current"`) |
+| A call without `senderIsOwner: true` (heartbeat, subagent, scheduled run without message authority) is limited to the admitted chats; in a group with a sender list it is refused | `actionScope: "off"` |
 | Local files are sent only from the agent's allowed directories | No switch: copy files into the agent workspace |
 | Messages, edits and presses older than 60 minutes — including MAX redeliveries after downtime — get no answer | `maxEventAgeMinutes: 0` |
 | The webhook answers `200` after writing the event to disk; `503` when that fails or the queue is full | `webhookQueue.overflow: "drop"`, `webhookQueue.mode: "memory"` |

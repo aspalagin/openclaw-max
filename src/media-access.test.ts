@@ -13,12 +13,19 @@ import { PlatformMessageNotDispatchedError } from 'openclaw/plugin-sdk/error-run
 import { resolvePinnedHostnameWithPolicy } from 'openclaw/plugin-sdk/ssrf-runtime';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { maxMessageActions as actions } from './actions.js';
+import { maxMessageActions } from './actions.js';
 import { MaxApi } from './api.js';
 import { maxOutboundAdapter } from './channel-outbound.js';
 import { deliverMaxReply } from './deliver.js';
 import { setMaxRuntime } from './runtime.js';
 import { sendMaxMediaMessage } from './send.js';
+
+// The actions run as an owner call (CLI passes senderIsOwner=true);
+// actionScope has its own tests in action-scope.test.ts.
+const actions: typeof maxMessageActions = {
+  ...maxMessageActions,
+  handleAction: (ctx) => maxMessageActions.handleAction!({ senderIsOwner: true, ...ctx }),
+};
 
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',

@@ -207,8 +207,10 @@ describe('send paths', () => {
   it('message tool send and sendAttachment honor silent over the default', async () => {
     const cfg = useConfig({ notify: false });
     mockFetch({ '-7103': 'chat' });
-    const actions = maxMessageActions as unknown as {
-      handleAction: (ctx: unknown) => Promise<unknown>;
+    // An owner call (as the CLI makes it): actionScope is not under test here.
+    const actions = {
+      handleAction: (ctx: object) =>
+        maxMessageActions.handleAction!({ senderIsOwner: true, ...ctx } as never),
     };
     await actions.handleAction({
       action: 'send',
