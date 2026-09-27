@@ -93,6 +93,11 @@ export async function deliverMaxReply(params: {
   chatId: string;
   replyToId?: string;
   callbackId?: string;
+  /**
+   * Shared by the payloads of one turn: a press is answered by the first of
+   * them only (a second answer would replace the first in the same message).
+   */
+  callbackState?: { answered: boolean };
   config: OpenClawConfig;
   log?: ChannelLogSink;
   statusSink?: (patch: { lastInboundAt?: number; lastOutboundAt?: number }) => void;
@@ -106,7 +111,10 @@ export async function deliverMaxReply(params: {
   const buttons = readMaxChannelButtons(payload.channelData);
   // channelData.max (notify, silent, disableLinkPreview) beats the account defaults.
   const sendOptions = resolveMaxSendFlags(account.config, { channelData: payload.channelData });
-  const draftMid = payload.text ? (params.draft?.messageId ?? undefined) : undefined;
+  // Only the first text final replaces the draft: once it carries a final
+  // text, later final payloads of the turn go as new messages.
+  const draftMid =
+    payload.text && !params.draft?.finalized ? (params.draft?.messageId ?? undefined) : undefined;
 
   // Everything the recipient can already see; a visible stream draft counts
   // until it is replaced or deleted.
@@ -116,9 +124,15 @@ export async function deliverMaxReply(params: {
   // A button press is answered with the text and keyboard (POST /answers);
   // the reply's media still follows in the chat below.
   const answersCallback = Boolean(
-    params.callbackId && !draftMid && (payload.text || buttons?.length),
+    params.callbackId &&
+    !params.callbackState?.answered &&
+    // A finalized draft carries the answer: the pressed message stays as is.
+    !params.draft?.finalized &&
+    !draftMid &&
+    (payload.text || buttons?.length),
   );
   if (answersCallback) {
+    if (params.callbackState) params.callbackState.answered = true;
     try {
       await answerMaxCallback(params.callbackId as string, payload.text ?? '', {
         token: account.token,

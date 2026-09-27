@@ -293,6 +293,48 @@ describe('edit streaming: long and refused finals', () => {
 
     expect(calls.map((c) => c.method)).toEqual(['POST']);
   });
+
+  it('sends a second final payload as a new message instead of overwriting the draft', async () => {
+    mockFetch(sent('mid.draft'), [200, { success: true }], sent('mid.2'));
+    const draft = await startDraft();
+
+    await deliver({ text: 'First part of the answer' }, { draft });
+    await deliver({ text: 'Second part of the answer' }, { draft });
+
+    const edits = calls.filter((c) => c.method === 'PUT');
+    expect(edits).toHaveLength(1);
+    expect(edits[0].body.text).toBe('First part of the answer');
+    expect(posts().map((c) => c.body.text)).toEqual([
+      'Draft of the answer, long enough to be sent',
+      'Second part of the answer',
+    ]);
+  });
+
+  it('answers a button press with the first payload only, later ones go to the chat', async () => {
+    mockFetch([200, { success: true }], sent('mid.2'));
+    const callbackState = { answered: false };
+    const extra = { callbackId: 'cb.1', callbackState };
+
+    await deliver({ text: 'First part of the answer' }, extra);
+    await deliver({ text: 'Second part of the answer' }, extra);
+
+    const answers = calls.filter((c) => c.url.includes('/answers'));
+    expect(answers).toHaveLength(1);
+    expect(answers[0].body.message).toMatchObject({ text: 'First part of the answer' });
+    expect(posts().map((c) => c.body.text)).toEqual(['Second part of the answer']);
+  });
+
+  it('keeps the pressed message when a press answer went into the draft', async () => {
+    mockFetch(sent('mid.draft'), [200, { success: true }], sent('mid.2'));
+    const draft = await startDraft();
+    const extra = { draft, callbackId: 'cb.1', callbackState: { answered: false } };
+
+    await deliver({ text: 'First part of the answer' }, extra);
+    await deliver({ text: 'Second part of the answer' }, extra);
+
+    expect(calls.filter((c) => c.url.includes('/answers'))).toHaveLength(0);
+    expect(posts().at(-1)?.body.text).toBe('Second part of the answer');
+  });
 });
 
 describe('voice replies', () => {

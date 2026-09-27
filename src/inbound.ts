@@ -513,6 +513,8 @@ export async function processIncomingMessage(
       ? createMaxProgressDraft({ account, chatId: chatIdStr, replyToId: replyMid, log, statusSink })
       : undefined;
 
+  // One press, one answer: later payloads of the turn go to the chat.
+  const callbackState = { answered: false };
   let dispatchFailed = false;
   try {
     await core.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
@@ -534,6 +536,7 @@ export async function processIncomingMessage(
               chatId: chatIdStr,
               replyToId: replyMid,
               callbackId,
+              callbackState,
               config,
               log,
               statusSink,
