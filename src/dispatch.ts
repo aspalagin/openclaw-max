@@ -23,8 +23,8 @@ function sendReadReceipt(chatId: number | undefined, opts: MaxMonitorOptions): v
       log?.debug?.(`[${account.accountId}] mark_seen failed: ${String(err)}`);
     });
   }
-  // typing_on is sent once, by processIncomingMessage right before the agent
-  // run — only for messages that pass the group/DM gates.
+  // typing_on is kept up by processIncomingMessage for the agent turn — only
+  // for messages that pass the group/DM gates.
 }
 
 /** Route one update by update_type (shared by the polling loop and the webhook queue). */

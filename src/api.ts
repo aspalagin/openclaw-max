@@ -542,8 +542,19 @@ export class MaxApi {
 
   // ── Chat actions ──
 
-  async sendAction(chatId: number, action: MaxSenderAction): Promise<MaxSimpleResult> {
-    return this.request('POST', `/chats/${chatId}/actions`, undefined, { action });
+  async sendAction(
+    chatId: number,
+    action: MaxSenderAction,
+    opts?: { timeoutMs?: number; retryAttempts?: number },
+  ): Promise<MaxSimpleResult> {
+    return this.request(
+      'POST',
+      `/chats/${chatId}/actions`,
+      undefined,
+      { action },
+      opts?.timeoutMs,
+      opts?.retryAttempts,
+    );
   }
 
   // ── Callbacks ──

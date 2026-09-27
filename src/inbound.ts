@@ -17,6 +17,7 @@ import { getMaxRuntime } from './runtime.js';
 import { sendMaxMessage } from './send.js';
 import { createMaxDraftStream } from './stream-draft.js';
 import type { MaxMarkupElement } from './types.js';
+import { createMaxTypingCallbacks } from './typing.js';
 
 /** Longest quote of a replied-to message handed to the agent. */
 const MAX_REPLY_QUOTE_CHARS = 1000;
@@ -317,12 +318,18 @@ export async function processIncomingMessage(
     accountId: route.accountId,
   });
 
-  // Send typing indicator while agent processes
-  if (chatId != null) {
-    opts.api.sendAction(chatId, 'typing_on').catch((err) => {
-      log?.debug?.(`[${account.accountId}] typing_on failed: ${String(err)}`);
-    });
-  }
+  // Typing indicator for the whole turn: core starts it per typingMode and
+  // stops the keepalive when the run completes, fails or is aborted.
+  const typingCallbacks =
+    chatId != null
+      ? createMaxTypingCallbacks({
+          api: opts.api,
+          chatId,
+          onError: (err) => {
+            log?.debug?.(`[${account.accountId}] typing_on failed: ${String(err)}`);
+          },
+        })
+      : undefined;
 
   // Streaming modes: "partial" = edit single message, "block" = each block as separate message
   const streamMode = account.config.streamMode ?? 'off';
@@ -353,6 +360,7 @@ export async function processIncomingMessage(
     cfg: config,
     dispatcherOptions: {
       ...prefixOptions,
+      typingCallbacks,
       deliver: async (rawPayload) => {
         // This funnel consumes ReplyPayload directly, so it must apply the same
         // presentation fallback/render policy as core's outbound path.

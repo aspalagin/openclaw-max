@@ -29,6 +29,7 @@ import {
   buildMaxModelsProviderChannelData,
 } from './model-buttons.js';
 import { maxSetupWizard } from './onboarding.js';
+import { sendMaxHeartbeatTyping } from './typing.js';
 
 // ── Meta ──
 
@@ -93,6 +94,7 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
   setup: maxSetupAdapter,
   status: maxStatusAdapter,
   gateway: maxGatewayAdapter,
+  heartbeat: { sendTyping: sendMaxHeartbeatTyping },
 
   // Message actions (send, edit, delete)
   actions: maxMessageActions,

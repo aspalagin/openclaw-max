@@ -428,8 +428,19 @@ function makeCallbackRuntime() {
         formatAgentEnvelope: vi.fn(({ body }: { body: string }) => body),
         finalizeInboundContext: (ctx: Record<string, unknown>) => ctx,
         dispatchReplyWithBufferedBlockDispatcher: vi.fn(
-          async ({ ctx }: { ctx: Record<string, unknown> }) => {
+          async ({
+            ctx,
+            dispatcherOptions,
+          }: {
+            ctx: Record<string, unknown>;
+            dispatcherOptions: {
+              typingCallbacks?: { onReplyStart: () => Promise<void>; onIdle?: () => void };
+            };
+          }) => {
             dispatched.push(ctx);
+            // Like core: typing starts with the reply and stops once dispatch is idle.
+            await dispatcherOptions.typingCallbacks?.onReplyStart();
+            dispatcherOptions.typingCallbacks?.onIdle?.();
           },
         ),
       },

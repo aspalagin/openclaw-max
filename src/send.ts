@@ -289,7 +289,7 @@ export type MaxSendOutcome = { messageId: string; raw: MaxSendResult };
  * the body (after the target, so a bad target fails before any upload), send —
  * the per-chat limiter lives in MaxApi.sendMessage — through the caller's retry
  * policy, and report the sent mid. typing_on is not sent here: the inbound
- * pipeline sends it once per handled message.
+ * pipeline keeps it up for the agent turn.
  */
 async function sendWithBody(params: {
   api: MaxApi;
