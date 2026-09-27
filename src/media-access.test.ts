@@ -318,6 +318,22 @@ describe('image links go to MAX by URL only for public https hosts', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  // Core's local-file loader fetches http(s) URLs of any case itself, past
+  // the account proxy: a URL of any case goes to the runtime fetcher.
+  it.each(['HTTP://127.0.0.1/pic.png', 'Https://cdn.example.org/doc.pdf'])(
+    'downloads %s through the runtime fetcher (account proxy), not the local loader',
+    async (url) => {
+      const fetchRemoteMedia = withDownload(async () => {
+        throw new Error('Blocked hostname or private/internal/special-use IP address');
+      });
+
+      await rejection(sendMaxMediaMessage('-7001', '', url, { token: 't' }));
+
+      expect(fetchRemoteMedia).toHaveBeenCalledWith(expect.objectContaining({ url }));
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+
   it('uploads instead when the host resolves to a private address', async () => {
     vi.mocked(resolvePinnedHostnameWithPolicy).mockRejectedValueOnce(new Error('private'));
     const fetchRemoteMedia = withDownload(async () => ({

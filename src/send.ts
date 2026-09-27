@@ -667,8 +667,9 @@ export function describeMaxMediaSource(source: MaxMediaSource): string {
   return typeof source === 'string' ? source : `${source.fileName} (inline)`;
 }
 
+/** Any case: core's local-file loader would fetch such a URL itself, past the proxy. */
 function isRemoteUrl(source: string): boolean {
-  return source.startsWith('https://') || source.startsWith('http://');
+  return /^https?:\/\//i.test(source);
 }
 
 /** https link whose path looks like an image: MAX can fetch it itself (image.payload.url). */
