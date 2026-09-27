@@ -6,7 +6,7 @@ A channel plugin that connects an [OpenClaw](https://openclaw.ai) assistant to t
 
 It is for OpenClaw users who need their assistant reachable in MAX. You need a MAX bot token (bots are created by organisations on [business.max.ru](https://business.max.ru/self)) and an OpenClaw gateway you run yourself.
 
-Version 0.8.0. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md).
+Version 0.8.0. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md) (in Russian).
 
 ## Contents
 
@@ -53,7 +53,7 @@ Version 0.8.0. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max
 | Edited message | Processed again as a new message | `edit` action; draft streaming edits one message |
 | Deleted message | Ignored (logged at debug level) | `delete` action |
 | Pin | — | `pin` / `unpin` in groups and channels; `delivery.pin` |
-| Bot start (deep link) | Delivered to the agent as `/start` or `/start <payload>` | — |
+| Bot start (deep link) | Delivered to the agent as `/start` or `/start <payload>`; like messages, skipped when older than `maxEventAgeMinutes` | — |
 | Typing indicator, read receipt | — | `typing_on` for the whole turn; `mark_seen` on incoming messages (`markSeen`) |
 
 Reactions and polls are not supported.
@@ -65,7 +65,7 @@ Reactions and polls are not supported.
 - MAX Bot API as described by schema 0.0.33 and [dev.max.ru/docs-api](https://dev.max.ru/docs-api).
 - For webhook mode: a public HTTPS address on port 443 with a trusted certificate that reaches the gateway's HTTP server.
 
-**Verification status.** Text, media, buttons, both transports and incoming voice transcription over webhook are in production use with OpenClaw 2026.9.6. Features new in 0.8.0 are covered by the test suite; these have not yet been verified against the live MAX API: the HTTP proxy and `apiBaseUrl`, SecretRef resolution at gateway start, turn status, command menus, voice replies, and recovery of the durable webhook queue after a real gateway restart.
+**Verification status.** Version 0.7.3 is in production use with OpenClaw 2026.9.6: text, media, buttons, both transports and incoming voice transcription over webhook. Version 0.8.0 has not yet been run against the live MAX API. Everything new in 0.8.0 is covered by the automated test suite and has passed an independent code review; live checks are still ahead — among them the HTTP proxy and `apiBaseUrl`, SecretRef resolution at gateway start, turn status, command menus, voice replies, and recovery of the durable webhook queue after a real gateway restart.
 
 ## Installation
 
@@ -90,7 +90,7 @@ To update: `openclaw plugins update openclaw-max` for an npm install, or `opencl
 ## Quick start
 
 1. **Create a bot.** On [business.max.ru](https://business.max.ru/self) (a registered organisation or sole trader is required) open **Chat bots → Create**, wait for moderation, then copy the token under **Chat bots → Integration**.
-2. **Store the token** in a file readable by the gateway user, for example `/home/you/.openclaw/secrets/max-bot-token` (mode `0600`). The path is used as given: use an absolute path; `~` is not expanded, and a symbolic link is rejected.
+2. **Store the token** in a file readable by the gateway user, for example `/home/you/.openclaw/secrets/max-bot-token` (mode `0600`). The path is used as given: use an absolute path; `~` is not expanded. It must be a regular file: a symbolic link is not read, as if the file were missing.
 3. **Configure** `~/.openclaw/openclaw.json`:
 
    ```jsonc
@@ -128,7 +128,7 @@ The token can also come from `botToken` (a string or a [SecretRef](#secrets-and-
 - **Subscription:** at start the plugin removes this bot's subscriptions to other URLs and subscribes `webhookUrl`. Every 12 minutes it checks that the subscription still exists and recreates it if MAX removed it. On stop the subscription is kept, so events that arrive during a restart are redelivered by MAX.
 - **Processing:** the HTTP handler checks the secret, the body and duplicates, records the event (see [Reliability](#reliability)) and answers; the agent runs in the account task — in order within a chat, up to 4 chats in parallel.
 - **Turning it on:** deploy the plugin and restart the gateway first, then add `webhookUrl` and restart again; check that the log shows `MAX webhook subscribed` and that a message reaches the agent.
-- **Rolling back:** set `transport: "polling"` (or remove `webhookUrl`) and restart; the polling start removes the subscription. If the plugin cannot start, remove it by hand: `curl -X DELETE "https://platform-api2.max.ru/subscriptions?url=<webhookUrl>" -H "Authorization: <token>"`.
+- **Rolling back:** set `transport: "polling"` (or remove `webhookUrl`) and restart; the polling start removes the subscription. If the plugin cannot start, remove it by hand: `curl -X DELETE "<api>/subscriptions?url=<webhookUrl>" -H "Authorization: <token>"`, where `<api>` is your `apiBaseUrl` or, if it is not set, `https://platform-api2.max.ru`.
 
 ### Long polling
 
@@ -242,7 +242,7 @@ message(action="pin", target="CHAT_ID", messageId="MID")
 - `silent=true` sends without a push notification; MAX channels always notify.
 - `pin=true` or `delivery.pin` pins the sent message. MAX has no pinning in private dialogs: the plugin skips the call and returns `pinned: false` with a reason.
 
-**Scope (`actionScope`).** In a turn started by someone other than the owner, actions work only in the current chat and in chats the inbound policy admits (dialogs with senders in `allowFrom` or paired, groups in `groups` and, when a group has a sender list, only if the requester is on it). Only calls OpenClaw marks as the owner's (`senderIsOwner: true`) are not limited: the owner's own turns, `openclaw message` from the CLI, an admin's chat in the Control UI. Every other call — including runs without a conversation whose owner mark is missing or false, as heartbeat, subagent, scheduled and plugin- or hook-started runs may be — is limited to the admitted chats; in a group with a sender list it is refused, as there is no requester to check. Core deliveries (agent replies, reminders, automation announcements) do not go through the `message` tool and are not affected. A refused action is a tool error raised before anything changes in MAX; if the plugin cannot determine the chat of a message, it refuses. Outside the chat of the current turn, `edit` and `delete` work only on messages the bot sent itself (the author comes from the same lookup as the chat); in the current chat and for the owner they work as before. A `send`, `sendAttachment` or `sticker` with `replyTo` may reply only to a message of the chat it goes to (checked with one lookup, made only when `replyTo` is set); a reply to a message of another chat, or one whose chat cannot be determined, is refused.
+**Scope (`actionScope`).** In a turn started by someone other than the owner, actions work only in the current chat and in chats the inbound policy admits (dialogs with senders in `allowFrom` or paired, groups in `groups` and, when a group has a sender list, only if the requester is on it). Only calls OpenClaw marks as the owner's (`senderIsOwner: true`) are not limited: the owner's own turns, `openclaw message` from the CLI, an admin's chat in the Control UI. Every other call — including runs without a conversation whose owner mark is missing or false, as heartbeat, subagent, scheduled and plugin- or hook-started runs may be — is limited to the admitted chats; in a group with a sender list it is refused, as there is no requester to check. Core deliveries (agent replies, reminders, automation announcements) do not go through the `message` tool and are not affected. A `send` with `presentation` (cards, buttons), which core delivers without the plugin's action handler, is checked the same way, and `actions.send: false` applies to it too. The current chat counts only for the account the turn came through: an action in it through another MAX account (`accountId`) is checked against that account's policy. A refused action is a tool error raised before anything changes in MAX; if the plugin cannot determine the chat of a message, it refuses. Outside the chat of the current turn, `edit` and `delete` work only on messages the bot sent itself (the author comes from the same lookup as the chat); in the current chat and for the owner they work as before. A `send`, `sendAttachment` or `sticker` with `replyTo` (and a `send` with `presentation`) may reply only to a message of the chat it goes to (checked with one lookup, made only when `replyTo` is set); a reply to a message of another chat, or one whose chat cannot be determined, is refused.
 
 - `admitted` (default) — as above.
 - `current` — non-owner turns act only in their own chat.
@@ -331,10 +331,12 @@ The provider must exist in core's `secrets.providers`. The paths `channels.max.b
 ## Reliability
 
 - **Durable webhook queue.** Each accepted webhook event is written to `<stateDir>/max/inbox-<account>/` before MAX gets `200`. After a restart or crash, unprocessed events are handled first, in the original order within each chat. An event is finished once core has accepted the agent turn (core resumes an interrupted turn itself). If the event cannot be written or the queue is full (`webhookQueue.maxPending`), MAX gets `503` and retries later (`overflow: "drop"` acknowledges and drops instead). If the state directory is not writable, the queue falls back to memory with a warning. The SDK's own ingress queue is available only to bundled and official plugins in OpenClaw 2026.9.x, so the plugin keeps its own journal with the same contract.
-- **Deduplication.** Keys of handled events (`update_type:timestamp:mid`) are kept for 24 hours, up to 5000, and survive restarts, so MAX redeliveries are dropped. Long polling uses the same keys, so a restart in the middle of a batch does not repeat already handled events.
+- **Deduplication.** Keys of handled events (`update_type:timestamp:mid`; for events without a message — the chat and user instead of `mid`) are kept for 24 hours, up to 5000, and survive restarts, so MAX redeliveries are dropped. Long polling uses the same keys and, like the webhook queue, marks an event handled once core has accepted its turn: after a restart or crash in the middle of a batch — even in the middle of a turn — handled events are not repeated, and core resumes an interrupted turn instead of it being started again.
 - **Event age.** Messages, edits, button presses and bot starts older than `maxEventAgeMinutes` (default 60) are skipped with a warning, so after a long outage the bot does not answer hours-old messages. Chat registry events are always processed.
 - **Delivery errors** are reported to core: nothing sent → the reply is not dispatched; part visible → partial delivery with the visible message ids. After a failed text chunk the rest is not sent.
 - **Long answers** are split at 4000 characters (or a lower `textChunkLimit`); with `streamMode: "partial"` the first chunk replaces the draft and the rest follow as new messages, buttons on the last one.
+- **Answers in several parts.** When core delivers an answer as several parts, only the first goes into the streaming draft or answers the button press (`POST /answers`); the other parts, and the blocks of `streamMode: "block"`, follow as new messages, so no part overwrites another.
+- **Streaming draft** (`streamMode: "partial"`). Draft updates are sent one at a time, so there is never a second draft; the final answer waits for a draft send already in flight. Tool output (verbose mode) goes as separate messages while the draft keeps streaming. A draft that did not become the answer — `NO_REPLY`, `/stop`, a reply via the `message` tool, or an answer of media only — is deleted at the end of the turn; after a processing error it stays.
 - **Retries:** `429` and network errors are retried; `attachment.not.ready` after an upload is retried; text sends are throttled to MAX's 2 messages per second per chat.
 
 ## MAX API limits
@@ -390,7 +392,7 @@ Network access by the plugin: the MAX Bot API and its upload and CDN hosts (thro
 |---|---|
 | The bot does not answer in private messages | `dmPolicy` is `pairing` and the sender is not approved (`openclaw pairing list max`), or `allowlist` without the sender in `allowFrom` |
 | The bot does not answer in a group | The chat is not in `groups` (`groupPolicy: allowlist`); the bot was not mentioned (`requireMention`); the sender is not in `groups.<id>.allowFrom` / `groupAllowFrom`; the bot is not a group administrator — MAX then does not deliver group messages to it (observed with long polling) |
-| `MAX bot token not configured: …` in status | No `botToken`, `tokenFile` or `MAX_BOT_TOKEN`; the message names the option path. A `tokenFile` that is missing, empty or a symlink is ignored |
+| `MAX bot token not configured: …` in status | No `botToken`, `tokenFile` or `MAX_BOT_TOKEN`; the message names the option path. A `tokenFile` that is missing, empty or a symbolic link is not read (`tokenFile is missing, empty or not a regular file`); the default account then uses `MAX_BOT_TOKEN`, if set |
 | Account does not start, error mentions a SecretRef | The reference did not resolve; check `secrets.providers` and the referenced variable, file or command |
 | Webhook: no events arrive | Check the public URL, certificate and that the reverse proxy forwards the path; after 8 hours of failures MAX removes the subscription — the plugin recreates it within 12 minutes; long polling does not work while a subscription exists |
 | MAX gets `503` from the webhook | The journal could not be written (disk full, permissions) or `webhookQueue.maxPending` was reached |
@@ -415,7 +417,7 @@ A 0.7 config works without changes. Behaviour that changes and how to get the 0.
 | Outside the chat of the current turn `edit` and `delete` touch only the bot's own messages | `actionScope: "off"` |
 | `replyTo` of a send must point to a message of the chat the send goes to; otherwise it is refused | `actionScope: "off"` |
 | Local files are sent only from the agent's allowed directories | No switch: copy files into the agent workspace |
-| Messages, edits and presses older than 60 minutes — including MAX redeliveries after downtime — get no answer | `maxEventAgeMinutes: 0` |
+| Messages, edits, button presses and bot starts older than 60 minutes — including MAX redeliveries after downtime — get no answer | `maxEventAgeMinutes: 0` |
 | The webhook answers `200` after writing the event to disk; `503` when that fails or the queue is full | `webhookQueue.overflow: "drop"`, `webhookQueue.mode: "memory"` |
 | Pending webhook events, with message text, are kept in `<stateDir>/max/inbox-<account>/` until processed | `webhookQueue.mode: "memory"` (the key file stays) |
 | Named accounts inherit every channel-level option, including `dmPolicy`, `allowFrom`, `groupPolicy`, `groups` | Set the policies in each account |
@@ -432,8 +434,9 @@ A 0.7 config works without changes. Behaviour that changes and how to get the 0.
 | `streaming.mode` wins over `streamMode` | Keep only one of them |
 | Polling waits 2–60 s after an error (was 3 s), 5 minutes after `401` | — |
 | The published package no longer contains `scripts/` | The scripts stay in the repository |
+| `groups.<id>.enabled`, `groups.<id>.systemPrompt`, `groups.<id>.skills`, `actions` and `textChunkLimit` take effect (0.7 accepted them in the schema but did not read them) | Remove these keys from the config |
 
-The full list is in the [changelog](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md).
+The full list is in the [changelog](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md) (in Russian).
 
 ## Development
 
