@@ -7,7 +7,7 @@
 import { resolveApprovalOverGateway } from 'openclaw/plugin-sdk/approval-gateway-runtime';
 import { questionGatewayRuntime } from 'openclaw/plugin-sdk/question-gateway-runtime';
 
-import type { ResolvedMaxAccount } from './accounts.js';
+import { admitMaxGroupMessage } from './access-policy.js';
 import type { MaxCallback, MaxMessage } from './api.js';
 import { decodeMaxCommandMenuPayload } from './command-menu.js';
 import { processIncomingMessage } from './inbound.js';
@@ -54,7 +54,7 @@ export async function processCallback(
   // plain channelData.max.buttons payloads keep arriving as message text.
   const presentationCallback = decodeMaxPresentationCallback(payload);
   if (presentationCallback?.kind === 'approval' || presentationCallback?.kind === 'question') {
-    await resolveMaxRuntimeControlCallback(presentationCallback, callback, opts);
+    await resolveMaxRuntimeControlCallback(presentationCallback, callback, message, opts);
     return;
   }
   // Command menu choices re-enter as that command's text; inbound checks the
@@ -79,30 +79,38 @@ export async function processCallback(
 /**
  * Approvals and ask_user answers are operator actions: only senders listed
  * explicitly in the account's allowFrom may press them (a wildcard is enough
- * for questions, never for approvals).
+ * for questions, never for approvals). A wildcard answer in a group also
+ * needs the group policy and its sender allowlist; with the chat unknown
+ * (the keyboard message is gone) the wildcard is not enough.
  */
 function isMaxRuntimeControlSender(
-  account: ResolvedMaxAccount,
+  opts: MaxMonitorOptions,
+  message: MaxMessage | null,
   senderId: string,
   kind: 'approval' | 'question',
 ): boolean {
+  const { account, config } = opts;
   const allowFrom = (account.config.allowFrom ?? []).map((entry) =>
     String(entry).trim().replace(/^max:/i, ''),
   );
   if (allowFrom.includes(senderId)) return true;
-  return kind === 'question' && allowFrom.includes('*');
+  if (kind !== 'question' || !allowFrom.includes('*') || !message) return false;
+  const { chat_id: chatId, chat_type: chatType } = message.recipient;
+  if (chatType !== 'chat' && chatType !== 'channel') return true;
+  return admitMaxGroupMessage(account, config, chatId, senderId).admitted;
 }
 
 async function resolveMaxRuntimeControlCallback(
   action: Extract<MaxPresentationCallback, { kind: 'approval' | 'question' }>,
   callback: MaxCallback,
+  message: MaxMessage | null,
   opts: MaxMonitorOptions,
 ): Promise<void> {
   const { account, config, log } = opts;
   const senderId = String(callback.user.user_id);
   let notification: string;
 
-  if (!isMaxRuntimeControlSender(account, senderId, action.kind)) {
+  if (!isMaxRuntimeControlSender(opts, message, senderId, action.kind)) {
     log?.warn(
       `[${account.accountId}] MAX ${action.kind} button pressed by unauthorized sender ${senderId}`,
     );
@@ -128,7 +136,7 @@ async function resolveMaxRuntimeControlCallback(
           questionId: action.questionId,
           optionValue: action.optionValue,
           senderId,
-          authorize: () => isMaxRuntimeControlSender(account, senderId, 'question'),
+          authorize: () => isMaxRuntimeControlSender(opts, message, senderId, 'question'),
         });
         notification =
           result.status === 'answered'

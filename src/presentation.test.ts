@@ -623,6 +623,33 @@ describe('presentation button round trip', () => {
     });
   });
 
+  it('holds a wildcard question answer in a group to the group sender allowlist', async () => {
+    const { setMaxRuntime } = await import('./runtime.js');
+    const { dispatchUpdate } = await import('./dispatch.js');
+    setMaxRuntime(makeRuntime().core as never);
+    const opts = makeOpts({
+      dmPolicy: 'open',
+      allowFrom: ['*'],
+      groupPolicy: 'allowlist',
+      groups: { '-7001': { allowFrom: ['1000101'] } },
+    });
+    const inGroup = (userId: number, chatId = -7001) => {
+      const update = pressUpdate(buttonPayload('Yes'), userId);
+      update.message!.recipient = { chat_type: 'chat', chat_id: chatId } as never;
+      return update;
+    };
+
+    await dispatchUpdate(inGroup(999), opts as never);
+    await dispatchUpdate(inGroup(1000101, -9999), opts as never);
+    expect(questionMock.resolveOption).not.toHaveBeenCalled();
+    expect(opts.api.answerCallback).toHaveBeenCalledWith('cb.presentation.1', {
+      notification: 'You are not allowed to answer this.',
+    });
+
+    await dispatchUpdate(inGroup(1000101), opts as never);
+    expect(questionMock.resolveOption).toHaveBeenCalledTimes(1);
+  });
+
   it('reports a failed resolution instead of throwing', async () => {
     const { setMaxRuntime } = await import('./runtime.js');
     const { dispatchUpdate } = await import('./dispatch.js');

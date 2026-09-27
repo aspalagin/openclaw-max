@@ -211,7 +211,7 @@ In an admitted group, a non-empty `groups.<id>.allowFrom` (else `groupAllowFrom`
 
 **Mentions.** With `requireMention` (default `true`) the bot answers in a group when it is mentioned (`@username` or a MAX mention), when someone replies to its message or presses its button, or when the text matches mention patterns configured in OpenClaw core (`messages.groupChat.mentionPatterns` or the agent's `groupChat.mentionPatterns`). Patterns that core derives from the agent's name are not used in MAX — only explicitly configured ones. `channels.max.mentionPatterns` limits where patterns apply: `{ "mode": "deny" }` turns them off for MAX, `allowIn` / `denyIn` list group ids. A captionless voice message in such a group is checked against the patterns using the MAX transcript or one transcription by core (only for admitted groups and senders).
 
-**Approvals and questions.** Approval buttons can be pressed only by senders listed explicitly in `allowFrom`; for `ask_user` questions a `"*"` entry is enough.
+**Approvals and questions.** Approval buttons can be pressed only by senders listed explicitly in `allowFrom`; for `ask_user` questions a `"*"` entry is enough — in a group such an answer also needs the group admitted and the sender on its sender list (`groups.<id>.allowFrom` / `groupAllowFrom`), if it has one.
 
 **Finding a user id.** `openclaw pairing list max` shows the id of a sender waiting for pairing. Group chat ids are negative numbers.
 
