@@ -700,6 +700,25 @@ describe('edit streaming draft (streamMode "partial")', () => {
 
   const hello = () => created({ body: { mid: 'mid.q', seq: 1, text: 'hello' } });
 
+  it('removes a draft that no final answer replaced (NO_REPLY, aborted turn)', async () => {
+    useTurn(async () => undefined);
+    await dispatchUpdate(hello(), makeOpts({ streamMode: 'partial' }) as never);
+
+    expect(fetchCalls().map((c) => c.method)).toEqual(['POST', 'DELETE']);
+    expect(fetchCalls()[1].url).toContain('message_id=mid.draft');
+  });
+
+  it('keeps the draft of a failed dispatch as the record of the turn', async () => {
+    useTurn(async () => {
+      throw new Error('dispatch failed');
+    });
+    await expect(
+      dispatchUpdate(hello(), makeOpts({ streamMode: 'partial' }) as never),
+    ).rejects.toThrow('dispatch failed');
+
+    expect(fetchCalls().map((c) => c.method)).toEqual(['POST']);
+  });
+
   it('sends a tool payload as its own message and puts the final into the draft', async () => {
     useTurn(async (captured) => {
       await captured.dispatcherOptions.deliver({ text: 'Tool output' }, { kind: 'tool' });

@@ -575,7 +575,11 @@ export async function processIncomingMessage(
     throw err;
   } finally {
     await progress?.close({ failed: dispatchFailed });
-    await draft.clear();
+    // A partial draft no final answer replaced (NO_REPLY, an aborted turn, an
+    // answer sent by the message tool) is not the answer: remove it. After a
+    // failed dispatch it stays as the record of the turn.
+    if (!dispatchFailed && draft.messageId && !draft.finalized) await draft.discard();
+    else await draft.clear();
   }
 }
 
