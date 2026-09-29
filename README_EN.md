@@ -65,7 +65,7 @@ Reactions and polls are not supported.
 - MAX Bot API as described by schema 0.0.33 and [dev.max.ru/docs-api](https://dev.max.ru/docs-api).
 - For webhook mode: a public HTTPS address on port 443 with a trusted certificate that reaches the gateway's HTTP server.
 
-**Verification status.** Version 0.8.0 has been in production use since 27 September 2026 with OpenClaw 2026.9.6 in webhook mode. Verified live: start and webhook subscription, channel status (`mode`, `tokenStatus`), text in a direct chat, long answers in parts, core commands, sends through the `message` tool, and recovery of the durable queue after a real gateway restart — a message core refused while the gateway was shutting down waited for the next start and was answered. Versions 0.7.x were in production use before that with text, media, buttons, both transports and incoming voice transcription over webhook. The rest of what is new in 0.8.0 is covered by the automated test suite and has passed an independent code review, but has not been checked live yet — among it the HTTP proxy and `apiBaseUrl`, SecretRef resolution at gateway start, turn status, command menus, voice replies, forwarded messages, groups and long polling.
+**Verification status.** Version 0.8.0 has been in production use since 27 September 2026 with OpenClaw 2026.9.6 in webhook mode. Verified live: start and webhook subscription, channel status (`mode`, `tokenStatus`), text in a direct chat, long answers in parts, core commands, sends through the `message` tool, including a file from the agent workspace and the refusal of a file of a type that is not allowed, and recovery of the durable queue after a real gateway restart — a message core refused while the gateway was shutting down waited for the next start and was answered. Versions 0.7.x were in production use before that with text, media, buttons, both transports and incoming voice transcription over webhook. The rest of what is new in 0.8.0 is covered by the automated test suite and has passed an independent code review, but has not been checked live yet — among it the HTTP proxy and `apiBaseUrl`, SecretRef resolution at gateway start, turn status, command menus, voice replies, forwarded messages, groups and long polling.
 
 ## Installation
 
@@ -253,7 +253,7 @@ This stops a prompt injection in one chat from editing, deleting or posting in a
 ## Media and local files
 
 - **Incoming** media is downloaded after the access checks, within `mediaMaxMb` (default 20 MB) and `mediaMaxCount` (default 12 per message); the agent gets a note about media that was not loaded. Files are stored by OpenClaw core's media store.
-- **Outgoing local files** are read only through the OpenClaw SDK loader from the directories core allows for the agent: its workspace, the gateway media directories and what the core filesystem policy permits. Paths outside them — including via `..` or symbolic links — fail with `Local media path is not under an allowed directory: …`. To send a file from elsewhere, copy it into the agent workspace first. There is no option to turn this off.
+- **Outgoing local files** are read only through the OpenClaw SDK loader from the directories core allows for the agent: its workspace, the gateway media directories and what the core filesystem policy permits. Paths outside them — including via `..` or symbolic links — fail with `Local media path is not under an allowed directory: …`. To send a file from elsewhere, copy it into the agent workspace first. When core policy grants the agent host reads, the directory is not limited, but core checks the type by content: images, audio, video, PDF, Office documents, archives and plain-text documents (`.txt`, `.md`, `.csv`, `.json`, `.yaml`) are sent, anything else fails with `Host-local media sends only allow …`. There is no option to turn these checks off.
 - **Inline content:** `buffer` (base64 or a data URL) with `filename` and `contentType`; the size limit is checked before decoding. If both a path and `buffer` are given, the path is used.
 - **Remote URLs** are fetched through core's SSRF-guarded downloader into memory. An image URL is passed to MAX as a link only when its host is public https; otherwise the image is downloaded and uploaded.
 
@@ -360,7 +360,7 @@ From the MAX Bot API documentation:
 
 - **Access control by default:** private messages need pairing, groups need an allowlist, group sender lists are enforced.
 - **Action scope:** the `message` tool cannot act in chats the inbound policy does not admit (see [above](#message-tool-actions-and-their-scope)).
-- **Local files:** only from directories OpenClaw allows for the agent; `..` and symbolic links cannot escape them.
+- **Local files:** only from directories OpenClaw allows for the agent; `..` and symbolic links cannot escape them. For an agent with host reads core allows any path, but only file types verified by content.
 - **Remote media:** fetched through core's SSRF guard; private, loopback, link-local and metadata addresses are not passed to MAX as links.
 - **Webhook:** the secret is checked in constant time before the body is read.
 - **Secrets:** SecretRef support; token, webhook secret and proxy credentials are not logged.
@@ -407,6 +407,7 @@ Network access by the plugin: the MAX Bot API and its upload and CDN hosts (thro
 | MAX gets `503` from the webhook | The journal could not be written (disk full, permissions) or `webhookQueue.maxPending` was reached |
 | Old messages get no answer after downtime | They are older than `maxEventAgeMinutes` (default 60); set `0` to answer any age |
 | `Local media path is not under an allowed directory` | The file is outside the agent's allowed directories; copy it into the workspace |
+| `Host-local media sends only allow …` | The agent has host reads and core did not recognize or does not allow the file type; send a file of an allowed type or pass the content as `buffer` |
 | The `message` tool is refused in another chat | `actionScope`: the chat is not admitted by the inbound policy; add it to the policy or change `actionScope` |
 | `MAX API does not resolve @username …` | Use `user:<id>` or a numeric chat id |
 | `pinned: false` in a private dialog | MAX has no pinning in dialogs |
@@ -425,7 +426,7 @@ A 0.7 config works without changes. Behaviour that changes and how to get the 0.
 | A call without `senderIsOwner: true` (heartbeat, subagent, scheduled run without message authority) is limited to the admitted chats; in a group with a sender list it is refused | `actionScope: "off"` |
 | Outside the chat of the current turn `edit` and `delete` touch only the bot's own messages | `actionScope: "off"` |
 | `replyTo` of a send must point to a message of the chat the send goes to; otherwise it is refused | `actionScope: "off"` |
-| Local files are sent only from the agent's allowed directories | No switch: copy files into the agent workspace |
+| Local files are read by core's guarded loader: from the agent's allowed directories, and with host reads only verified file types | No switch: copy files into the agent workspace |
 | Messages, edits, button presses and bot starts older than 60 minutes — including MAX redeliveries after downtime — get no answer | `maxEventAgeMinutes: 0` |
 | The webhook answers `200` after writing the event to disk; `503` when that fails or the queue is full | `webhookQueue.overflow: "drop"`, `webhookQueue.mode: "memory"` |
 | Pending webhook events, with message text, are kept in `<stateDir>/max/inbox-<account>/` until processed | `webhookQueue.mode: "memory"` (the key file stays) |
