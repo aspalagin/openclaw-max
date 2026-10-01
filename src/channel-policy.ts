@@ -10,7 +10,7 @@ import { PAIRING_APPROVED_MESSAGE } from 'openclaw/plugin-sdk/channel-status';
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
 import { DEFAULT_ACCOUNT_ID, formatPairingApproveHint } from 'openclaw/plugin-sdk/core';
 
-import { type ResolvedMaxAccount, resolveMaxAccount } from './accounts.js';
+import { readMaxAccount, type ResolvedMaxAccount, resolveMaxAccount } from './accounts.js';
 import { sendMaxMessage } from './send.js';
 
 type MaxChannelPlugin = ChannelPlugin<ResolvedMaxAccount>;
@@ -109,10 +109,26 @@ function resolveMaxGroupToolPolicy(params: {
   return undefined;
 }
 
+/**
+ * Account config for the security adapter. Since OpenClaw 2026.9.7 `security audit`
+ * (and doctor) hand the adapter the read-only `config.inspectAccount` status, which
+ * carries no `config` — re-read the account section from cfg (side-effect free) in that case.
+ */
+function resolveMaxPolicyAccountConfig(
+  cfg: OpenClawConfig,
+  accountId: string,
+  account: Pick<ResolvedMaxAccount, 'config'> | { config?: undefined } | null | undefined,
+): ResolvedMaxAccount['config'] {
+  const config = (account as { config?: ResolvedMaxAccount['config'] } | null | undefined)?.config;
+  if (config && typeof config === 'object') return config;
+  return readMaxAccount({ cfg, accountId }).config;
+}
+
 /** DM policy (default pairing) and warnings for open group policy. */
 export const maxSecurityAdapter: NonNullable<MaxChannelPlugin['security']> = {
   resolveDmPolicy: ({ cfg, accountId, account }) => {
-    const resolvedAccountId = accountId ?? account.accountId ?? DEFAULT_ACCOUNT_ID;
+    const resolvedAccountId = accountId ?? account?.accountId ?? DEFAULT_ACCOUNT_ID;
+    const config = resolveMaxPolicyAccountConfig(cfg, resolvedAccountId, account);
     const maxSection = (cfg.channels as Record<string, unknown>)?.max as
       Record<string, unknown> | undefined;
     const useAccountPath = Boolean(
@@ -122,8 +138,8 @@ export const maxSecurityAdapter: NonNullable<MaxChannelPlugin['security']> = {
       ? `channels.max.accounts.${resolvedAccountId}.`
       : 'channels.max.';
     return {
-      policy: account.config.dmPolicy ?? 'pairing',
-      allowFrom: account.config.allowFrom ?? [],
+      policy: config.dmPolicy ?? 'pairing',
+      allowFrom: config.allowFrom ?? [],
       policyPath: `${basePath}dmPolicy`,
       allowFromPath: basePath,
       approveHint: formatPairingApproveHint('max'),
@@ -131,13 +147,17 @@ export const maxSecurityAdapter: NonNullable<MaxChannelPlugin['security']> = {
     };
   },
   collectWarnings: ({ account, cfg }) => {
+    const config = resolveMaxPolicyAccountConfig(
+      cfg,
+      account?.accountId ?? DEFAULT_ACCOUNT_ID,
+      account,
+    );
     const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy;
-    const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? 'allowlist';
+    const groupPolicy = config.groupPolicy ?? defaultGroupPolicy ?? 'allowlist';
     if (groupPolicy !== 'open') {
       return [];
     }
-    const groupAllowlistConfigured =
-      account.config.groups && Object.keys(account.config.groups).length > 0;
+    const groupAllowlistConfigured = config.groups && Object.keys(config.groups).length > 0;
     if (groupAllowlistConfigured) {
       return [
         `- MAX groups: groupPolicy="open" allows any member in allowed groups to trigger (mention-gated). Set channels.max.groupPolicy="allowlist" + channels.max.groupAllowFrom to restrict senders.`,
