@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `openclaw security audit` и security-шаг `openclaw doctor` на OpenClaw 2026.9.7 падали с `TypeError: Cannot read properties of undefined (reading 'dmPolicy')` в `channel-policy.ts`. С 2026.9.7 ядро (`resolveChannelAuditAccount`) передаёт в `security.resolveDmPolicy` и `collectWarnings` не разрешённый аккаунт, а read-only статус `config.inspectAccount`, в котором нет `config`. Адаптер безопасности теперь берёт `account.config`, а при его отсутствии перечитывает секцию аккаунта из конфига (`readMaxAccount`, без побочных эффектов), в том числе для `channels.max.accounts.<id>`; результат аудита тот же, что и с полным аккаунтом. На работу канала в gateway не влияло. Тесты: `channel-policy.test.ts` (полный аккаунт, статус inspectAccount, именованный аккаунт, умолчания, предупреждения о `groupPolicy="open"`).
+
 ## 0.8.0 - 2026-09-29
 
 Требования прежние: OpenClaw ≥ 2026.9.6, Node.js ≥ 22. Конфиг 0.7 работает без правок; что меняется при обновлении и как вернуть прежнее — в конце раздела.
