@@ -132,6 +132,24 @@ describe('plain-text fallback on a markup refusal', () => {
     expect(isMaxFormatRejection(new MaxApiError('x', 400, MARKUP_REFUSED))).toBe(true);
   });
 
+  it('logs the MAX error code of the refusal, not its message or the text', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockFetch([400, MARKUP_REFUSED], sent('mid.plain'));
+
+    await sendMaxMessage('70', '**private** note', { token: 't', format: 'markdown' });
+
+    expect(error).toHaveBeenCalledWith('[MAX API] POST /messages → 400 (code=proto.payload)');
+    expect(warn).toHaveBeenCalledWith(
+      '[MAX] markdown refused (proto.payload); resending as plain text',
+    );
+    const logged = [...error.mock.calls, ...warn.mock.calls].flat().join('\n');
+    expect(logged).not.toContain('Failed to parse markdown');
+    expect(logged).not.toContain('private');
+    error.mockRestore();
+    warn.mockRestore();
+  });
+
   it('applies to edits and callback answers', async () => {
     mockFetch([400, MARKUP_REFUSED], [200, { success: true }]);
     await editMaxMessage('mid.1', '_x_', { token: 't', format: 'markdown' });
@@ -156,6 +174,19 @@ describe('delivery errors follow the SDK contract', () => {
     expect((err as PlatformMessageNotDispatchedError).retryable).toBe(false);
     expect((err as Error).cause).toBeInstanceOf(MaxApiError);
     expect(LOG.error).toHaveBeenCalledWith(expect.stringContaining('chat.denied'));
+  });
+
+  it('logs the failed send with the MAX code but without the response body', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockFetch([403, { code: 'chat.denied', message: 'Cannot send "hello secret"' }]);
+
+    await rejection(deliver({ text: 'hello secret' }));
+
+    expect(LOG.error).toHaveBeenCalledWith(
+      '[default] MAX send failed: MaxApiError: MAX API POST /messages → 403 (code=chat.denied)',
+    );
+    expect(LOG.error.mock.calls.flat().join('\n')).not.toContain('secret');
+    error.mockRestore();
   });
 
   it('marks an exhausted rate limit as retryable, and rethrows ambiguous 5xx as is', () => {

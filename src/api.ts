@@ -320,6 +320,39 @@ export class MaxApiError extends Error {
   }
 }
 
+/** A MAX error code as it may appear in the log: a short dotted identifier. */
+const LOGGABLE_ERROR_CODE = /^[A-Za-z0-9][\w.-]{0,63}$/;
+/** A localization key MAX puts in `message`, e.g. "Key: errors.process.attachment.movie.not.owner". */
+const LOGGABLE_ERROR_KEY = /^Key:\s*(errors\.[\w.-]{1,100})$/;
+
+/**
+ * The machine-readable part of a MAX error response for the log: `code`
+ * (e.g. "proto.payload") and, when `message` is a bare localization key, that
+ * key. Free-form `message` text is left out: MAX documents it only as a
+ * human-readable description and some messages quote the request (e.g. "Path
+ * /chats is not recognized"), so it may echo user data. Accepts the parsed
+ * body or the raw response text; an empty or non-JSON body yields "".
+ * @internal exported for testing.
+ */
+export function describeMaxErrorBody(body: unknown): string {
+  let parsed = body;
+  if (typeof body === 'string') {
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return '';
+    }
+  }
+  if (!parsed || typeof parsed !== 'object') return '';
+  const { code, message } = parsed as { code?: unknown; message?: unknown };
+  const parts: string[] = [];
+  if (typeof code === 'string' && LOGGABLE_ERROR_CODE.test(code)) parts.push(`code=${code}`);
+  const key =
+    typeof message === 'string' ? LOGGABLE_ERROR_KEY.exec(message.trim())?.[1] : undefined;
+  if (key) parts.push(`key=${key}`);
+  return parts.join(' ');
+}
+
 /**
  * A request that hit the client-side deadline (our AbortController), as opposed
  * to a caller-supplied stop signal. Carries the stalled phase so the send path
@@ -462,13 +495,12 @@ export class MaxApi {
 
       if (!res.ok) {
         // Never log the request body: it may carry the webhook secret (POST
-        // /subscriptions) or private message text. Log only method+path+status.
-        getMaxLogger().error(`[MAX API] ${method} ${path} → ${res.status}`);
-        const error = new MaxApiError(
-          `MAX API ${method} ${path} → ${res.status}`,
-          res.status,
-          json,
-        );
+        // /subscriptions) or private message text. Log only method+path+status
+        // and the MAX error code (describeMaxErrorBody).
+        const detail = describeMaxErrorBody(json);
+        const summary = `${method} ${path} → ${res.status}${detail ? ` (${detail})` : ''}`;
+        getMaxLogger().error(`[MAX API] ${summary}`);
+        const error = new MaxApiError(`MAX API ${summary}`, res.status, json);
         const retryAfter = res.headers?.get?.('retry-after');
         if (retryAfter) {
           const seconds = Number(retryAfter);
@@ -769,10 +801,12 @@ export class MaxApi {
     );
 
     if (!uploadRes.ok) {
+      const text = await uploadRes.text().catch(() => null);
+      const detail = describeMaxErrorBody(text);
       throw new MaxApiError(
-        `MAX media upload failed: ${uploadRes.status}`,
+        `MAX media upload failed: ${uploadRes.status}${detail ? ` (${detail})` : ''}`,
         uploadRes.status,
-        await uploadRes.text().catch(() => null),
+        text,
       );
     }
 

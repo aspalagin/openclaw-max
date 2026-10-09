@@ -6,7 +6,7 @@ import { Buffer } from 'node:buffer';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MaxApi, MaxApiError, MaxRequestTimeoutError } from './api.js';
+import { describeMaxErrorBody, MaxApi, MaxApiError, MaxRequestTimeoutError } from './api.js';
 
 const MOCK_TOKEN = 'test-bot-token';
 const MOCK_BASE_URL = 'https://test-api.max.ru';
@@ -424,6 +424,129 @@ describe('MaxApi', () => {
       const err = await api.getMe().catch((e) => e as MaxApiError);
       expect(err).toBeInstanceOf(MaxApiError);
       expect((err as MaxApiError).code).toBe('attachment.not.ready');
+    });
+
+    it('logs the MAX error code of every failed attempt', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const retryApi = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, retryAttempts: 2 });
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 429,
+          headers: { get: () => null },
+          json: async () => ({ code: 'too.many.requests', message: 'Too many requests' }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ user_id: 1, first_name: 'Bot', is_bot: true }),
+        });
+
+      await retryApi.getMe();
+      expect(error).toHaveBeenCalledWith('[MAX API] GET /me → 429 (code=too.many.requests)');
+    });
+  });
+
+  describe('error log', () => {
+    let logged: string[];
+
+    beforeEach(() => {
+      logged = [];
+      vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+        logged.push(args.map(String).join(' '));
+      });
+    });
+
+    it('logs and throws the MAX code and message key, never the message text or request body', async () => {
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: async () => ({
+          code: 'proto.payload',
+          message: 'Key: errors.process.attachment.movie.not.owner',
+        }),
+      });
+
+      const err = (await api
+        .sendMessage({ text: 'private text' }, { chat_id: 1 })
+        .catch((e: unknown) => e)) as MaxApiError;
+
+      const summary =
+        'POST /messages → 400 (code=proto.payload key=errors.process.attachment.movie.not.owner)';
+      expect(logged).toEqual([`[MAX API] ${summary}`]);
+      expect(err.message).toBe(`MAX API ${summary}`);
+      expect(err.code).toBe('proto.payload');
+      expect(logged.join('\n')).not.toContain('private text');
+    });
+
+    it('leaves a free-form message out: it may echo the request', async () => {
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: async () => ({ code: 'proto.payload', message: 'Invalid text: private text' }),
+      });
+
+      await api.sendMessage({ text: 'private text' }, { chat_id: 1 }).catch(() => {});
+
+      expect(logged).toEqual(['[MAX API] POST /messages → 400 (code=proto.payload)']);
+    });
+
+    it('logs only method, path and status for an empty, non-JSON or code-less body', async () => {
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 404,
+          json: async () => {
+            throw new SyntaxError('Unexpected end of JSON input');
+          },
+        })
+        .mockResolvedValueOnce({ ok: false, status: 404, json: async () => 'Not Found' })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 404,
+          json: async () => ({ code: 'bad\ncode', message: 'Key: errors.a b' }),
+        });
+
+      for (let i = 0; i < 3; i += 1) {
+        const err = (await api.getMe().catch((e: unknown) => e)) as MaxApiError;
+        expect(err.message).toBe('MAX API GET /me → 404');
+      }
+      expect(logged).toEqual(Array(3).fill('[MAX API] GET /me → 404'));
+    });
+
+    it('describes a raw or parsed error body by its code and key only', () => {
+      expect(describeMaxErrorBody('{"code":"verify.token","message":"No access token"}')).toBe(
+        'code=verify.token',
+      );
+      expect(describeMaxErrorBody({ code: 'attachment.not.ready', message: 'Key: errors.x' })).toBe(
+        'code=attachment.not.ready key=errors.x',
+      );
+      expect(describeMaxErrorBody(`{"code":"${'a'.repeat(65)}"}`)).toBe('');
+      expect(describeMaxErrorBody('<html>502</html>')).toBe('');
+      expect(describeMaxErrorBody('')).toBe('');
+      expect(describeMaxErrorBody(null)).toBe('');
+      expect(describeMaxErrorBody(['proto.payload'])).toBe('');
+    });
+
+    it('puts the MAX code of a refused upload into the error', async () => {
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ url: 'https://upload.max.ru/u' }),
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 400,
+          text: async () => '{"code":"upload.error","message":"Bad file report.pdf"}',
+        });
+
+      const err = (await api
+        .uploadMedia('file', Buffer.from('x'), 'application/pdf', 'report.pdf')
+        .catch((e: unknown) => e)) as MaxApiError;
+
+      expect(err.message).toBe('MAX media upload failed: 400 (code=upload.error)');
     });
   });
 
