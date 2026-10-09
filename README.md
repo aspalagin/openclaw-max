@@ -6,7 +6,7 @@
 
 Плагин нужен тем, кто пользуется OpenClaw и хочет, чтобы ассистент был доступен в MAX. Понадобятся токен бота MAX (ботов создают организации на [business.max.ru](https://business.max.ru/self)) и собственный gateway OpenClaw.
 
-Версия 0.8.0. Изменения: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md).
+Версия 0.8.2. Изменения: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md).
 
 ## Содержание
 
@@ -490,3 +490,5 @@ CI также запускает `typecheck` и тесты на `openclaw@latest
 Разработка ведётся с помощью ИИ-агентов.
 
 **Лицензия:** MIT, см. [LICENSE](LICENSE).
+
+**Товарный знак.** Плагин неофициальный. MAX — товарный знак правообладателя, ООО «МАХ»; иконка пакета — логотип из [брендбука MAX](https://go.max.ru/brandbook).

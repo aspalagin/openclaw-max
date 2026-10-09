@@ -72,10 +72,9 @@ function logSendFailure(
   what: string,
   err: unknown,
 ): void {
-  const body = (err as { body?: unknown })?.body;
-  log?.error(
-    `[${account.accountId}] MAX ${what} failed: ${String(err)}${body ? ` body=${JSON.stringify(body)}` : ''}`,
-  );
+  // A MaxApiError message already carries the MAX error code; the response body
+  // stays out of the log, its free-form `message` may echo user data.
+  log?.error(`[${account.accountId}] MAX ${what} failed: ${String(err)}`);
 }
 
 export async function deliverMaxReply(params: {

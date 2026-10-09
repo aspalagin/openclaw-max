@@ -6,7 +6,7 @@ A channel plugin that connects an [OpenClaw](https://openclaw.ai) assistant to t
 
 It is for OpenClaw users who need their assistant reachable in MAX. You need a MAX bot token (bots are created by organisations on [business.max.ru](https://business.max.ru/self)) and an OpenClaw gateway you run yourself.
 
-Version 0.8.0. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md) (in Russian).
+Version 0.8.2. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md) (in Russian).
 
 ## Contents
 
@@ -490,3 +490,5 @@ Questions and proposals: [GitHub Issues](https://github.com/aspalagin/openclaw-m
 Development is carried out with the help of AI agents.
 
 **License:** MIT, see [LICENSE](LICENSE).
+
+**Trademark.** This plugin is unofficial. MAX is a trademark of its rights holder, ООО «МАХ»; the package icon is the logo from the [MAX brand book](https://go.max.ru/brandbook).
