@@ -241,6 +241,14 @@ describe('tables by width when markdown.tables is not set (auto)', () => {
     }
   });
 
+  it('a narrow table with a link goes as bullets: a block would drop the address', () => {
+    const table = '| Док | Где |\n|---|---|\n| API | [тут](https://dev.max.ru) |';
+    expect(toMaxMarkdown(table, { tableMode: 'auto' })).toBe(
+      '**API**\n• Где: [тут](https://dev.max.ru)',
+    );
+    expect(toMaxMarkdown(table, { tableMode: 'code' })).not.toContain('https://dev.max.ru');
+  });
+
   it('leaves tables in a fenced block alone, also across its blank lines', () => {
     const fenced = `\`\`\`\n${NARROW}\n\n${WIDE}\n\`\`\``;
     expect(toMaxMarkdown(`${fenced}\n\n${NARROW}\n\n${WIDE}`, { tableMode: 'auto' })).toBe(

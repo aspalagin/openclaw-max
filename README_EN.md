@@ -77,7 +77,7 @@ The agent writes ordinary Markdown and the plugin converts it to the MAX dialect
 MAX has no tables, and a code block does not scroll on a phone: a long line wraps and the table falls apart. So by default (`markdown.tables` not set) the plugin decides for each table on its own:
 
 - a narrow one — a monospace line of at most 36 columns (Cyrillic and Latin letters take one, emoji and CJK two) — goes as a monospace block with aligned columns. That much fits into a code block on an ordinary phone;
-- a wide one goes as bullets: per table row, the first cell in bold and the others as `• Column: value`. Reads on any screen.
+- a wide one goes as bullets: per table row, the first cell in bold and the others as `• Column: value`. Reads on any screen. A table with links goes as bullets too: a monospace block keeps only the link text.
 
 The standard OpenClaw key `markdown.tables` (in `channels.max` or `accounts.<id>`) sets one mode for every table, whatever its width:
 

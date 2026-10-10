@@ -92,7 +92,11 @@ export function codeTableWidth(headers: string[], rows: string[][]): number {
   return widths.reduce((sum, width) => sum + width + 3, 1);
 }
 
-/** Режимы таблиц текста в auto: узкая — code, широкая — bullets. */
+/**
+ * Режимы таблиц текста в auto: узкая — code, широкая — bullets. Таблица со
+ * ссылками — тоже bullets: в моноширинном блоке ядро оставляет от ссылки только
+ * текст, адрес теряется.
+ */
 function autoTableModes(markdown: string): Set<'code' | 'bullets'> {
   if (!markdown.includes('|')) return new Set();
   const { tables } = markdownToIRWithMeta(markdown, {
@@ -102,7 +106,10 @@ function autoTableModes(markdown: string): Set<'code' | 'bullets'> {
   });
   return new Set(
     tables.map((table) =>
-      codeTableWidth(table.headers, table.rows) <= MAX_NARROW_TABLE_WIDTH ? 'code' : 'bullets',
+      codeTableWidth(table.headers, table.rows) <= MAX_NARROW_TABLE_WIDTH &&
+      ![table.headerCells, ...table.rowCells].some((row) => row.some((cell) => cell.links.length))
+        ? 'code'
+        : 'bullets',
     ),
   );
 }
