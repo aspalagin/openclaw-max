@@ -15,6 +15,7 @@ import { jsonResult } from 'openclaw/plugin-sdk/tool-results';
 
 import { listMaxAccountIds, resolveMaxAccount } from './accounts.js';
 import { assertMaxActionInScope } from './action-scope.js';
+import { resolveMaxTableMode, toMaxMarkdown } from './format.js';
 import { sanitizeMaxFileName } from './media-temp.js';
 import {
   materializeMaxPresentation,
@@ -345,6 +346,9 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
     const sendFlags = resolveMaxSendFlags(account.config, {
       silent: typeof params.silent === 'boolean' ? params.silent : undefined,
     });
+    // MAX dialect and tables of the account (markdown.tables), before chunking.
+    const formatText = (text: string) =>
+      toMaxMarkdown(text, { tableMode: resolveMaxTableMode(account.config) });
 
     // Strip provider prefix from target (e.g. "max:123456789" → "123456789")
     const stripPrefix = (val: string | undefined): string | undefined => {
@@ -360,11 +364,12 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       });
       const presentation = normalizeMessagePresentation(params.presentation);
       const pin = readMaxDeliveryPin(params.delivery, params.pin);
-      const content =
+      const content = formatText(
         readStringParam(params, 'message', {
           required: !presentation,
           allowEmpty: true,
-        }) ?? '';
+        }) ?? '',
+      );
 
       // Pin the sent message when delivery.pin (or pin=true) was requested.
       // Optional pin failures degrade; a required one fails the action.
@@ -410,7 +415,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       if (presentation) {
         const rendered = await materializeMaxPresentation({ text: content, presentation });
         const renderedButtons = readMaxChannelButtons(rendered.channelData);
-        const text = rendered.text ?? '';
+        const text = formatText(rendered.text ?? '');
         const chunkLimit = resolveMaxTextChunkLimit(cfg, account.accountId);
         const chunks =
           text.length > chunkLimit
@@ -518,7 +523,7 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
         required: true,
         allowEmpty: true,
       });
-      await editMaxMessage(messageId, text, {
+      await editMaxMessage(messageId, formatText(text), {
         token: account.token,
         format: 'markdown',
       });
@@ -588,8 +593,9 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       const to = stripPrefix(readTargetParam(params))!;
       const replyTo = readStringParam(params, 'replyTo');
       await assertMaxActionInScope(ctx, account, { to, replyTo });
-      const caption =
-        readStringParam(params, 'message') ?? readStringParam(params, 'caption') ?? '';
+      const caption = formatText(
+        readStringParam(params, 'message') ?? readStringParam(params, 'caption') ?? '',
+      );
       const attachType =
         readStringParam(params, 'type') ?? readStringParam(params, 'attachmentType') ?? '';
       const mediaMaxBytes = (account.config.mediaMaxMb ?? 20) * 1024 * 1024;

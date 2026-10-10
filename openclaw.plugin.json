@@ -69,7 +69,19 @@
                 "type": "boolean"
               },
               "markdown": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "tables": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "bullets",
+                      "code",
+                      "block"
+                    ]
+                  }
+                },
+                "additionalProperties": false
               },
               "botToken": {
                 "anyOf": [
@@ -798,8 +810,8 @@
           "help": "false at channel level disables all accounts; in an account, disables that account."
         },
         "markdown": {
-          "label": "Markdown (no effect)",
-          "help": "Accepted for compatibility with the common channel config; has no effect in MAX.",
+          "label": "Markdown tables",
+          "help": "markdown.tables: how tables in agent replies are sent (MAX has no native tables). bullets (default): one bullet per cell under the bold row label; code: monospace block; block: same as code; off: raw Markdown.",
           "advanced": true
         },
         "botToken": {
@@ -1022,8 +1034,8 @@
           "help": "false disables this account; a channel switched off switches off every account."
         },
         "accounts.*.markdown": {
-          "label": "Markdown (no effect)",
-          "help": "Accepted for compatibility with the common channel config; has no effect in MAX.",
+          "label": "Markdown tables",
+          "help": "markdown.tables for this bot (off, bullets, code, block); inherits the channel value.",
           "advanced": true
         },
         "accounts.*.botToken": {

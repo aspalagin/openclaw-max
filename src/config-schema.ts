@@ -84,7 +84,10 @@ export const MaxAccountSchemaBase = z
   .object({
     name: z.string().optional(),
     enabled: z.boolean().optional(),
-    /** No effect in MAX: neither the plugin nor core reads it for this channel. */
+    /**
+     * markdown.tables: how agent tables reach MAX, which has no native tables —
+     * bullets (default), code (monospace block), block (same as code), off (raw).
+     */
     markdown: MarkdownConfigSchema.optional(),
     /** Plain token or a core SecretRef { source, provider, id } (also webhookSecret, httpProxy) */
     botToken: buildOptionalSecretInputSchema(),

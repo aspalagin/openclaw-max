@@ -876,3 +876,52 @@ describe('message tool: asVoice', () => {
     expect(JSON.stringify(result)).toContain('"messageId":"m-voice"');
   });
 });
+
+describe('message tool: MAX dialect and markdown.tables', () => {
+  const TABLE = '| Модель | Цена |\n|---|---|\n| Opus | 15 |';
+  const cfgWith = (tables?: string) =>
+    ({
+      channels: { max: { botToken: 'token', ...(tables ? { markdown: { tables } } : {}) } },
+    }) as OpenClawConfig;
+
+  beforeEach(() => vi.restoreAllMocks());
+
+  it('send converts headings and tables (bullets by default, code by config)', async () => {
+    const { MaxApi } = await import('./api.js');
+    const send = vi.spyOn(MaxApi.prototype, 'sendMessage').mockImplementation(
+      async () =>
+        ({
+          message: { body: { mid: 'm1' }, recipient: { chat_id: 9, chat_type: 'dialog' } },
+        }) as never,
+    );
+    await actions.handleAction({
+      action: 'send',
+      params: { target: '9', message: `## Итоги\n\n${TABLE}` },
+      cfg: cfgWith(),
+    } as never);
+    await actions.handleAction({
+      action: 'send',
+      params: { target: '9', message: TABLE },
+      cfg: cfgWith('code'),
+    } as never);
+
+    expect(send.mock.calls.map(([body]) => body.text)).toEqual([
+      '# Итоги\n\n**Opus**\n• Цена: 15',
+      '```\n| Модель | Цена |\n| ------ | ---- |\n| Opus   | 15   |\n```',
+    ]);
+  });
+
+  it('edit goes through the same formatting', async () => {
+    const { MaxApi } = await import('./api.js');
+    const edit = vi
+      .spyOn(MaxApi.prototype, 'editMessage')
+      .mockImplementation(async () => ({ success: true }) as never);
+    await actions.handleAction({
+      action: 'edit',
+      params: { messageId: 'mid.1', message: `### Обновлено ==сейчас==\n\n${TABLE}` },
+      cfg: cfgWith(),
+    } as never);
+
+    expect(edit.mock.calls[0][1].text).toBe('# Обновлено ^^сейчас^^\n\n**Opus**\n• Цена: 15');
+  });
+});

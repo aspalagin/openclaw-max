@@ -10,6 +10,7 @@ import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from 'openclaw/plugin-sdk/core
 import { resolveSecretInputString } from 'openclaw/plugin-sdk/secret-input';
 import { canResolveEnvSecretRefInReadOnlyPath } from 'openclaw/plugin-sdk/secret-ref-readonly';
 
+import type { MaxMarkdownTableMode } from './format.js';
 import {
   bindMaxNetwork,
   type MaxNetwork,
@@ -23,6 +24,8 @@ export interface MaxAccountConfig {
   botToken?: string;
   tokenFile?: string;
   name?: string;
+  /** markdown.tables: tables of agent replies (format.ts; default bullets) */
+  markdown?: { tables?: MaxMarkdownTableMode };
   dmPolicy?: string;
   allowFrom?: Array<string | number>;
   groups?: Record<
@@ -313,6 +316,7 @@ export function readMaxAccount(params: {
       botToken: section.botToken as string | undefined,
       tokenFile: section.tokenFile as string | undefined,
       name: section.name as string | undefined,
+      markdown: section.markdown as MaxAccountConfig['markdown'],
       dmPolicy: section.dmPolicy as string | undefined,
       allowFrom: section.allowFrom as Array<string | number> | undefined,
       groups: section.groups as MaxAccountConfig['groups'],

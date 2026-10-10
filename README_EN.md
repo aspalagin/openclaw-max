@@ -11,6 +11,7 @@ Version 0.8.2. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max
 ## Contents
 
 - [Supported message types](#supported-message-types)
+- [Outgoing formatting](#outgoing-formatting)
 - [Requirements and compatibility](#requirements-and-compatibility)
 - [Installation](#installation)
 - [Quick start](#quick-start)
@@ -38,7 +39,7 @@ Version 0.8.2. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max
 
 | Type | Incoming (MAX → agent) | Outgoing (agent → MAX) |
 |---|---|---|
-| Text | Yes; mentions detected from MAX markup, `@username` and core mention patterns | Yes; markdown converted to the MAX dialect (`++underline++`), split at 4000 characters; if MAX rejects the markup, resent once as plain text |
+| Text | Yes; mentions detected from MAX markup, `@username` and core mention patterns | Yes; markdown converted to the MAX dialect (headings, highlight, underline, rules, tables — see [Outgoing formatting](#outgoing-formatting)), split at 4000 characters; if MAX rejects the markup, resent once as plain text |
 | Image | Downloaded and passed to the agent as media | Yes; several images and videos go as albums of up to 12; a public https image URL is passed to MAX as a link |
 | Video | Downloaded (size limit `mediaMaxMb`) | Yes |
 | Audio and voice | Downloaded; the MAX transcript is used when present, otherwise OpenClaw core transcribes | Yes; `asVoice` / `audioAsVoice` sends a MAX `audio` attachment |
@@ -57,6 +58,34 @@ Version 0.8.2. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max
 | Typing indicator, read receipt | — | `typing_on` for the whole turn; `mark_seen` on incoming messages (`markSeen`) |
 
 Reactions and polls are not supported.
+
+## Outgoing formatting
+
+The agent writes ordinary Markdown and the plugin converts it to the MAX dialect. Code, ``` and ~~~ blocks and links stay as written. What MAX parses itself was checked by live sends on 2026-10-10 (markup read back with `GET /messages`):
+
+| In the agent reply | In MAX |
+|---|---|
+| `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, ``` blocks, links, mentions | as is |
+| `# Heading` | heading |
+| `## …` to `###### …` | `# …`: MAX has one heading level and shows the others as plain text |
+| `^^text^^`, `==text==` | highlight (red); `==` becomes `^^` |
+| `<u>text</u>`, `++text++` | underline |
+| `> quote` | as is, MAX parses it itself |
+| `---`, `***`, `___`, `* * *` | a `───` line: MAX draws no rules itself |
+| table | per `markdown.tables`, see below |
+
+MAX has no tables. The standard OpenClaw key `markdown.tables` (in `channels.max` or `accounts.<id>`) decides how they are sent:
+
+- `bullets` (default, as for Signal and WhatsApp) — per table row: the first cell in bold, the others as `• Column: value` bullets. Reads well on a narrow phone screen;
+- `code` — a monospace block with aligned columns. A wide table wraps or scrolls on a phone;
+- `block` — same as `code`;
+- `off` — the table goes as written, raw text with `|`.
+
+```json5
+{ channels: { max: { markdown: { tables: "code" } } } }
+```
+
+A reply is formatted before it is split into 4000-character parts: parts are measured as sent, and a table block that fits into one message is never split (a longer block is split with its ``` fence closed and reopened). The stream draft and its edits, core delivery (cron, `openclaw message send`) and the `send`, `edit` and `sendAttachment` actions are formatted like an ordinary reply. If MAX rejects the markup, the text is resent once without it, as before.
 
 ## Requirements and compatibility
 
@@ -168,6 +197,7 @@ All options live under `channels.max`; the same keys (except `accounts` and `com
 | `streamMode` | `off` \| `partial` \| `block` | `off` | `partial` — one draft message edited while the answer streams; `block` — core block replies |
 | `streaming` | core streaming config | off | `streaming.mode` (`off`, `partial`, `block`, `progress`) wins over `streamMode`; `streaming.progress.*` configures [turn status](#turn-status) |
 | `textChunkLimit` | integer | `4000` | Characters per outgoing message, account value first; values above MAX's 4000 are capped |
+| `markdown.tables` | `bullets` \| `code` \| `block` \| `off` | `bullets` | How tables in agent replies are sent: as bullets, as a monospace block (`block` is the same as `code`) or as written; see [Outgoing formatting](#outgoing-formatting) |
 | `responsePrefix` | string | — | Prefix of agent replies, applied by OpenClaw core (`"auto"` — agent name) |
 | `historyLimit` | integer ≥ 0 | core default | Read by OpenClaw core: recent turns of a group session the embedded agent runtime keeps in the prompt (native CLI runtimes keep their own history) |
 | `dmHistoryLimit`, `dms.<userId>.historyLimit` | integer ≥ 0 | no limit | Read by OpenClaw core: the same for private dialogs with a per-channel session (`session.dmScope`), per user first |
@@ -190,7 +220,7 @@ Per-group settings (`groups.<chatId>` or `groups["*"]`):
 | `systemPrompt` | — | Extra system prompt for turns in this group |
 | `skills` | all | Skills a turn in this group may load; `[]` — none |
 
-Accepted by the schema for compatibility with the common channel config shape but **without effect in MAX** — neither the plugin nor OpenClaw core reads them for this channel: `markdown` (table rendering), `blockStreaming` (use `streamMode` or `streaming.mode: "block"`), `blockStreamingCoalesce` (core reads `streaming.block.coalesce`). They stay in the schema so existing configs keep validating.
+Accepted by the schema for compatibility with the common channel config shape but **without effect in MAX** — neither the plugin nor OpenClaw core reads them for this channel: `blockStreaming` (use `streamMode` or `streaming.mode: "block"`), `blockStreamingCoalesce` (core reads `streaming.block.coalesce`). They stay in the schema so existing configs keep validating.
 
 ## Access and policies
 

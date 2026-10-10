@@ -1,7 +1,7 @@
 /**
- * Agent prompt hints of the MAX channel: stickers, location, contact, pin,
- * button types, presentation, voice, inline files, silent sends, local file
- * roots and action scope for the message tool.
+ * Agent prompt hints of the MAX channel: text formatting, stickers, location,
+ * contact, pin, button types, presentation, voice, inline files, silent sends,
+ * local file roots and action scope for the message tool.
  */
 
 import type { ChannelPlugin } from 'openclaw/plugin-sdk/channel-core';
@@ -19,6 +19,7 @@ export const maxAgentPromptAdapter: NonNullable<MaxChannelPlugin['agentPrompt']>
       '😂:109550b5 😊:109971b5 😍:10931eb5 🥰:10931eb5 😢:109330b5 😭:109330b5 😡:10941fb5 😱:109302b5 🤔:109308b5 👍:109368b5 👎:109323b5 ❤️:10931eb5 🔥:b4867ebb 💪:c1254bbb 🎉:10933cb5 😘:10931eb5 🤗:109b94b5 😎:10931db5 🙄:c14211bb 😴:10936eb5 😤:10941fb5 🤮:6b8bb 🤯:109302b5 😳:109302b5 🥳:10933cb5 💀:b4863ebb 🙈:b4850cbb 😏:11e4c60bb 😅:109550b5 🤣:109550b5 😋:109d2db5 😜:455b5 🤷:10d5cf5bb 😫:10936eb5 😩:10997db5 🥺:109356b5 😌:14aae3bb 😒:109323b5 🤪:455b5 😇:11e4dedbb 🙏:50cb5 💔:10997db5 👀:b48534bb ✨:11e43b2bb 😈:10941fb5 🤝:109368b5 🤦:502b5 😬:5dab4b5 🤩:5dabfb5 😶:2ae2b5';
 
     return [
+      '- MAX formatting (replies and `send`): Markdown with **bold**, *italic*, ~~strike~~, ++underline++, ^^highlight^^ (red), `code`, ``` blocks, [links](https://example.com), `# Heading` (one level: `##`…`######` are sent as `#`) and `> quote`. MAX has no tables: Markdown tables are converted (by default each row becomes its bold first cell with a bullet per other cell; channels.max.markdown.tables=code makes a monospace block), so prefer lists for wide data.',
       '- MAX stickers: use `message(action="sticker", target="CHAT_ID", stickerId="CODE")`. Pick a sticker code matching the mood from the emoji map below. Each entry is emoji:hexCode.',
       `- Sticker emoji map: ${emojiMap}`,
       '- MAX location: use `message(action="sendAttachment", target="CHAT_ID", type="location", latitude="55.75", longitude="37.62")` to send a native map pin.',

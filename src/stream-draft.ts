@@ -9,6 +9,7 @@
 import type { ChannelLogSink } from 'openclaw/plugin-sdk/channel-contract';
 
 import type { ResolvedMaxAccount } from './accounts.js';
+import { resolveMaxTableMode, toMaxMarkdown } from './format.js';
 import {
   deleteMaxMessage,
   editMaxMessage,
@@ -78,7 +79,11 @@ export function createMaxDraftStream(params: {
 
   const draftUpdate = async (text: string) => {
     if (draftStopped || !text) return;
-    const trimmed = text.trimEnd();
+    // Formatted like the final answer (deliver.ts), so the final edit compares
+    // and replaces like with like.
+    const trimmed = toMaxMarkdown(text, {
+      tableMode: resolveMaxTableMode(account.config),
+    }).trimEnd();
     if (!trimmed || trimmed === draftLastText) return;
     if (trimmed.length > DRAFT_MAX_CHARS) {
       draftStopped = true;

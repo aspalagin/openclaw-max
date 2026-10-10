@@ -24,6 +24,19 @@ describe('MAX message tool hints', () => {
     }
   });
 
+  it('describes the MAX markup and the table conversion', () => {
+    const text = hints();
+    for (const needle of [
+      '# Heading',
+      '^^highlight^^',
+      '> quote',
+      '++underline++',
+      'markdown.tables',
+    ]) {
+      expect(text).toContain(needle);
+    }
+  });
+
   it('carries no installation paths', () => {
     const text = hints();
     expect(text).not.toMatch(/projects\/openclaw-max|\/root\/|sticker-emoji-map/);
