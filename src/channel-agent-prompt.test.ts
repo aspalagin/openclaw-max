@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { maxAgentPromptAdapter } from './channel-agent-prompt.js';
+import { MAX_NARROW_TABLE_WIDTH } from './format.js';
 
 const hints = () =>
   (maxAgentPromptAdapter.messageToolHints as (params: unknown) => string[])({}).join('\n');
@@ -32,6 +33,7 @@ describe('MAX message tool hints', () => {
       '> quote',
       '++underline++',
       'markdown.tables',
+      `up to ${MAX_NARROW_TABLE_WIDTH} monospace columns`,
     ]) {
       expect(text).toContain(needle);
     }

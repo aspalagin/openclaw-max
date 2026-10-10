@@ -811,7 +811,7 @@
         },
         "markdown": {
           "label": "Markdown tables",
-          "help": "markdown.tables: how tables in agent replies are sent (MAX has no native tables). bullets (default): one bullet per cell under the bold row label; code: monospace block; block: same as code; off: raw Markdown.",
+          "help": "markdown.tables: how tables in agent replies are sent (MAX has no native tables). Not set: by width, a table up to 36 monospace columns as a monospace block, a wider one as bullets. bullets: one bullet per cell under the bold row label; code: monospace block; block: same as code; off: raw Markdown.",
           "advanced": true
         },
         "botToken": {

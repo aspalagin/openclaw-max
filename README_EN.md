@@ -70,16 +70,21 @@ The agent writes ordinary Markdown and the plugin converts it to the MAX dialect
 | `## …` to `###### …` | `# …`: MAX has one heading level and shows the others as plain text |
 | `^^text^^`, `==text==` | highlight (red); `==` becomes `^^` |
 | `<u>text</u>`, `++text++` | underline |
-| `> quote` | as is, MAX parses it itself |
+| `> quote` | a quote block: MAX parses it itself (checked on a phone on 2026-10-10; the Bot API `markup` does not show it) |
 | `---`, `***`, `___`, `* * *` | a `───` line: MAX draws no rules itself |
-| table | per `markdown.tables`, see below |
+| table | a narrow one as a monospace block, a wide one as bullets; see below |
 
-MAX has no tables. The standard OpenClaw key `markdown.tables` (in `channels.max` or `accounts.<id>`) decides how they are sent:
+MAX has no tables, and a code block does not scroll on a phone: a long line wraps and the table falls apart. So by default (`markdown.tables` not set) the plugin decides for each table on its own:
 
-- `bullets` (default, as for Signal and WhatsApp) — per table row: the first cell in bold, the others as `• Column: value` bullets. Reads well on a narrow phone screen;
-- `code` — a monospace block with aligned columns. A wide table wraps or scrolls on a phone;
+- a narrow one — a monospace line of at most 36 columns (Cyrillic and Latin letters take one, emoji and CJK two) — goes as a monospace block with aligned columns. That much fits into a code block on an ordinary phone;
+- a wide one goes as bullets: per table row, the first cell in bold and the others as `• Column: value`. Reads on any screen.
+
+The standard OpenClaw key `markdown.tables` (in `channels.max` or `accounts.<id>`) sets one mode for every table, whatever its width:
+
+- `bullets` — always bullets, as for Signal and WhatsApp;
+- `code` — always a monospace block, a wide table too (it wraps on a phone);
 - `block` — same as `code`;
-- `off` — the table goes as written, raw text with `|`.
+- `off` — as written, raw text with `|`.
 
 ```json5
 { channels: { max: { markdown: { tables: "code" } } } }
@@ -197,7 +202,7 @@ All options live under `channels.max`; the same keys (except `accounts` and `com
 | `streamMode` | `off` \| `partial` \| `block` | `off` | `partial` — one draft message edited while the answer streams; `block` — core block replies |
 | `streaming` | core streaming config | off | `streaming.mode` (`off`, `partial`, `block`, `progress`) wins over `streamMode`; `streaming.progress.*` configures [turn status](#turn-status) |
 | `textChunkLimit` | integer | `4000` | Characters per outgoing message, account value first; values above MAX's 4000 are capped |
-| `markdown.tables` | `bullets` \| `code` \| `block` \| `off` | `bullets` | How tables in agent replies are sent: as bullets, as a monospace block (`block` is the same as `code`) or as written; see [Outgoing formatting](#outgoing-formatting) |
+| `markdown.tables` | `bullets` \| `code` \| `block` \| `off` | by width | How tables in agent replies are sent. Not set: each by its width, up to 36 columns as a monospace block, wider as bullets. A set mode applies to every table: bullets, a monospace block (`block` is the same as `code`) or as written; see [Outgoing formatting](#outgoing-formatting) |
 | `responsePrefix` | string | — | Prefix of agent replies, applied by OpenClaw core (`"auto"` — agent name) |
 | `historyLimit` | integer ≥ 0 | core default | Read by OpenClaw core: recent turns of a group session the embedded agent runtime keeps in the prompt (native CLI runtimes keep their own history) |
 | `dmHistoryLimit`, `dms.<userId>.historyLimit` | integer ≥ 0 | no limit | Read by OpenClaw core: the same for private dialogs with a per-channel session (`session.dmScope`), per user first |

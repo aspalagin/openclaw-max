@@ -86,7 +86,8 @@ export const MaxAccountSchemaBase = z
     enabled: z.boolean().optional(),
     /**
      * markdown.tables: how agent tables reach MAX, which has no native tables —
-     * bullets (default), code (monospace block), block (same as code), off (raw).
+     * not set: by width (narrow as a monospace block, wide as bullets); bullets,
+     * code (monospace block), block (same as code), off (raw) for every table.
      */
     markdown: MarkdownConfigSchema.optional(),
     /** Plain token or a core SecretRef { source, provider, id } (also webhookSecret, httpProxy) */

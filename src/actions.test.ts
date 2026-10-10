@@ -879,6 +879,9 @@ describe('message tool: asVoice', () => {
 
 describe('message tool: MAX dialect and markdown.tables', () => {
   const TABLE = '| Модель | Цена |\n|---|---|\n| Opus | 15 |';
+  const TABLE_CODE = '```\n| Модель | Цена |\n| ------ | ---- |\n| Opus   | 15   |\n```';
+  const WIDE = '| День | План |\n|---|---|\n| Суббота | Кремль, Кул-Шариф и Чак-чак на Баумана |';
+  const WIDE_BULLETS = '**Суббота**\n• План: Кремль, Кул-Шариф и Чак-чак на Баумана';
   const cfgWith = (tables?: string) =>
     ({
       channels: { max: { botToken: 'token', ...(tables ? { markdown: { tables } } : {}) } },
@@ -886,7 +889,7 @@ describe('message tool: MAX dialect and markdown.tables', () => {
 
   beforeEach(() => vi.restoreAllMocks());
 
-  it('send converts headings and tables (bullets by default, code by config)', async () => {
+  it('send converts headings and tables (by width by default, as configured otherwise)', async () => {
     const { MaxApi } = await import('./api.js');
     const send = vi.spyOn(MaxApi.prototype, 'sendMessage').mockImplementation(
       async () =>
@@ -901,14 +904,19 @@ describe('message tool: MAX dialect and markdown.tables', () => {
     } as never);
     await actions.handleAction({
       action: 'send',
-      params: { target: '9', message: TABLE },
+      params: { target: '9', message: WIDE },
       cfg: cfgWith('code'),
     } as never);
+    await actions.handleAction({
+      action: 'send',
+      params: { target: '9', message: TABLE },
+      cfg: cfgWith('bullets'),
+    } as never);
 
-    expect(send.mock.calls.map(([body]) => body.text)).toEqual([
-      '# Итоги\n\n**Opus**\n• Цена: 15',
-      '```\n| Модель | Цена |\n| ------ | ---- |\n| Opus   | 15   |\n```',
-    ]);
+    const texts = send.mock.calls.map(([body]) => body.text);
+    expect(texts[0]).toBe(`# Итоги\n\n${TABLE_CODE}`);
+    expect(texts[1]).toMatch(/^```\n\| День +\| План/);
+    expect(texts[2]).toBe('**Opus**\n• Цена: 15');
   });
 
   it('edit goes through the same formatting', async () => {
@@ -918,10 +926,15 @@ describe('message tool: MAX dialect and markdown.tables', () => {
       .mockImplementation(async () => ({ success: true }) as never);
     await actions.handleAction({
       action: 'edit',
-      params: { messageId: 'mid.1', message: `### Обновлено ==сейчас==\n\n${TABLE}` },
+      params: {
+        messageId: 'mid.1',
+        message: `### Обновлено ==сейчас==\n\n${TABLE}\n\n${WIDE}`,
+      },
       cfg: cfgWith(),
     } as never);
 
-    expect(edit.mock.calls[0][1].text).toBe('# Обновлено ^^сейчас^^\n\n**Opus**\n• Цена: 15');
+    expect(edit.mock.calls[0][1].text).toBe(
+      `# Обновлено ^^сейчас^^\n\n${TABLE_CODE}\n\n${WIDE_BULLETS}`,
+    );
   });
 });
