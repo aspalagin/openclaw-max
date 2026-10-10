@@ -6,7 +6,7 @@
 
 Плагин нужен тем, кто пользуется OpenClaw и хочет, чтобы ассистент был доступен в MAX. Понадобятся токен бота MAX (ботов создают организации на [business.max.ru](https://business.max.ru/self)) и собственный gateway OpenClaw.
 
-Версия 0.8.2. Изменения: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md).
+Версия 0.9.0. Изменения: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md).
 
 ## Содержание
 
