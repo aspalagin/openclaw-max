@@ -13,6 +13,7 @@ import { LocalMediaAccessError } from 'openclaw/plugin-sdk/web-media';
 
 import type { ResolvedMaxAccount } from './accounts.js';
 import { MaxApiError } from './api.js';
+import { resolveMaxTableMode, toMaxMarkdown } from './format.js';
 import { readMaxDeliveryPin, resolveMaxTextChunkLimit } from './presentation.js';
 import { getMaxRuntime } from './runtime.js';
 import {
@@ -109,6 +110,11 @@ export async function deliverMaxReply(params: {
 }): Promise<void> {
   const { payload, account, chatId, config, log, statusSink } = params;
   const core = getMaxRuntime();
+  // MAX dialect and tables (markdown.tables) before chunking: a table becomes
+  // bullets or one code block, and the chunks are measured as sent.
+  const replyText = payload.text
+    ? toMaxMarkdown(payload.text, { tableMode: resolveMaxTableMode(account.config) })
+    : payload.text;
   const buttons = readMaxChannelButtons(payload.channelData);
   // channelData.max (notify, silent, disableLinkPreview) beats the account defaults.
   const sendOptions = resolveMaxSendFlags(account.config, { channelData: payload.channelData });
@@ -142,13 +148,13 @@ export async function deliverMaxReply(params: {
   if (answersCallback) {
     if (params.callbackState) params.callbackState.answered = true;
     try {
-      await answerMaxCallback(params.callbackId as string, payload.text ?? '', {
+      await answerMaxCallback(params.callbackId as string, replyText ?? '', {
         token: account.token,
         format: 'markdown',
         buttons,
       });
       visible.callbackAnswered = true;
-      if (payload.text) visible.texts.push(payload.text);
+      if (replyText) visible.texts.push(replyText);
       statusSink?.({ lastOutboundAt: Date.now() });
     } catch (err: unknown) {
       // Like a failed text chunk: the media still goes, then reject.
@@ -182,10 +188,10 @@ export async function deliverMaxReply(params: {
 
   if (answersCallback) {
     // The text went with the callback answer.
-  } else if (payload.text) {
+  } else if (replyText) {
     const chunkLimit = resolveMaxTextChunkLimit(config, account.accountId);
     const chunkMode = core.channel.text.resolveChunkMode(config, 'max', account.accountId);
-    const chunks = core.channel.text.chunkMarkdownTextWithMode(payload.text, chunkLimit, chunkMode);
+    const chunks = core.channel.text.chunkMarkdownTextWithMode(replyText, chunkLimit, chunkMode);
 
     for (let index = 0; index < chunks.length; index += 1) {
       const chunk = chunks[index];

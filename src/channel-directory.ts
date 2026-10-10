@@ -7,6 +7,7 @@ import type { ChannelPlugin } from 'openclaw/plugin-sdk/channel-core';
 
 import { type ResolvedMaxAccount, resolveMaxAccount } from './accounts.js';
 import { MaxApi } from './api.js';
+import { MAX_DECLARED_TABLE_MODE } from './format.js';
 import { loadMaxAccountState } from './state.js';
 
 type MaxChannelPlugin = ChannelPlugin<ResolvedMaxAccount>;
@@ -33,6 +34,10 @@ export const maxMessagingAdapter: NonNullable<MaxChannelPlugin['messaging']> = {
     looksLikeId: (raw) => MAX_TARGET_PATTERN.test(stripMaxPrefix(raw)),
     hint: '<chatId|user:userId>',
   },
+  // What core sees for MAX without markdown.tables: keeps the group prompt's
+  // "Avoid Markdown tables" and is the safe mode for core's resolver. The
+  // plugin itself picks code or bullets per table by width (format.ts).
+  defaultMarkdownTableMode: MAX_DECLARED_TABLE_MODE,
 };
 
 /** MAX has no member/chat listing for bots: peers come from allowFrom, groups from the chat registry. */

@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MaxApi, MaxApiError } from './api.js';
 import { deliverMaxReply, toMaxDeliveryError } from './deliver.js';
+import type { MaxMarkdownTableMode } from './format.js';
 import { setMaxRuntime } from './runtime.js';
 import { answerMaxCallback, editMaxMessage, isMaxFormatRejection, sendMaxMessage } from './send.js';
 import { createMaxDraftStream } from './stream-draft.js';
@@ -632,5 +633,208 @@ describe('channels.max.textChunkLimit', () => {
     maxOutboundAdapter.chunker?.('hello', 9000);
     maxOutboundAdapter.chunker?.('hello', 1200);
     expect(chunkMarkdownText.mock.calls.map((call) => call[1])).toEqual([4000, 1200]);
+  });
+});
+
+describe('MAX dialect and markdown.tables in replies', () => {
+  const TABLE = [
+    '| Модель | Цена | Комментарий |',
+    '|---|---|---|',
+    '| Opus | 15 | для кода |',
+    '| Haiku | 1 | быстрая |',
+  ].join('\n');
+  const REPLY = `## Итоги\n\n${TABLE}\n\n==Главное==: брать Opus.`;
+  const BULLETS = [
+    '# Итоги',
+    '',
+    '**Opus**',
+    '• Цена: 15',
+    '• Комментарий: для кода',
+    '',
+    '**Haiku**',
+    '• Цена: 1',
+    '• Комментарий: быстрая',
+    '',
+    '^^Главное^^: брать Opus.',
+  ].join('\n');
+  /** TABLE is 31 columns wide as a block: by default it goes as one. */
+  const CODE = [
+    '```',
+    '| Модель | Цена | Комментарий |',
+    '| ------ | ---- | ----------- |',
+    '| Opus   | 15   | для кода    |',
+    '| Haiku  | 1    | быстрая     |',
+    '```',
+  ].join('\n');
+  const CODE_REPLY = `# Итоги\n\n${CODE}\n\n^^Главное^^: брать Opus.`;
+  /** 53 columns as a block: by default it goes as bullets. */
+  const WIDE = [
+    '| День | План | Где поесть |',
+    '|---|---|---|',
+    '| Суббота | Кремль и Кул-Шариф | Чак-чак на Баумана |',
+  ].join('\n');
+  const WIDE_BULLETS = '**Суббота**\n• План: Кремль и Кул-Шариф\n• Где поесть: Чак-чак на Баумана';
+  const withTables = (tables: MaxMarkdownTableMode) => ({
+    ...ACCOUNT,
+    config: { markdown: { tables } },
+  });
+
+  /** Core's own markdown chunker (fence-aware), as the gateway runs it. */
+  async function useCoreChunker() {
+    const { chunkMarkdownTextWithMode } = await import('openclaw/plugin-sdk/reply-runtime');
+    setMaxRuntime({
+      channel: { text: { resolveChunkMode: () => 'length', chunkMarkdownTextWithMode } },
+    } as never);
+  }
+
+  it('sends headings as #, ==x== as ^^x^^; by default a narrow table as a block, a wide one as bullets', async () => {
+    mockFetch(sent('mid.1'));
+    await deliver({ text: `${REPLY}\n\n${WIDE}` });
+    expect(posts()[0].body.text).toBe(`${CODE_REPLY}\n\n${WIDE_BULLETS}`);
+    expect(posts()[0].body.format).toBe('markdown');
+  });
+
+  it('follows an explicit markdown.tables of the account whatever the width', async () => {
+    for (const tables of ['code', 'block'] as const) {
+      mockFetch(sent('mid.1'));
+      await deliver({ text: TABLE }, { account: withTables(tables) });
+      expect(posts()[0].body.text).toBe(CODE);
+    }
+    mockFetch(sent('mid.1'));
+    await deliver({ text: WIDE }, { account: withTables('code') });
+    expect(posts()[0].body.text).toMatch(/^```\n\| День +\| План/);
+    mockFetch(sent('mid.1'));
+    await deliver({ text: REPLY }, { account: withTables('bullets') });
+    expect(posts()[0].body.text).toBe(BULLETS);
+    mockFetch(sent('mid.1'));
+    await deliver({ text: TABLE }, { account: withTables('off') });
+    expect(posts()[0].body.text).toBe(TABLE);
+  });
+
+  it('chunks after the conversion: the code table stays one block, every chunk fits', async () => {
+    await useCoreChunker();
+    mockFetch(sent('mid.1'), sent('mid.2'), sent('mid.3'));
+    const filler = 'Вступление. '.repeat(20).trim();
+    await deliver(
+      { text: `${filler}\n\n${TABLE}\n\n${filler}` },
+      {
+        account: withTables('code'),
+        config: { channels: { max: { textChunkLimit: 300 } } },
+      },
+    );
+    const texts = posts().map((c) => String(c.body.text));
+    expect(texts.length).toBeGreaterThan(1);
+    for (const text of texts) {
+      expect(text.length).toBeLessThanOrEqual(300);
+      expect((text.match(/^```/gm) ?? []).length % 2).toBe(0);
+    }
+    const tableChunk = texts.find((text) => text.includes('| Модель |'));
+    expect(tableChunk).toContain('| Haiku  |');
+    expect(tableChunk?.startsWith('```')).toBe(true);
+  });
+
+  it('a code block longer than the limit is split with closed and reopened fences', async () => {
+    await useCoreChunker();
+    mockFetch(sent('mid.1'));
+    const rows = Array.from({ length: 12 }, (_, i) => `| Строка ${i} | значение ${i} |`);
+    await deliver(
+      { text: `| A | B |\n|---|---|\n${rows.join('\n')}` },
+      {
+        account: withTables('code'),
+        config: { channels: { max: { textChunkLimit: 200 } } },
+      },
+    );
+    const texts = posts().map((c) => String(c.body.text));
+    expect(texts.length).toBeGreaterThan(1);
+    for (const text of texts) {
+      expect(text.length).toBeLessThanOrEqual(200);
+      expect((text.match(/^```/gm) ?? []).length).toBe(2);
+    }
+  });
+
+  it('a markup refusal still resends the formatted text once as plain text', async () => {
+    mockFetch([400, MARKUP_REFUSED], sent('mid.plain'));
+    await deliver({ text: REPLY }, { account: withTables('bullets') });
+    expect(posts()).toHaveLength(2);
+    expect(posts()[0].body.format).toBe('markdown');
+    expect(posts()[1].body.format).toBeUndefined();
+    expect(posts()[1].body.text).toBe(BULLETS);
+  });
+
+  it('formats the stream draft like the final answer, so an equal final needs no edit', async () => {
+    mockFetch(sent('mid.draft'), [200, { success: true }]);
+    const draft = createMaxDraftStream({ account: ACCOUNT, chatId: '70', log: LOG });
+    await draft.update(`${REPLY}\n\n${WIDE}`);
+    expect(posts()[0].body.text).toBe(`${CODE_REPLY}\n\n${WIDE_BULLETS}`);
+
+    await deliver({ text: `${REPLY}\n\n${WIDE}` }, { draft });
+    expect(calls.map((c) => c.method)).toEqual(['POST']);
+    expect(draft.finalized).toBe(true);
+  });
+
+  it('formats draft edits and the final edit of the draft', async () => {
+    vi.useFakeTimers();
+    try {
+      mockFetch(sent('mid.draft'), [200, { success: true }]);
+      const draft = createMaxDraftStream({
+        account: withTables('code'),
+        chatId: '70',
+        log: LOG,
+      });
+      await draft.update('## Черновик ответа, уже достаточно длинный');
+      await vi.advanceTimersByTimeAsync(1500);
+      await draft.update(`## Черновик ответа, уже достаточно длинный\n\n${TABLE}`);
+      const edits = calls.filter((c) => c.method === 'PUT');
+      expect(posts()[0].body.text).toBe('# Черновик ответа, уже достаточно длинный');
+      expect(edits).toHaveLength(1);
+      expect(String(edits[0].body.text)).toMatch(/^# Черновик[^\n]*\n\n```\n\| Модель \| Цена/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('by default draft edits pick the mode per table too', async () => {
+    vi.useFakeTimers();
+    try {
+      mockFetch(sent('mid.draft'), [200, { success: true }]);
+      const draft = createMaxDraftStream({ account: ACCOUNT, chatId: '70', log: LOG });
+      await draft.update(REPLY);
+      await vi.advanceTimersByTimeAsync(1500);
+      await draft.update(`${REPLY}\n\n${WIDE}`);
+      const edits = calls.filter((c) => c.method === 'PUT');
+      expect(posts()[0].body.text).toBe(CODE_REPLY);
+      expect(edits).toHaveLength(1);
+      expect(edits[0].body.text).toBe(`${CODE_REPLY}\n\n${WIDE_BULLETS}`);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("converts tables in core's outbound path before core chunks the text", async () => {
+    const { maxOutboundAdapter } = await import('./channel-outbound.js');
+    const normalize = maxOutboundAdapter.normalizePayload as NonNullable<
+      typeof maxOutboundAdapter.normalizePayload
+    >;
+    const cfg = { channels: { max: { botToken: 't', markdown: { tables: 'code' } } } } as never;
+    const normalized = normalize({ payload: { text: `## Отчёт\n\n${TABLE}` }, cfg });
+    expect(normalized?.text).toMatch(/^# Отчёт\n\n```\n\| Модель \| Цена/);
+    const defaultCfg = { channels: { max: { botToken: 't' } } } as never;
+    expect(normalize({ payload: { text: `${TABLE}\n\n${WIDE}` }, cfg: defaultCfg })?.text).toBe(
+      `${CODE}\n\n${WIDE_BULLETS}`,
+    );
+    expect(normalize({ payload: { mediaUrl: 'https://a.ru/x.png' }, cfg })).toEqual({
+      mediaUrl: 'https://a.ru/x.png',
+    });
+    const accountCfg = {
+      channels: {
+        max: {
+          markdown: { tables: 'code' },
+          accounts: { two: { botToken: 't2', markdown: { tables: 'off' } } },
+        },
+      },
+    } as never;
+    expect(normalize({ payload: { text: TABLE }, cfg: accountCfg, accountId: 'two' })?.text).toBe(
+      TABLE,
+    );
   });
 });

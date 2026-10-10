@@ -8,6 +8,7 @@ import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
 import { getAgentScopedMediaLocalRoots } from 'openclaw/plugin-sdk/media-local-roots';
 
 import { type ResolvedMaxAccount, resolveMaxAccount } from './accounts.js';
+import { resolveMaxTableMode, toMaxMarkdown } from './format.js';
 import {
   materializeMaxPresentation,
   MAX_PRESENTATION_CAPABILITIES,
@@ -27,6 +28,11 @@ import {
 } from './send.js';
 
 type MaxChannelPlugin = ChannelPlugin<ResolvedMaxAccount>;
+
+/** MAX dialect and tables of the account (markdown.tables); see format.ts. */
+function formatMaxText(text: string, account: ResolvedMaxAccount): string {
+  return toMaxMarkdown(text, { tableMode: resolveMaxTableMode(account.config) });
+}
 
 /**
  * Local media access for an outbound send: the roots and host reader core
@@ -55,6 +61,12 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
     getMaxRuntime().channel.text.chunkMarkdownText(text, Math.min(limit, MAX_TEXT_LIMIT)),
   chunkerMode: 'markdown',
   textChunkLimit: 4000,
+  // Before core chunks the text: tables become bullets or one code block, so
+  // the chunker measures the text as sent and never splits a raw table.
+  normalizePayload: ({ payload, cfg, accountId }) =>
+    payload.text
+      ? { ...payload, text: formatMaxText(payload.text, resolveMaxAccount({ cfg, accountId })) }
+      : payload,
 
   // Presentation (docs/plugins/message-presentation.md): core adapts to these
   // capabilities, renders through renderPresentation and pins through
@@ -86,7 +98,10 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
     const payload = rawPayload.presentation
       ? await materializeMaxPresentation(rawPayload)
       : rawPayload;
-    const effectiveText = payload === rawPayload ? text : (payload.text ?? '');
+    const effectiveText = formatMaxText(
+      payload === rawPayload ? text : (payload.text ?? ''),
+      account,
+    );
     const buttons = readMaxChannelButtons(payload.channelData);
     const sendFlags = resolveMaxSendFlags(account.config, {
       silent: ctx.silent,
@@ -149,7 +164,7 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
     const account = resolveMaxAccount({ cfg, accountId });
     if (!account.token) throw new Error('MAX bot token not configured');
 
-    const result = await sendMaxMessage(to, text, {
+    const result = await sendMaxMessage(to, formatMaxText(text, account), {
       token: account.token,
       replyToMessageId: replyToId ?? undefined,
       format: 'markdown',
@@ -163,11 +178,12 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
   },
 
   sendMedia: async (ctx) => {
-    const { to, text, mediaUrl, accountId, replyToId } = ctx;
+    const { to, mediaUrl, accountId, replyToId } = ctx;
     const cfg = await loadMaxConfig();
     const account = resolveMaxAccount({ cfg, accountId });
     if (!account.token) throw new Error('MAX bot token not configured');
     const sendFlags = resolveMaxSendFlags(account.config, { silent: ctx.silent });
+    const text = formatMaxText(ctx.text, account);
 
     if (!mediaUrl) {
       // No media, send as text
