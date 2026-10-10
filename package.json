@@ -1,6 +1,6 @@
 {
   "name": "@aspalagin/openclaw-max",
-  "version": "0.8.2",
+  "version": "0.9.0",
   "description": "MAX messenger (max.ru) channel for OpenClaw: private and group chats over webhook or long polling; media, voice messages with transcription and voice replies; inline keyboards and command menus; message edits and pins; several bot accounts",
   "keywords": [
     "openclaw",
