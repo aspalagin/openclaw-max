@@ -253,12 +253,14 @@ describe('MAX Group Functionality', () => {
       expect(result).toBe('all');
     });
 
+    // toolsBySender keys are typed (id:, username:, name:, e164:, channel:) or '*';
+    // OpenClaw 2026.10.1 throws on untyped keys.
     it('should resolve toolsBySender from group config', () => {
       const cfg = makeConfig({
         groups: {
           '12345': {
             toolsBySender: {
-              user1: 'all',
+              'id:user1': 'all',
               '*': 'none',
             },
           },
@@ -281,7 +283,7 @@ describe('MAX Group Functionality', () => {
         groups: {
           '12345': {
             toolsBySender: {
-              otheruser: 'all',
+              'id:otheruser': 'all',
             },
             tools: 'none',
           },
@@ -304,23 +306,21 @@ describe('MAX Group Functionality', () => {
         groups: {
           '12345': {
             toolsBySender: {
-              '@admin': 'all',
+              'username:@admin': 'all',
             },
           },
         },
       });
-      const result = resolve({
+      const sender = {
         cfg,
         groupId: '12345',
         accountId: undefined,
         senderId: 'user1',
         senderName: 'Admin User',
-        senderUsername: 'admin',
         senderE164: undefined,
-      });
-      // Depends on resolveToolsBySender matching — may or may not match @admin to username
-      // Just verify it returns something or undefined (no crash)
-      expect(result === 'all' || result === undefined).toBe(true);
+      };
+      expect(resolve({ ...sender, senderUsername: 'admin' })).toBe('all');
+      expect(resolve({ ...sender, senderUsername: 'guest' })).toBeUndefined();
     });
   });
 
