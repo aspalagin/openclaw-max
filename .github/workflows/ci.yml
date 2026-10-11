@@ -50,9 +50,15 @@ jobs:
         with:
           node-version: 24
       - run: npm ci --ignore-scripts
-      - run: npm install --no-save --ignore-scripts openclaw@${{ matrix.openclaw }}
-      - if: matrix.zod != 'locked'
-        run: npm install --no-save --ignore-scripts zod@${{ matrix.zod }}
-      - run: node -p "'openclaw ' + require('./node_modules/openclaw/package.json').version + ', zod ' + require('./node_modules/zod/package.json').version"
+      # One install for both packages: a second `npm install --no-save` resets
+      # the first one back to the lockfile (the zod leg used to run the locked
+      # openclaw instead of the matrix one).
+      - run: npm install --no-save --ignore-scripts openclaw@${{ matrix.openclaw }} ${{ matrix.zod != 'locked' && format('zod@{0}', matrix.zod) || '' }}
+      - run: |
+          openclaw=$(node -p "require('./node_modules/openclaw/package.json').version")
+          zod=$(node -p "require('./node_modules/zod/package.json').version")
+          echo "openclaw $openclaw, zod $zod"
+          test "$openclaw" = "$(npm view openclaw@${{ matrix.openclaw }} version)"
+          test "${{ matrix.zod }}" = locked || test "$zod" = "${{ matrix.zod }}"
       - run: npm run typecheck
       - run: npm test
