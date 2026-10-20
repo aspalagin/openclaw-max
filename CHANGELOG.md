@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- Совместимость с OpenClaw 2026.10.5: SDK-экспорт `readJsonFileWithFallback` из `openclaw/plugin-sdk/json-store` удалён апстримом (остались `loadJsonFile`, `saveJsonFile`, `writeJsonFileAtomically`), из-за чего плагин целиком не загружался на 10.5 (ошибка линковки ESM). Хелпер заменён локальной реализацией `src/json-store-compat.ts` с той же семантикой (нет файла → fallback и `exists: false`; битый JSON → fallback и `exists: true`). Проверено typecheck/build/тестами против openclaw 2026.9.6 и 2026.10.5.
+
 ## 0.9.0 - 2026-10-10
 
 Требования прежние: OpenClaw ≥ 2026.9.6, Node.js ≥ 22. Конфиг 0.8 работает без правок.
