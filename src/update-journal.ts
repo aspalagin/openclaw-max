@@ -20,7 +20,9 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
-import { readJsonFileWithFallback, writeJsonFileAtomically } from 'openclaw/plugin-sdk/json-store';
+import { writeJsonFileAtomically } from 'openclaw/plugin-sdk/json-store';
+
+import { readJsonFileWithFallback } from './json-store-compat.js';
 import { resolveStateDir } from 'openclaw/plugin-sdk/state-paths';
 
 import type { MaxUpdate } from './api.js';
