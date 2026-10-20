@@ -2,7 +2,9 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.9.1 - 2026-10-20
+
+Требования: OpenClaw ≥ 2026.9.6 (проверено на 2026.9.6, 2026.10.5 и 2026.10.10-beta.2), Node.js ≥ 22. Конфиг 0.9.0 работает без правок.
 
 ### Fixed
 
