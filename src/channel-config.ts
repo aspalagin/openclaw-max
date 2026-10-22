@@ -16,9 +16,11 @@ import {
 import {
   isMaxAccountConfigured,
   listMaxAccountIds,
+  type MaxTokenSourceChoice,
   readMaxAccount,
   type ResolvedMaxAccount,
   resolveMaxAccount,
+  withMaxTokenSource,
 } from './accounts.js';
 import { resolveMaxTransport } from './monitor-types.js';
 
@@ -105,7 +107,7 @@ export const maxSetupAdapter: NonNullable<MaxChannelPlugin['setup']> = {
     if (input.useEnv && accountId !== DEFAULT_ACCOUNT_ID) {
       return 'MAX_BOT_TOKEN can only be used for the default account.';
     }
-    if (!input.useEnv && !input.token && !input.tokenFile) {
+    if (!input.useEnv && !input.token && !input.tokenFile?.trim()) {
       return 'MAX requires --token or --token-file (or --use-env with MAX_BOT_TOKEN).';
     }
     return null;
@@ -126,16 +128,29 @@ export const maxSetupAdapter: NonNullable<MaxChannelPlugin['setup']> = {
           })
         : namedConfig;
 
+    // The token source chosen here replaces the account's previous one
+    // (withMaxTokenSource): otherwise the bot keeps its old token.
+    const tokenFile = input.tokenFile?.trim();
+    const tokenSource: MaxTokenSourceChoice | undefined = input.useEnv
+      ? { env: true }
+      : input.token
+        ? { botToken: input.token }
+        : tokenFile
+          ? { tokenFile }
+          : undefined;
+    const enableWithToken = (account: Record<string, unknown> | undefined) => {
+      const enabled = { ...account, enabled: true };
+      return tokenSource ? withMaxTokenSource(enabled, tokenSource) : enabled;
+    };
+
     if (accountId === DEFAULT_ACCOUNT_ID) {
       return {
         ...next,
         channels: {
           ...next.channels,
-          max: {
-            ...((next.channels as Record<string, unknown>)?.max as Record<string, unknown>),
-            enabled: true,
-            ...(input.useEnv ? {} : input.token ? { botToken: input.token } : {}),
-          },
+          max: enableWithToken(
+            (next.channels as Record<string, unknown>)?.max as Record<string, unknown>,
+          ),
         },
       };
     }
@@ -151,14 +166,12 @@ export const maxSetupAdapter: NonNullable<MaxChannelPlugin['setup']> = {
           enabled: true,
           accounts: {
             ...(maxSection.accounts as Record<string, unknown>),
-            [accountId]: {
-              ...((maxSection.accounts as Record<string, unknown>)?.[accountId] as Record<
+            [accountId]: enableWithToken(
+              (maxSection.accounts as Record<string, unknown>)?.[accountId] as Record<
                 string,
                 unknown
-              >),
-              enabled: true,
-              ...(input.token ? { botToken: input.token } : {}),
-            },
+              >,
+            ),
           },
         },
       },
