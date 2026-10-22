@@ -131,6 +131,27 @@ export const MAX_ACCOUNT_OWN_KEYS = [
   'defaultAccount',
 ] as const;
 
+/** Token source chosen in setup: a token, a token file, or MAX_BOT_TOKEN (default account only). */
+export type MaxTokenSourceChoice = { botToken: unknown } | { tokenFile: string } | { env: true };
+
+/**
+ * An account's settings with the token source chosen in setup. The choice
+ * replaces the previous source: a stale botToken (plain or SecretRef) would
+ * win over a new token file or MAX_BOT_TOKEN, a stale tokenFile over
+ * MAX_BOT_TOKEN. Other keys stay as they are.
+ */
+export function withMaxTokenSource(
+  account: Record<string, unknown>,
+  choice: MaxTokenSourceChoice,
+): Record<string, unknown> {
+  const next = { ...account };
+  if ('botToken' in choice) next.botToken = choice.botToken;
+  else delete next.botToken;
+  if ('tokenFile' in choice) next.tokenFile = choice.tokenFile;
+  else delete next.tokenFile;
+  return next;
+}
+
 /**
  * Get the MAX channel section from config.
  */

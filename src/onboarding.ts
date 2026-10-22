@@ -8,7 +8,13 @@ import { DEFAULT_ACCOUNT_ID } from 'openclaw/plugin-sdk/core';
 import type { ChannelSetupDmPolicy, ChannelSetupWizard } from 'openclaw/plugin-sdk/setup';
 import { formatDocsLink } from 'openclaw/plugin-sdk/setup';
 
-import { listMaxAccountIds, resolveMaxAccount, resolveMaxAccountNetwork } from './accounts.js';
+import {
+  listMaxAccountIds,
+  type MaxTokenSourceChoice,
+  resolveMaxAccount,
+  resolveMaxAccountNetwork,
+  withMaxTokenSource,
+} from './accounts.js';
 import { MaxApi } from './api.js';
 
 const channel = 'max' as const;
@@ -37,22 +43,25 @@ const dmPolicy: ChannelSetupDmPolicy = {
   setPolicy: (cfg: OpenClawConfig, policy: DmPolicy) => setMaxDmPolicy(cfg, policy),
 };
 
+/** Enables the account with the chosen token source; it replaces the previous one. */
 function applyAccountConfig(params: {
   cfg: OpenClawConfig;
   accountId: string;
-  patch: Record<string, unknown>;
+  tokenSource: MaxTokenSourceChoice;
 }): OpenClawConfig {
-  const { cfg, accountId, patch } = params;
+  const { cfg, accountId, tokenSource } = params;
   if (accountId === DEFAULT_ACCOUNT_ID) {
     return {
       ...cfg,
       channels: {
         ...cfg.channels,
-        max: {
-          ...cfg.channels?.['max'],
-          enabled: true,
-          ...patch,
-        },
+        max: withMaxTokenSource(
+          {
+            ...cfg.channels?.['max'],
+            enabled: true,
+          },
+          tokenSource,
+        ),
       },
     };
   }
@@ -65,11 +74,13 @@ function applyAccountConfig(params: {
         enabled: true,
         accounts: {
           ...cfg.channels?.['max']?.accounts,
-          [accountId]: {
-            ...cfg.channels?.['max']?.accounts?.[accountId],
-            enabled: true,
-            ...patch,
-          },
+          [accountId]: withMaxTokenSource(
+            {
+              ...cfg.channels?.['max']?.accounts?.[accountId],
+              enabled: true,
+            },
+            tokenSource,
+          ),
         },
       },
     },
@@ -111,7 +122,7 @@ export const maxSetupWizard: ChannelSetupWizard = {
       return accountId === DEFAULT_ACCOUNT_ID && Boolean(process.env[ENV_MAX_BOT_TOKEN]);
     },
     apply: ({ cfg, accountId }) => {
-      return applyAccountConfig({ cfg, accountId, patch: {} });
+      return applyAccountConfig({ cfg, accountId, tokenSource: { env: true } });
     },
   },
 
@@ -142,7 +153,7 @@ export const maxSetupWizard: ChannelSetupWizard = {
       allowEnv: ({ accountId }) => accountId === DEFAULT_ACCOUNT_ID,
 
       applyUseEnv: ({ cfg, accountId }) => {
-        return applyAccountConfig({ cfg, accountId, patch: {} });
+        return applyAccountConfig({ cfg, accountId, tokenSource: { env: true } });
       },
 
       applySet: async ({ cfg, accountId, resolvedValue }) => {
@@ -166,7 +177,7 @@ export const maxSetupWizard: ChannelSetupWizard = {
         return applyAccountConfig({
           cfg,
           accountId,
-          patch: { botToken: tokenValue },
+          tokenSource: { botToken: tokenValue },
         });
       },
     },
@@ -191,7 +202,7 @@ export const maxSetupWizard: ChannelSetupWizard = {
         return applyAccountConfig({
           cfg,
           accountId,
-          patch: { tokenFile: path },
+          tokenSource: { tokenFile: path },
         });
       },
     },
