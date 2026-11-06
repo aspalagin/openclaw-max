@@ -321,10 +321,18 @@ export async function processIncomingMessage(
     agentId: route.agentId,
   });
   const envelopeOptions = core.channel.reply.resolveEnvelopeFormatOptions(config);
-  const previousTimestamp = core.channel.session.readSessionUpdatedAt({
+  const session = core.channel.session as typeof core.channel.session & {
+    readSessionUpdatedAtAsync?: (
+      params: Parameters<typeof core.channel.session.readSessionUpdatedAt>[0],
+    ) => Promise<ReturnType<typeof core.channel.session.readSessionUpdatedAt>>;
+  };
+  const timestampParams = {
     storePath,
     sessionKey: route.sessionKey,
-  });
+  };
+  const previousTimestamp = session.readSessionUpdatedAtAsync
+    ? await session.readSessionUpdatedAtAsync(timestampParams)
+    : session.readSessionUpdatedAt(timestampParams);
 
   // Combine text and attachment descriptions for the agent; a forward follows
   // the sender's own text as a marked block.
@@ -411,7 +419,7 @@ export async function processIncomingMessage(
   // rights or core no longer offers the choice; otherwise it goes to core as
   // the typed command would.
   if (isTextSlashCommand) {
-    const menu = resolveMaxCommandMenu({
+    const menu = await resolveMaxCommandMenu({
       text: rawTextTrimmed,
       press: isCommandMenuPress,
       ctx: ctxPayload,

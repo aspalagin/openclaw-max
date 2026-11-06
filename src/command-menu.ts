@@ -9,6 +9,7 @@
  * changes the session or the config: the chosen command does, in core.
  */
 
+import * as commandSdk from 'openclaw/plugin-sdk/command-auth-native';
 import {
   buildCommandTextFromArgs,
   type ChatCommandDefinition,
@@ -20,11 +21,8 @@ import {
   normalizeCommandBody,
   parseCommandArgs,
   resolveCommandArgChoices,
-  resolveCommandArgMenu,
-  resolveCommandAuthorization,
   resolveEffectiveAgentRuntime,
   resolveFastModeState,
-  resolveStoredModelOverride,
 } from 'openclaw/plugin-sdk/command-auth-native';
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
 
@@ -36,6 +34,27 @@ type MaxButton = { text: string; payload: string };
 type SessionEntry = NonNullable<
   ReturnType<ReturnType<typeof getMaxRuntime>['agent']['session']['getSessionEntry']>
 >;
+
+type AsyncCommand<T extends (...args: never[]) => unknown> = (
+  ...args: Parameters<T>
+) => Promise<ReturnType<T>>;
+
+// Namespace lookup keeps the package loadable on 2026.9.6, before the async
+// exports existed, and on hosts that remove the legacy exports after 2026.
+const commands = commandSdk as typeof commandSdk & {
+  resolveCommandAuthorizationAsync?: AsyncCommand<typeof commandSdk.resolveCommandAuthorization>;
+  resolveCommandArgMenuAsync?: AsyncCommand<typeof commandSdk.resolveCommandArgMenu>;
+  resolveStoredModelOverrideAsync?: (
+    params: Omit<
+      Parameters<typeof commandSdk.resolveStoredModelOverride>[0],
+      'loadSessionEntry'
+    > & {
+      loadSessionEntry?: (
+        key: string,
+      ) => SessionEntry | undefined | Promise<SessionEntry | undefined>;
+    },
+  ) => Promise<ReturnType<typeof commandSdk.resolveStoredModelOverride>>;
+};
 
 /** Private envelope of a menu button: the command text of one choice. */
 const COMMAND_MENU_PREFIX = 'mxcmd1:';
@@ -99,27 +118,38 @@ type MenuModelContext = {
 };
 
 /** The session's model (dynamic choices such as /think levels depend on it). */
-function resolveMenuModelContext(params: {
+async function resolveMenuModelContext(params: {
   cfg: OpenClawConfig;
   agentId: string;
   sessionKey: string;
-}): MenuModelContext {
+}): Promise<MenuModelContext> {
   const core = getMaxRuntime();
   const { cfg, agentId, sessionKey } = params;
   try {
-    const load = (key: string) => core.agent.session.getSessionEntry({ agentId, sessionKey: key });
-    const entry = load(sessionKey);
+    const session = core.agent.session as typeof core.agent.session & {
+      getSessionEntryAsync?: AsyncCommand<typeof core.agent.session.getSessionEntry>;
+    };
+    const loadSync = (key: string) => session.getSessionEntry({ agentId, sessionKey: key });
+    const load = (key: string) =>
+      session.getSessionEntryAsync
+        ? session.getSessionEntryAsync({ agentId, sessionKey: key })
+        : loadSync(key);
+    const entry = await load(sessionKey);
     const defaults = core.modelConfig.resolveDefaultModelForAgent({ cfg, agentId });
     // An automatic fallback override is temporary: menus follow the default.
+    const overrideParams = { sessionEntry: entry, sessionKey, defaultProvider: defaults.provider };
     const override =
       entry?.modelOverrideSource === 'auto'
         ? null
-        : resolveStoredModelOverride({
-            sessionEntry: entry,
-            loadSessionEntry: load,
-            sessionKey,
-            defaultProvider: defaults.provider,
-          });
+        : commands.resolveStoredModelOverrideAsync
+          ? await commands.resolveStoredModelOverrideAsync({
+              ...overrideParams,
+              loadSessionEntry: load,
+            })
+          : commands.resolveStoredModelOverride({
+              ...overrideParams,
+              loadSessionEntry: loadSync,
+            });
     const provider = override?.provider ?? defaults.provider;
     const model = override?.model ?? defaults.model;
     let agentRuntime: string | undefined;
@@ -190,15 +220,15 @@ function resolveCurrentChoice(
  * context of the message, so command rights are resolved exactly as core
  * resolves them for the same text.
  */
-export function resolveMaxCommandMenu(params: {
+export async function resolveMaxCommandMenu(params: {
   text: string;
   press: boolean;
-  ctx: Parameters<typeof resolveCommandAuthorization>[0]['ctx'];
+  ctx: Parameters<typeof commandSdk.resolveCommandAuthorization>[0]['ctx'];
   cfg: OpenClawConfig;
   agentId: string;
   sessionKey: string;
   botUsername?: string;
-}): MaxCommandMenuDecision {
+}): Promise<MaxCommandMenuDecision> {
   const { press, cfg, agentId, sessionKey } = params;
   const pass: MaxCommandMenuDecision = press ? { kind: 'stale' } : { kind: 'dispatch' };
   const parsed = parseMenuCommand(params.text, params.botUsername);
@@ -212,7 +242,9 @@ export function resolveMaxCommandMenu(params: {
     return pass;
   }
   // Core authorizes MAX text commands with CommandAuthorized unset (false).
-  const authorization = resolveCommandAuthorization({
+  const authorization = await (
+    commands.resolveCommandAuthorizationAsync ?? commands.resolveCommandAuthorization
+  )({
     ctx: params.ctx,
     cfg,
     commandAuthorized: params.ctx.CommandAuthorized === true,
@@ -221,10 +253,10 @@ export function resolveMaxCommandMenu(params: {
     return press ? { kind: 'denied' } : { kind: 'dispatch' };
   }
 
-  const context = resolveMenuModelContext({ cfg, agentId, sessionKey });
+  const context = await resolveMenuModelContext({ cfg, agentId, sessionKey });
   if (press && !isPressStillOffered(command, args, cfg, context)) return { kind: 'stale' };
 
-  const menu = resolveCommandArgMenu({
+  const menu = await (commands.resolveCommandArgMenuAsync ?? commands.resolveCommandArgMenu)({
     command,
     args,
     cfg,

@@ -4,6 +4,7 @@
  * checked for command rights, DM/group policy and stale choices.
  */
 
+import * as commandSdk from 'openclaw/plugin-sdk/command-auth-native';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { MaxUpdate } from './api.js';
@@ -13,6 +14,7 @@ import { dispatchUpdate } from './dispatch.js';
 import { setMaxRuntime } from './runtime.js';
 
 vi.mock('./deliver.js', () => ({ deliverMaxReply: vi.fn(async () => undefined) }));
+vi.mock('openclaw/plugin-sdk/command-auth-native', { spy: true });
 
 const OWNER = { user_id: 1001, first_name: 'Anna', is_bot: false };
 const GUEST = { user_id: 2002, first_name: 'Ivan', is_bot: false };
@@ -25,8 +27,9 @@ function makeRuntime(sessionEntry: Record<string, unknown> | undefined = undefin
   const dispatched: Record<string, unknown>[] = [];
   const shouldHandleTextCommands = vi.fn(() => true);
   const getSessionEntry = vi.fn(() => sessionEntry);
+  const getSessionEntryAsync = vi.fn(async () => sessionEntry);
   const core = {
-    agent: { session: { getSessionEntry } },
+    agent: { session: { getSessionEntry, getSessionEntryAsync } },
     modelConfig: {
       resolveDefaultModelForAgent: vi.fn(() => ({
         provider: 'anthropic',
@@ -46,6 +49,7 @@ function makeRuntime(sessionEntry: Record<string, unknown> | undefined = undefin
       session: {
         resolveStorePath: vi.fn(() => '/tmp/store'),
         readSessionUpdatedAt: vi.fn(() => undefined),
+        readSessionUpdatedAtAsync: vi.fn(async (): Promise<number | undefined> => undefined),
         recordSessionMetaFromInbound: vi.fn(async () => undefined),
       },
       reply: {
@@ -60,7 +64,7 @@ function makeRuntime(sessionEntry: Record<string, unknown> | undefined = undefin
       },
     },
   };
-  return { core, dispatched, shouldHandleTextCommands, getSessionEntry };
+  return { core, dispatched, shouldHandleTextCommands, getSessionEntry, getSessionEntryAsync };
 }
 
 function makeOpts(accountConfig: Record<string, unknown> = {}) {
@@ -143,7 +147,7 @@ describe('command argument menus', () => {
   let runtime: ReturnType<typeof makeRuntime>;
 
   beforeEach(() => {
-    vi.mocked(deliverMaxReply).mockClear();
+    vi.clearAllMocks();
     runtime = makeRuntime();
     setMaxRuntime(runtime.core as never);
   });
@@ -163,7 +167,7 @@ describe('command argument menus', () => {
       'default ✓',
     );
     expect(menu.buttons.every((row) => row.length <= 2)).toBe(true);
-    expect(runtime.getSessionEntry).toHaveBeenCalledWith({
+    expect(runtime.getSessionEntryAsync).toHaveBeenCalledWith({
       agentId: 'main',
       sessionKey: 'agent:main:max:direct:1001',
     });
@@ -180,6 +184,61 @@ describe('command argument menus', () => {
     const labels = menu.buttons.flat().map((button) => button.text);
     expect(labels).toContain('high ✓');
     expect(labels).toContain('default');
+  });
+
+  it.runIf('resolveCommandAuthorizationAsync' in commandSdk)(
+    'awaits modern SDK methods without calling their legacy alternatives',
+    async () => {
+      runtime = makeRuntime({ thinkingLevel: 'high' });
+      runtime.core.channel.session.readSessionUpdatedAtAsync.mockResolvedValue(1790000000000);
+      setMaxRuntime(runtime.core as never);
+
+      await dispatchUpdate(typed('/think'), makeOpts() as never);
+
+      expect(lastMenu().text).toContain('Current thinking level: high.');
+      expect(runtime.getSessionEntry).not.toHaveBeenCalled();
+      expect(runtime.core.channel.session.readSessionUpdatedAt).not.toHaveBeenCalled();
+      expect(runtime.core.channel.reply.formatAgentEnvelope).toHaveBeenCalledWith(
+        expect.objectContaining({ previousTimestamp: 1790000000000 }),
+      );
+      expect(commandSdk.resolveCommandAuthorization).not.toHaveBeenCalled();
+      expect(commandSdk.resolveStoredModelOverride).not.toHaveBeenCalled();
+      expect(commandSdk.resolveCommandArgMenu).not.toHaveBeenCalled();
+      for (const name of [
+        'resolveCommandAuthorizationAsync',
+        'resolveStoredModelOverrideAsync',
+        'resolveCommandArgMenuAsync',
+      ]) {
+        expect(Reflect.get(commandSdk, name)).toHaveBeenCalled();
+      }
+    },
+  );
+
+  it('keeps session reads working on a runtime without async methods', async () => {
+    runtime = makeRuntime({ thinkingLevel: 'high' });
+    Reflect.deleteProperty(runtime.core.agent.session, 'getSessionEntryAsync');
+    Reflect.deleteProperty(runtime.core.channel.session, 'readSessionUpdatedAtAsync');
+    setMaxRuntime(runtime.core as never);
+
+    await dispatchUpdate(typed('/think'), makeOpts() as never);
+
+    expect(lastMenu().text).toContain('Current thinking level: high.');
+    expect(runtime.getSessionEntry).toHaveBeenCalled();
+    expect(runtime.core.channel.session.readSessionUpdatedAt).toHaveBeenCalled();
+  });
+
+  it('does not retry a failed async session read through the legacy API', async () => {
+    runtime.getSessionEntryAsync.mockRejectedValue(new Error('Session store unavailable'));
+
+    await dispatchUpdate(typed('/think'), makeOpts() as never);
+
+    expect(runtime.getSessionEntryAsync).toHaveBeenCalled();
+    expect(runtime.getSessionEntry).not.toHaveBeenCalled();
+    expect(
+      lastMenu()
+        .buttons.flat()
+        .map((button) => button.text),
+    ).toContain('default ✓');
   });
 
   it('shows the core fast-mode status over the /fast choices', async () => {
