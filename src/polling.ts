@@ -257,6 +257,7 @@ export async function startMaxPollingLoop(opts: MaxMonitorOptions): Promise<void
 
   const maxAgeMs = resolveMaxEventMaxAgeMs(account.config.maxEventAgeMinutes);
   const journal = await openPollingJournal(opts);
+  opts.journal = journal;
   if (journal) await drainWebhookLeftovers(opts, journal, maxAgeMs);
 
   let failures = 0;

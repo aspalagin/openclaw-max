@@ -6,7 +6,7 @@ A channel plugin that connects an [OpenClaw](https://openclaw.ai) assistant to t
 
 It is for OpenClaw users who need their assistant reachable in MAX. You need a MAX bot token (bots are created by organisations on [business.max.ru](https://business.max.ru/self)) and an OpenClaw gateway you run yourself.
 
-Version 0.9.4. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md) (in Russian).
+Version 0.9.5. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md) (in Russian).
 
 ## Contents
 
@@ -43,7 +43,7 @@ Version 0.9.4. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max
 | Image | Downloaded and passed to the agent as media | Yes; several images and videos go as albums of up to 12; a public https image URL is passed to MAX as a link |
 | Video | Downloaded (size limit `mediaMaxMb`) | Yes |
 | Audio and voice | Downloaded; the MAX transcript is used when present, otherwise OpenClaw core transcribes | Yes; `asVoice` / `audioAsVoice` sends a MAX `audio` attachment |
-| File | Downloaded | Yes, from an allowed local path, a URL or inline `buffer` |
+| File | Downloaded within `mediaMaxMb`; a larger file is not downloaded and the agent gets its name, size and the reason | Yes, from an allowed local path, a URL or inline `buffer` |
 | Sticker | Sticker code and image | `sticker` action by code |
 | Contact | Name and phones parsed from the VCard, MAX profile | `sendAttachment` with `type="contact"` |
 | Location | Coordinates and a map link | `sendAttachment` with `type="location"` |
@@ -287,7 +287,7 @@ This stops a prompt injection in one chat from editing, deleting or posting in a
 
 ## Media and local files
 
-- **Incoming** media is downloaded after the access checks, within `mediaMaxMb` (default 20 MB) and `mediaMaxCount` (default 12 per message); the agent gets a note about media that was not loaded. Files are stored by OpenClaw core's media store.
+- **Incoming** media is downloaded after the access checks, within `mediaMaxMb` (default 20 MB) and `mediaMaxCount` (default 12 per message); the agent gets a note about media that was not loaded. A file whose size, as declared by MAX, exceeds `mediaMaxMb` is not downloaded: the agent gets a note such as `[file: report.pdf, 70.0 MB — не загружен: превышает лимит 20 MB]` ("not loaded: over the 20 MB limit") and a warning is logged. MAX download links are signed, so they never reach the agent or the log, including when a download fails. To let the agent receive large files, raise `mediaMaxMb` in `channels.max` or for the account. Files are stored by OpenClaw core's media store.
 - **Outgoing local files** are read only through the OpenClaw SDK loader from the directories core allows for the agent: its workspace, the gateway media directories and what the core filesystem policy permits. Paths outside them — including via `..` or symbolic links — fail with `Local media path is not under an allowed directory: …`. To send a file from elsewhere, copy it into the agent workspace first. When core policy grants the agent host reads, the directory is not limited, but core checks the type by content: images, audio, video, PDF, Office documents, archives and plain-text documents (`.txt`, `.md`, `.csv`, `.json`, `.yaml`) are sent, anything else fails with `Host-local media sends only allow …`. There is no option to turn these checks off.
 - **Inline content:** `buffer` (base64 or a data URL) with `filename` and `contentType`; the size limit is checked before decoding. If both a path and `buffer` are given, the path is used.
 - **Remote URLs** are fetched through core's SSRF-guarded downloader into memory. An image URL is passed to MAX as a link only when its host is public https; otherwise the image is downloaded and uploaded.
@@ -367,6 +367,7 @@ The provider must exist in core's `secrets.providers`. The paths `channels.max.b
 
 - **Durable webhook queue.** Each accepted webhook event is written to `<stateDir>/max/inbox-<account>/` before MAX gets `200`. After a restart or crash, unprocessed events are handled first, in the original order within each chat. An event is finished once core has accepted the agent turn (core resumes an interrupted turn itself). If the event cannot be written or the queue is full (`webhookQueue.maxPending`), MAX gets `503` and retries later (`overflow: "drop"` acknowledges and drops instead). If the state directory is not writable, the queue falls back to memory with a warning. The SDK's own ingress queue is available only to bundled and official plugins in OpenClaw 2026.9.x, so the plugin keeps its own journal with the same contract.
 - **Deduplication.** Keys of handled events (`update_type:timestamp:mid`; for events without a message — the chat and user instead of `mid`) are kept for 24 hours, up to 5000, and survive restarts, so MAX redeliveries are dropped. Long polling uses the same keys and, like the webhook queue, marks an event handled once core has accepted its turn: after a restart or crash in the middle of a batch — even in the middle of a turn — handled events are not repeated, and core resumes an interrupted turn instead of it being started again.
+- **Incomplete events.** MAX sometimes delivers a webhook `message_created` without the message itself (seen for large files: the event carries only `update_type`, `timestamp` and `user_locale`). The plugin looks for the user's message with the same `timestamp` among the 10 newest messages of at most three recently active direct dialogs (one `GET /messages` per dialog, 10 seconds in total) and handles it as usual. It is deduplicated under its real `mid`, so if MAX later delivers the full event there is no second turn. When nothing is found, a warning is logged. The dialogs come from the chat registry: a dialog is recorded with the first message of an admitted sender or with `bot_started`. A direct message without a sender, or without text, attachments and forwarded content (as seen for a forwarded large file), is read back by its `mid` (`GET /messages/{mid}`).
 - **Gateway shutdown.** While the gateway stops or restarts gracefully, core accepts no new agent turns, but the webhook and long polling keep receiving events. Such an event is not lost: the plugin keeps it queued and retries after 2, 5, 10 and then every 30 seconds, with the chat's later events waiting behind it. If the gateway stops first, the event stays in the journal on disk and is handled after the start (long polling also does not save the batch marker). A refusal after core has accepted the turn and other processing errors are not retried. With the queue in memory (`webhookQueue.mode: "memory"` or an unwritable state directory) such an event is still skipped with an error in the log.
 - **Event age.** Messages, edits, button presses and bot starts older than `maxEventAgeMinutes` (default 60) are skipped with a warning, so after a long outage the bot does not answer hours-old messages. Chat registry events are always processed.
 - **Delivery errors** are reported to core: nothing sent → the reply is not dispatched; part visible → partial delivery with the visible message ids. After a failed text chunk the rest is not sent.
@@ -420,7 +421,7 @@ What the plugin stores on disk (`<stateDir>` is OpenClaw's state directory, by d
 
 | Path | Contents | Lifetime |
 |---|---|---|
-| `<stateDir>/max/state-<account>.json` | Long-polling marker; chat registry (chat id, type, title, when the bot was added, removed or stopped); the generated webhook secret, if any | Until deleted |
+| `<stateDir>/max/state-<account>.json` | Long-polling marker; chat registry (chat id, type, title, when the bot was added, removed or stopped; for direct dialogs, the time of the last message from an admitted sender); the generated webhook secret, if any | Until deleted |
 | `<stateDir>/max/inbox-<account>/` (directory `0700`, files `0600`) | Webhook events waiting to be processed, including message text and attachment metadata | Deleted once processed |
 | `<stateDir>/max/inbox-<account>/completed.json` | Keys of handled events (`update_type:timestamp:mid`), no content | 24 hours, up to 5000 keys |
 
@@ -440,6 +441,8 @@ Network access by the plugin: the MAX Bot API and its upload and CDN hosts (thro
 | Account does not start, error mentions a SecretRef | The reference did not resolve; check `secrets.providers` and the referenced variable, file or command |
 | Webhook: no events arrive | Check the public URL, certificate and that the reverse proxy forwards the path; after 8 hours of failures MAX removes the subscription — the plugin recreates it within 12 minutes; long polling does not work while a subscription exists |
 | MAX gets `503` from the webhook | The journal could not be written (disk full, permissions) or `webhookQueue.maxPending` was reached |
+| The agent got `[file: … — не загружен: превышает лимит N MB]` ("not loaded: over the N MB limit") | The file exceeds `mediaMaxMb` (default 20 MB); raise `mediaMaxMb` and send the file again |
+| `MAX message_created without a message dropped: no registered dialog to look it up in` in the log | MAX delivered an event without the message and the direct dialog is not in the chat registry yet (e.g. a large file was the first message after installation); send the bot any message and send the file again |
 | Old messages get no answer after downtime | They are older than `maxEventAgeMinutes` (default 60); set `0` to answer any age |
 | `Local media path is not under an allowed directory` | The file is outside the agent's allowed directories; copy it into the workspace |
 | `Host-local media sends only allow …` | The agent has host reads and core did not recognize or does not allow the file type; send a file of an allowed type or pass the content as `buffer` |

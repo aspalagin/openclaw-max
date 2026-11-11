@@ -9,6 +9,7 @@ import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
 import type { MaxAccountConfig, ResolvedMaxAccount } from './accounts.js';
 import type { MaxApi, MaxUpdateType } from './api.js';
 import type { MaxStateStore } from './state.js';
+import type { MaxUpdateJournal } from './update-journal.js';
 import type { RegisterMaxWebhookRoute } from './webhook.js';
 
 /**
@@ -30,6 +31,8 @@ export interface MaxMonitorOptions {
   statusSink?: (patch: MaxStatusPatch) => void;
   /** Persistent marker + chat registry (created by startMaxPolling when absent) */
   state?: MaxStateStore;
+  /** The transport's durable update journal (dedupe keys of handled updates), if any */
+  journal?: MaxUpdateJournal;
   /** Gateway route registration; defaults to plugin-sdk registerPluginHttpRoute (tests inject a mock) */
   registerWebhookRoute?: RegisterMaxWebhookRoute;
 }

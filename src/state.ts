@@ -5,7 +5,8 @@
  * The marker survives gateway restarts so updates are neither replayed nor
  * lost past the server-side retention window. The chat registry replaces the
  * deprecated GET /chats (June 2026): chats are collected from bot_added /
- * bot_started / chat_title_changed updates and passively from group messages.
+ * bot_started / chat_title_changed updates and passively from group messages
+ * and from dialogs with admitted senders.
  */
 
 import * as fs from 'node:fs/promises';
@@ -26,6 +27,8 @@ export interface MaxChatRegistryEntry {
   removedAt?: number;
   /** bot_stopped in a dialog: user halted the bot */
   stopped?: boolean;
+  /** Dialogs: last message of an admitted sender (to the minute) */
+  lastInboundAt?: number;
 }
 
 export interface MaxAccountState {

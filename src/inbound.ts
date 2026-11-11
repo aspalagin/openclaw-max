@@ -12,7 +12,7 @@ import { getAgentScopedMediaLocalRoots } from 'openclaw/plugin-sdk/media-local-r
 
 import { admitMaxGroupChat, admitMaxGroupSender, readMaxDmAllowFrom } from './access-policy.js';
 import type { ResolvedMaxAccount } from './accounts.js';
-import type { MaxAttachment, MaxLinkedMessage, MaxMessage, MaxUser } from './api.js';
+import type { MaxAttachment, MaxLinkedMessage, MaxMessage, MaxUpdate, MaxUser } from './api.js';
 import { resolveMaxCommandMenu } from './command-menu.js';
 import { deliverMaxReply } from './deliver.js';
 import {
@@ -27,6 +27,7 @@ import { materializeMaxPresentation } from './presentation.js';
 import { createMaxProgressDraft } from './progress-draft.js';
 import { getMaxRuntime } from './runtime.js';
 import { sendMaxMessage } from './send.js';
+import type { MaxStateStore } from './state.js';
 import { createMaxDraftStream } from './stream-draft.js';
 import { maxTurnAdoptionReplyOptions } from './turn-adoption.js';
 import type { MaxMarkupElement } from './types.js';
@@ -102,10 +103,11 @@ export async function processIncomingMessage(
     !(forward && (forward.text.trim() || hasAgentAttachments(forward.attachments)))
   ) {
     // A message with no text and no attachments at all is what some clients
-    // reportedly get in long polling for a voice message: leave a trace.
-    if (!attachments.length && !forward && !isCallbackCommand) {
+    // reportedly get in long polling for a voice message, and the webhook for
+    // a forwarded large file: leave a trace.
+    if (!attachments.length && !isCallbackCommand) {
       log?.info?.(
-        `[${account.accountId}] Skipping empty message ${messageId}: no text, attachments or forward`,
+        `[${account.accountId}] Skipping empty message ${messageId}: no text, attachments or ${forward ? 'forwarded content' : 'forward'}`,
       );
     }
     return;
@@ -210,6 +212,9 @@ export async function processIncomingMessage(
         return;
       }
     }
+    // A dialog with an admitted sender: where a message_created without a
+    // message is looked up (recoverMaxMessageByTimestamp).
+    if (chatId != null) rememberMaxDialog(opts.state, chatId);
   }
 
   // Group policy (disabled / allowlist incl. "*" / open)
@@ -639,6 +644,143 @@ function readForwardedMessage(
 
 function hasAgentAttachments(attachments: MaxAttachment[]): boolean {
   return attachments.some((att) => att.type !== 'inline_keyboard');
+}
+
+/** A dialog message without a sender or without any text, attachment or forwarded content. */
+function isIncompleteMaxMessage(message: MaxMessage): boolean {
+  const forward = readForwardedMessage(message.link);
+  const hasContent =
+    Boolean(message.body?.text?.trim()) ||
+    hasAgentAttachments(message.body?.attachments ?? []) ||
+    Boolean(forward && (forward.text.trim() || hasAgentAttachments(forward.attachments)));
+  return !hasContent || !message.sender;
+}
+
+/**
+ * A new dialog message as the webhook may deliver it for a large file: the
+ * forwarded attachments or the sender missing, so the gates would drop it
+ * silently. The same message read back by its mid (GET /messages/{mid}) is
+ * complete; when that fails or is no better, the delivered one stays.
+ */
+export async function completeMaxMessage(
+  message: MaxMessage,
+  opts: MaxMonitorOptions,
+): Promise<MaxMessage> {
+  const { account, log } = opts;
+  const mid = message.body?.mid;
+  if (!mid || message.recipient?.chat_type !== 'dialog' || !isIncompleteMaxMessage(message)) {
+    return message;
+  }
+  try {
+    const fetched = await opts.api.getMessageById(mid);
+    if (fetched?.body?.mid !== mid || isIncompleteMaxMessage(fetched)) return message;
+    log?.info?.(`[${account.accountId}] MAX message ${mid} arrived incomplete, refetched by mid`);
+    return fetched;
+  } catch (err) {
+    log?.warn?.(
+      `[${account.accountId}] MAX message ${mid} arrived incomplete, refetch failed: ${String(err)}`,
+    );
+    return message;
+  }
+}
+
+/** Least interval between two registry writes of one dialog's last inbound time. */
+const MAX_DIALOG_SEEN_WRITE_MS = 60_000;
+/** Most dialogs a message_created without a message is looked up in. */
+const MAX_RECOVERY_DIALOGS = 3;
+/** Newest messages read per dialog for that lookup. */
+const MAX_RECOVERY_MESSAGES = 10;
+/** Time budget of the whole lookup. */
+const MAX_RECOVERY_TIMEOUT_MS = 10_000;
+
+/** Record a dialog with an admitted sender in the chat registry (persisted). */
+function rememberMaxDialog(state: MaxStateStore | undefined, chatId: number): void {
+  if (!state) return;
+  const entry = state.chats[String(chatId)];
+  const now = Date.now();
+  const known = entry?.type === 'dialog' && entry.removedAt == null;
+  if (known && now - (entry.lastInboundAt ?? 0) < MAX_DIALOG_SEEN_WRITE_MS) return;
+  state.upsertChat(chatId, {
+    type: 'dialog',
+    lastInboundAt: now,
+    ...(known ? {} : { addedAt: now }),
+  });
+}
+
+/** Registered dialogs, the most recently active first. */
+function recentMaxDialogs(state: MaxStateStore | undefined): number[] {
+  return Object.values(state?.chats ?? {})
+    .filter((entry) => entry.type === 'dialog' && entry.removedAt == null)
+    .sort((a, b) => (b.lastInboundAt ?? b.addedAt ?? 0) - (a.lastInboundAt ?? a.addedAt ?? 0))
+    .map((entry) => entry.chatId);
+}
+
+/** `promise`, or a rejection once `ms` elapse. */
+function withMaxTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timeout after ${ms} ms`)), ms);
+    timer.unref?.();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * The message of a message_created that MAX delivered without one (seen for
+ * large files: only update_type, timestamp and user_locale). The update names
+ * no chat, so the newest messages of the most recently active registered
+ * dialogs (at most MAX_RECOVERY_DIALOGS, one GET /messages each, within
+ * MAX_RECOVERY_TIMEOUT_MS) are searched for a user's message with exactly the
+ * update's timestamp. Undefined, with a warning, when none is found.
+ */
+export async function recoverMaxMessageByTimestamp(
+  update: MaxUpdate,
+  opts: MaxMonitorOptions,
+): Promise<MaxMessage | undefined> {
+  const { account, log } = opts;
+  // Field names only, no values: they tell what MAX sent instead.
+  const fields = `update fields: ${Object.keys(update).sort().join(',')}`;
+  const dialogs = recentMaxDialogs(opts.state).slice(0, MAX_RECOVERY_DIALOGS);
+  if (typeof update.timestamp !== 'number' || dialogs.length === 0) {
+    log?.warn?.(
+      `[${account.accountId}] MAX message_created without a message dropped: ${dialogs.length === 0 ? 'no registered dialog to look it up in' : 'no timestamp'} (${fields})`,
+    );
+    return undefined;
+  }
+  const deadline = Date.now() + MAX_RECOVERY_TIMEOUT_MS;
+  const failures: string[] = [];
+  for (const chatId of dialogs) {
+    const left = deadline - Date.now();
+    if (left <= 0) {
+      failures.push(`chat ${chatId}: lookup time budget spent`);
+      break;
+    }
+    try {
+      const { messages } = await withMaxTimeout(
+        opts.api.getMessages(chatId, { count: MAX_RECOVERY_MESSAGES }),
+        left,
+      );
+      const found = (messages ?? []).find(
+        (message) =>
+          message.timestamp === update.timestamp &&
+          Boolean(message.body?.mid) &&
+          message.sender?.is_bot !== true &&
+          (opts.botUserId == null || message.sender?.user_id !== opts.botUserId),
+      );
+      if (found) {
+        log?.info?.(
+          `[${account.accountId}] MAX message_created without a message recovered by timestamp: ${found.body?.mid} in chat ${chatId}`,
+        );
+        return found;
+      }
+    } catch (err) {
+      failures.push(`chat ${chatId}: ${String(err)}`);
+    }
+  }
+  log?.warn?.(
+    `[${account.accountId}] MAX message_created without a message dropped: no message with timestamp ${update.timestamp} in ${dialogs.length} dialog(s)${failures.length ? ` (${failures.join('; ')})` : ''} (${fields})`,
+  );
+  return undefined;
 }
 
 /** Author label of a linked message: sender name, or the origin chat for channel posts. */
