@@ -14,7 +14,12 @@ import { LocalMediaAccessError } from 'openclaw/plugin-sdk/web-media';
 import type { ResolvedMaxAccount } from './accounts.js';
 import { MaxApiError } from './api.js';
 import { resolveMaxTableMode, toMaxMarkdown } from './format.js';
-import { readMaxDeliveryPin, resolveMaxTextChunkLimit } from './presentation.js';
+import {
+  isMaxPinEnabled,
+  MAX_PIN_DISABLED,
+  readMaxDeliveryPin,
+  resolveMaxTextChunkLimit,
+} from './presentation.js';
 import { getMaxRuntime } from './runtime.js';
 import {
   answerMaxCallback,
@@ -268,7 +273,12 @@ export async function deliverMaxReply(params: {
 
   // The message a callback answer changed has no id here to pin.
   const pin = answersCallback ? undefined : readMaxDeliveryPin(payload.delivery);
-  if (pin && firstMessageId) {
+  if (pin && firstMessageId && !isMaxPinEnabled(account.config.actions)) {
+    // channels.max.actions.pin gates the pin of a reply too; the reply stays.
+    log?.[pin.required ? 'error' : 'warn'](
+      `[${account.accountId}] MAX pin of ${firstMessageId} skipped: ${MAX_PIN_DISABLED}`,
+    );
+  } else if (pin && firstMessageId) {
     try {
       const pinned = await pinMaxMessage(chatId, firstMessageId, {
         token: account.token,

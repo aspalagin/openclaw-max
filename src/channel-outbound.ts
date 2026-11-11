@@ -10,7 +10,9 @@ import { getAgentScopedMediaLocalRoots } from 'openclaw/plugin-sdk/media-local-r
 import { type ResolvedMaxAccount, resolveMaxAccount } from './accounts.js';
 import { resolveMaxTableMode, toMaxMarkdown } from './format.js';
 import {
+  isMaxPinEnabled,
   materializeMaxPresentation,
+  MAX_PIN_DISABLED,
   MAX_PRESENTATION_CAPABILITIES,
   MAX_TEXT_LIMIT,
   renderMaxPresentation,
@@ -77,6 +79,9 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
   pinDeliveredMessage: async ({ cfg, target, messageId, pin, assertDirectAdapterHandoff }) => {
     const account = resolveMaxAccount({ cfg, accountId: target.accountId });
     if (!account.token) throw new Error('MAX bot token not configured');
+    // channels.max.actions.pin gates this pin too: core keeps the delivered
+    // message and logs the refusal (a required pin fails the delivery).
+    if (!isMaxPinEnabled(account.config.actions)) throw new Error(MAX_PIN_DISABLED);
     assertDirectAdapterHandoff?.();
     // Dialogs cannot pin: pinMaxMessage resolves { pinned: false } without an
     // API call or error, so core logs no failed pin for a DM delivery.

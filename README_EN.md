@@ -6,7 +6,7 @@ A channel plugin that connects an [OpenClaw](https://openclaw.ai) assistant to t
 
 It is for OpenClaw users who need their assistant reachable in MAX. You need a MAX bot token (bots are created by organisations on [business.max.ru](https://business.max.ru/self)) and an OpenClaw gateway you run yourself.
 
-Version 0.9.5. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md) (in Russian).
+Version 0.9.6. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md) (in Russian).
 
 ## Contents
 
@@ -206,7 +206,7 @@ All options live under `channels.max`; the same keys (except `accounts` and `com
 | `responsePrefix` | string | — | Prefix of agent replies, applied by OpenClaw core (`"auto"` — agent name) |
 | `historyLimit` | integer ≥ 0 | core default | Read by OpenClaw core: recent turns of a group session the embedded agent runtime keeps in the prompt (native CLI runtimes keep their own history) |
 | `dmHistoryLimit`, `dms.<userId>.historyLimit` | integer ≥ 0 | no limit | Read by OpenClaw core: the same for private dialogs with a per-channel session (`session.dmScope`), per user first |
-| `actions` | object `{ <action>: boolean }` | all on | `false` turns a `message` tool action off (`send`, `edit`, `delete`, `sticker`, `sendAttachment`, `pin`, `unpin`): hidden from the tool and refused |
+| `actions` | object `{ <action>: boolean }` | all on | `false` turns a `message` tool action off (`send`, `edit`, `delete`, `sticker`, `sendAttachment`, `pin`, `unpin`): hidden from the tool and refused. `pin: false` also forbids pinning through `pin=true` / `delivery.pin`: on `send`, in core delivery and in agent replies. `sticker: false` also forbids a sticker through `send` with `stickerId`. `sendAttachment: false` turns off only the separate action: attachments, location and contact in `send` are part of `send`, as in core channels |
 | `apiBaseUrl` | string | `https://platform-api2.max.ru` | Bot API base URL; `https` only, `http` just for loopback |
 | `httpProxy` | string or SecretRef | — | HTTP(S) proxy for all MAX traffic; `""` in an account turns an inherited proxy off |
 | `logMessagePreview` | boolean | `false` | Add a 50-character text preview to debug logs |
@@ -275,7 +275,7 @@ message(action="pin", target="CHAT_ID", messageId="MID")
 
 - `attachments=[…]` sends several files; images and videos go as albums of up to 12, audio and files one by one. The result has `messageIds`; failed items are listed in `mediaErrors`.
 - `silent=true` sends without a push notification; MAX channels always notify.
-- `pin=true` or `delivery.pin` pins the sent message. MAX has no pinning in private dialogs: the plugin skips the call and returns `pinned: false` with a reason.
+- `pin=true` or `delivery.pin` pins the sent message. MAX has no pinning in private dialogs: the plugin skips the call and returns `pinned: false` with a reason. With `actions.pin: false` such a `send` is refused before anything is sent, with `MAX action "pin" is disabled by channels.max.actions`; for an agent reply the pin is skipped with a warning in the log.
 
 **Scope (`actionScope`).** In a turn started by someone other than the owner, actions work only in the current chat and in chats the inbound policy admits (dialogs with senders in `allowFrom` or paired, groups in `groups` and, when a group has a sender list, only if the requester is on it). Only calls OpenClaw marks as the owner's (`senderIsOwner: true`) are not limited: the owner's own turns, `openclaw message` from the CLI, an admin's chat in the Control UI. Every other call — including runs without a conversation whose owner mark is missing or false, as heartbeat, subagent, scheduled and plugin- or hook-started runs may be — is limited to the admitted chats; in a group with a sender list it is refused, as there is no requester to check. Core deliveries (agent replies, reminders, automation announcements) do not go through the `message` tool and are not affected. A `send` with `presentation` (cards, buttons), which core delivers without the plugin's action handler, is checked the same way, and `actions.send: false` applies to it too. The current chat counts only for the account the turn came through: an action in it through another MAX account (`accountId`) is checked against that account's policy. A refused action is a tool error raised before anything changes in MAX; if the plugin cannot determine the chat of a message, it refuses. Outside the chat of the current turn, `edit` and `delete` work only on messages the bot sent itself (the author comes from the same lookup as the chat); in the current chat and for the owner they work as before. A `send`, `sendAttachment` or `sticker` with `replyTo` (and a `send` with `presentation`) may reply only to a message of the chat it goes to (checked with one lookup, made only when `replyTo` is set); a reply to a message of another chat, or one whose chat cannot be determined, is refused.
 
@@ -413,7 +413,7 @@ From the MAX Bot API documentation:
 - An event whose processing crashes the gateway process (rather than raising an error the plugin catches) is processed again after every start until it is older than `maxEventAgeMinutes`; with `0`, without limit.
 - `pin` and `unpin` check the chat but not the message author: in an admitted chat where the bot is an administrator they pin and unpin any message (unlike `edit` and `delete` outside the current chat).
 
-Report vulnerabilities privately as described in [SECURITY.md](https://github.com/aspalagin/openclaw-max/blob/main/SECURITY.md). Supported version: 0.8.x.
+Report vulnerabilities privately as described in [SECURITY.md](https://github.com/aspalagin/openclaw-max/blob/main/SECURITY.md). Supported version: 0.9.x.
 
 ## Privacy
 
@@ -446,6 +446,7 @@ Network access by the plugin: the MAX Bot API and its upload and CDN hosts (thro
 | Old messages get no answer after downtime | They are older than `maxEventAgeMinutes` (default 60); set `0` to answer any age |
 | `Local media path is not under an allowed directory` | The file is outside the agent's allowed directories; copy it into the workspace |
 | `Host-local media sends only allow …` | The agent has host reads and core did not recognize or does not allow the file type; send a file of an allowed type or pass the content as `buffer` |
+| `MAX action "pin" is disabled by channels.max.actions: send without pin=true / delivery.pin` | Pinning is off (`actions.pin: false`); send without `pin` / `delivery.pin` or turn `pin` on |
 | The `message` tool is refused in another chat | `actionScope`: the chat is not admitted by the inbound policy; add it to the policy or change `actionScope` |
 | `MAX API does not resolve @username …` | Use `user:<id>` or a numeric chat id |
 | `pinned: false` in a private dialog | MAX has no pinning in dialogs |
