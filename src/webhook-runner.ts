@@ -213,6 +213,7 @@ export async function startMaxWebhook(opts: MaxMonitorOptions): Promise<void> {
   // fails with GatewayDrainingError once the request's work admission is
   // released).
   const journal = await openWebhookJournal(opts);
+  opts.journal = journal;
   const queueConfig = account.config.webhookQueue;
   const queue = createMaxWebhookUpdateQueue({
     accountId: account.accountId,

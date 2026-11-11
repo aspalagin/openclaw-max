@@ -115,9 +115,28 @@ export async function collectInboundAttachments(params: {
         }
       }
 
-      if (url && typeof url === 'string' && url.startsWith('http')) {
+      // Fall back to text description (sticker code already added above);
+      // never the signed download URL.
+      const describeNotLoaded = (reason: string): void => {
+        if (attType === 'audio') {
+          if (!transcription) attachmentDescriptions.push(VOICE_UNAVAILABLE);
+        } else if (attType !== 'sticker') {
+          attachmentDescriptions.push(describeUnloadedMedia(att, attType, reason));
+        }
+      };
+      const maxMb = account.config.mediaMaxMb ?? 20;
+      const maxBytes = maxMb * 1024 * 1024;
+      const declaredSize = readAttachmentSize(att);
+      const downloadable = Boolean(url && typeof url === 'string' && url.startsWith('http'));
+
+      if (downloadable && declaredSize !== undefined && declaredSize > maxBytes) {
+        // MAX declares the size of a file: one over the limit is not downloaded.
+        log?.warn?.(
+          `[${account.accountId}] ${attType} of ${messageId} not loaded: ${declaredSize} bytes, over the mediaMaxMb limit of ${maxMb} MB`,
+        );
+        describeNotLoaded(`превышает лимит ${maxMb} MB`);
+      } else if (downloadable) {
         try {
-          const maxBytes = (account.config.mediaMaxMb ?? 20) * 1024 * 1024;
           const { proxyUrl } = resolveMaxAccountNetwork(account);
           const fetched = await fetchMaxRemoteMedia(url, maxBytes, proxyUrl);
           const inboundFileName = fetched.fileName
@@ -144,13 +163,11 @@ export async function collectInboundAttachments(params: {
             ...(transcription ? { transcribed: true } : {}),
           });
         } catch (err) {
-          log?.error?.(`[${account.accountId}] Failed to download ${attType}: ${String(err)}`);
-          // Fall back to text description (sticker code already added above)
-          if (attType === 'audio') {
-            if (!transcription) attachmentDescriptions.push(VOICE_UNAVAILABLE);
-          } else if (attType !== 'sticker') {
-            attachmentDescriptions.push(`[${attType}: ${url}]`);
-          }
+          log?.error?.(
+            `[${account.accountId}] Failed to download ${attType} of ${messageId}: ${redactUrls(String(err))}`,
+          );
+          const tooLarge = (err as { code?: unknown } | null)?.code === 'max_bytes';
+          describeNotLoaded(tooLarge ? `превышает лимит ${maxMb} MB` : 'ошибка загрузки');
         }
       } else {
         // No URL — text description
@@ -187,6 +204,33 @@ export async function collectInboundAttachments(params: {
   }
 
   return { descriptions: attachmentDescriptions, mediaInputs, mediaTaken };
+}
+
+/** Size in bytes MAX declares for an attachment (files carry it), if any. */
+function readAttachmentSize(att: MaxAttachment): number | undefined {
+  const raw = att as Record<string, unknown>;
+  const value = raw.size ?? (raw.payload as Record<string, unknown> | undefined)?.size;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * A media attachment that was not loaded, for the agent: type, file name and
+ * size when MAX sent them, and why.
+ */
+function describeUnloadedMedia(att: MaxAttachment, attType: string, reason: string): string {
+  const raw = att as Record<string, unknown>;
+  const payload = raw.payload as Record<string, unknown> | undefined;
+  const size = readAttachmentSize(att);
+  const parts = [
+    toInlineText(raw.filename ?? payload?.filename),
+    size !== undefined ? `${(size / (1024 * 1024)).toFixed(1)} MB` : '',
+  ].filter(Boolean);
+  return `[${attType}${parts.length ? `: ${parts.join(', ')}` : ''} — не загружен: ${reason}]`;
+}
+
+/** Error text for logs: MAX download URLs are signed, so they never reach the log. */
+function redactUrls(text: string): string {
+  return text.replace(/https?:\/\/[^\s"'<>]+?(?=:?(?:\s|$))/g, '<url>');
 }
 
 /** One line of untrusted text: whitespace collapsed, clipped by code points. */

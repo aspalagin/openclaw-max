@@ -7,8 +7,14 @@
 import type { ResolvedMaxAccount } from './accounts.js';
 import type { MaxMessage, MaxUpdate, MaxUser } from './api.js';
 import { processCallback } from './callbacks.js';
-import { describeMaxLogText, processIncomingMessage } from './inbound.js';
+import {
+  completeMaxMessage,
+  describeMaxLogText,
+  processIncomingMessage,
+  recoverMaxMessageByTimestamp,
+} from './inbound.js';
 import type { MaxMonitorOptions } from './monitor-types.js';
+import { maxUpdateDedupeKey } from './webhook.js';
 
 /** mark_seen vanished from current MAX docs; keep behind config (default on). */
 function shouldMarkSeen(account: ResolvedMaxAccount): boolean {
@@ -33,15 +39,30 @@ export async function dispatchUpdate(update: MaxUpdate, opts: MaxMonitorOptions)
 
   switch (update.update_type) {
     case 'message_created': {
-      if (!update.message) break;
+      // Without a message (MAX does this for large files) it is looked up by
+      // the update's timestamp; a miss is logged there, never a silent loss.
+      const delivered = update.message ?? (await recoverMaxMessageByTimestamp(update, opts));
+      if (!delivered) break;
+      // The update was journaled under a key without a mid: a recovered
+      // message is deduped under its real mid too (MAX may still deliver it).
+      const recoveredKey = update.message
+        ? undefined
+        : maxUpdateDedupeKey({ ...update, message: delivered });
+      if (recoveredKey && opts.journal?.isDuplicate(recoveredKey)) {
+        log?.info?.(
+          `[${account.accountId}] MAX message ${delivered.body?.mid} already handled, recovered copy skipped`,
+        );
+        break;
+      }
+      const message = await completeMaxMessage(delivered, opts);
       // Skip messages from the bot itself
-      if (opts.botUserId && update.message.sender?.user_id === opts.botUserId) break;
+      if (opts.botUserId && message.sender?.user_id === opts.botUserId) break;
       statusSink?.({ lastInboundAt: Date.now() });
       // Mark message as read (typing starts once the message reaches the agent)
-      sendReadReceipt(update.message.recipient?.chat_id, opts);
+      sendReadReceipt(message.recipient?.chat_id, opts);
       // Passive chat discovery: GET /chats is deprecated, register group chats
       // the bot actually sees so directory.listGroups keeps working.
-      const recipient = update.message.recipient;
+      const recipient = message.recipient;
       if (
         opts.state &&
         recipient?.chat_id != null &&
@@ -55,7 +76,11 @@ export async function dispatchUpdate(update: MaxUpdate, opts: MaxMonitorOptions)
           addedAt: Date.now(),
         });
       }
-      await processIncomingMessage(update.message, update.user_locale, opts);
+      try {
+        await processIncomingMessage(message, update.user_locale, opts);
+      } finally {
+        if (recoveredKey) await opts.journal?.remember(recoveredKey);
+      }
       break;
     }
 
