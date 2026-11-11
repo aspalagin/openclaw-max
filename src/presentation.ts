@@ -20,6 +20,7 @@
  * - url / URL-backed web-app → a MAX `link` button.
  */
 
+import { createActionGate } from 'openclaw/plugin-sdk/channel-actions';
 import type { ChannelOutboundAdapter } from 'openclaw/plugin-sdk/channel-contract';
 import type { OpenClawConfig, ReplyPayload } from 'openclaw/plugin-sdk/core';
 import {
@@ -462,4 +463,16 @@ export function readMaxDeliveryPin(
   }
   if (pinFlag === true) return { enabled: true };
   return undefined;
+}
+
+/** Refusal of a pin while channels.max.actions.pin is false. */
+export const MAX_PIN_DISABLED = 'MAX action "pin" is disabled by channels.max.actions';
+
+/**
+ * channels.max.actions.pin (default on). It gates every pin made for the
+ * agent, not only the `pin` action: `pin=true` / `delivery.pin` of a send,
+ * core's delivery pin and the pin of an agent reply.
+ */
+export function isMaxPinEnabled(actions: Record<string, boolean | undefined> | undefined): boolean {
+  return createActionGate(actions)('pin');
 }

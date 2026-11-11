@@ -18,7 +18,9 @@ import { assertMaxActionInScope } from './action-scope.js';
 import { resolveMaxTableMode, toMaxMarkdown } from './format.js';
 import { sanitizeMaxFileName } from './media-temp.js';
 import {
+  isMaxPinEnabled,
   materializeMaxPresentation,
+  MAX_PIN_DISABLED,
   readMaxDeliveryPin,
   resolveMaxTextChunkLimit,
 } from './presentation.js';
@@ -281,8 +283,9 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
     return {
       actions: MAX_MESSAGE_ACTIONS.filter((name) => gate(name)),
       // presentation → inline keyboard + MAX markdown (presentation.ts);
-      // delivery-pin → PUT /chats/{chatId}/pin on the sent message.
-      capabilities: ['presentation', 'delivery-pin'],
+      // delivery-pin → PUT /chats/{chatId}/pin on the sent message, only
+      // while the pin action is on (it gates every pin).
+      capabilities: gate('pin') ? ['presentation', 'delivery-pin'] : ['presentation'],
       mediaSourceParams: { send: mediaSourceParams, sendAttachment: mediaSourceParams },
     };
   },
@@ -296,6 +299,11 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
     const account = resolveMaxAccount({ cfg: ctx.cfg, accountId: ctx.accountId });
     if (!createActionGate(account.config.actions)('send')) {
       throw new Error('MAX action "send" is disabled by channels.max.actions');
+    }
+    // Refused before anything is sent: a disabled pin is never made, and the
+    // send is not delivered without the pin it asked for.
+    if (readMaxDeliveryPin(payload.delivery) && !isMaxPinEnabled(account.config.actions)) {
+      throw new Error(`${MAX_PIN_DISABLED}: send without pin=true / delivery.pin`);
     }
     await assertMaxActionInScope(ctx, account, { to, replyTo: replyToId });
     return payload;
@@ -364,6 +372,11 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       });
       const presentation = normalizeMessagePresentation(params.presentation);
       const pin = readMaxDeliveryPin(params.delivery, params.pin);
+      // A pin is its own action (channels.max.actions.pin): refused before
+      // anything is sent, never made silently.
+      if (pin && !isMaxPinEnabled(account.config.actions)) {
+        throw new Error(`${MAX_PIN_DISABLED}: send without pin=true / delivery.pin`);
+      }
       const content = formatText(
         readStringParam(params, 'message', {
           required: !presentation,
@@ -446,8 +459,11 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
       // type: callback (default) | link | message | clipboard | open_app | request_contact | request_geo_location
       const buttons = readMaxSendButtons(params.buttons);
 
-      // Sticker sending (by sticker code)
+      // Sticker sending (by sticker code); a sticker is its own action too.
       if (stickerId) {
+        if (!createActionGate(account.config.actions)('sticker')) {
+          throw new Error('MAX action "sticker" is disabled by channels.max.actions');
+        }
         // stickerId can be a single id or comma-separated
         const codes = Array.isArray(params.stickerId)
           ? (params.stickerId as string[])
