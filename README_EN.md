@@ -95,6 +95,7 @@ A reply is formatted before it is split into 4000-character parts: parts are mea
 ## Requirements and compatibility
 
 - OpenClaw ≥ 2026.9.6 (`peerDependencies.openclaw`, `openclaw.compat.minGatewayVersion`). Older releases do not work, checked against 2026.9.3–2026.9.5 by typecheck and the test suite: 2026.9.5 lacks `createLivePreviewLifecycle` in `openclaw/plugin-sdk/channel-outbound`, so the plugin module fails to load (turn status is built on it); 2026.9.3 and 2026.9.4 also lack the sender check for answering agent questions with buttons (`authorize` in `resolveOption`), the guarded heartbeat typing hook and the plan-explanation format. Upgrade OpenClaw to use this plugin.
+- CI checks the locked SDK, OpenClaw 2026.11.1, 2026.11.3 and `latest`; `beta` remains an optional early check.
 - Node.js ≥ 22.
 - MAX Bot API as described by schema 0.0.33 and [dev.max.ru/docs-api](https://dev.max.ru/docs-api).
 - For webhook mode: a public HTTPS address on port 443 with a trusted certificate that reaches the gateway's HTTP server.
