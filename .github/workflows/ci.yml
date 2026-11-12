@@ -45,6 +45,8 @@ jobs:
         include:
           - openclaw: 2026.11.1
             zod: locked
+          - openclaw: 2026.11.3
+            zod: locked
           - openclaw: beta
             zod: locked
     steps:
