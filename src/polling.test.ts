@@ -263,14 +263,18 @@ describe('polling across a restart', () => {
     const batch = { updates: [msg('a1'), msg('a2')], marker: 9 };
     // Core adopts the turn of a1 (and now owns its crash recovery), then the
     // process dies mid-turn: the dispatch never returns.
+    let adopted = false;
     dispatchCalls.fn = async (u) => {
       dispatched.push((u as MaxUpdate).message?.body?.mid);
-      await maxTurnAdoptionReplyOptions().turnAdoptionLifecycle?.onAdopted();
+      const lifecycle = maxTurnAdoptionReplyOptions().turnAdoptionLifecycle;
+      if (lifecycle) {
+        await lifecycle.onAdopted();
+        adopted = true;
+      }
       await new Promise<never>(() => undefined);
     };
     const first = run('adopted-crash', [batch]);
-    await vi.waitFor(() => expect(dispatched).toEqual(['a1']));
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.waitFor(() => expect(adopted).toBe(true));
     first.abort.abort();
 
     resetMaxUpdateJournalsForTest(); // new process
