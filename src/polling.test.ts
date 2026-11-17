@@ -288,14 +288,19 @@ describe('polling across a restart', () => {
     resetMaxUpdateJournalsForTest(); // restarted with transport "polling"
 
     const dispatched: Array<string | undefined> = [];
+    let adopted = false;
     dispatchCalls.fn = async (u) => {
       dispatched.push((u as MaxUpdate).message?.body?.mid);
-      await maxTurnAdoptionReplyOptions().turnAdoptionLifecycle?.onAdopted();
+      const lifecycle = maxTurnAdoptionReplyOptions().turnAdoptionLifecycle;
+      if (lifecycle) {
+        await lifecycle.onAdopted();
+        adopted = true;
+      }
       await new Promise<never>(() => undefined);
     };
     const first = run('adopted-leftover', []);
-    await vi.waitFor(() => expect(dispatched).toEqual(['w1']));
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // Simulate a crash *after* the durable adoption, not 20 ms after dispatch.
+    await vi.waitFor(() => expect(adopted).toBe(true));
     first.abort.abort();
 
     resetMaxUpdateJournalsForTest(); // new process

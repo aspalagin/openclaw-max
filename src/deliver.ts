@@ -12,7 +12,7 @@ import { PlatformMessageNotDispatchedError } from 'openclaw/plugin-sdk/error-run
 import { LocalMediaAccessError } from 'openclaw/plugin-sdk/web-media';
 
 import type { ResolvedMaxAccount } from './accounts.js';
-import { type MaxApi, MaxApiError } from './api.js';
+import { type MaxApi, MaxApiError, MaxApiResultError } from './api.js';
 import { resolveMaxTableMode, toMaxMarkdown } from './format.js';
 import {
   isMaxPinEnabled,
@@ -66,7 +66,7 @@ export function toMaxDeliveryError(err: unknown, visible: MaxVisibleDelivery): u
       retryable: err.status === 429,
     });
   }
-  if (err instanceof LocalMediaAccessError) {
+  if (err instanceof MaxApiResultError || err instanceof LocalMediaAccessError) {
     return new PlatformMessageNotDispatchedError(err.message, { cause: err, retryable: false });
   }
   return err;

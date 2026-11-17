@@ -3,7 +3,7 @@ import type { ChannelMessageActionContext } from 'openclaw/plugin-sdk/channel-co
 
 import type { ResolvedMaxAccount } from './accounts.js';
 import { currentMaxChatForAccount } from './action-scope.js';
-import { MaxApi } from './api.js';
+import type { MaxApi } from './api.js';
 import { resolveMaxTableMode, toMaxMarkdown } from './format.js';
 
 export function commentMid(value: unknown): string {

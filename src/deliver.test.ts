@@ -8,7 +8,7 @@ import { isChannelPartialDeliveryError } from 'openclaw/plugin-sdk/channel-inbou
 import { PlatformMessageNotDispatchedError } from 'openclaw/plugin-sdk/error-runtime';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MaxApi, MaxApiError } from './api.js';
+import { MaxApi, MaxApiError, MaxApiResultError } from './api.js';
 import { deliverMaxReply, toMaxDeliveryError } from './deliver.js';
 import type { MaxMarkdownTableMode } from './format.js';
 import { setMaxRuntime } from './runtime.js';
@@ -193,6 +193,11 @@ describe('delivery errors follow the SDK contract', () => {
   it('marks an exhausted rate limit as retryable, and rethrows ambiguous 5xx as is', () => {
     const limited = toMaxDeliveryError(new MaxApiError('x', 429), { messageIds: [], texts: [] });
     expect((limited as PlatformMessageNotDispatchedError).retryable).toBe(true);
+
+    const refused = new MaxApiResultError('MAX returned success=false', 200, null);
+    const rejected = toMaxDeliveryError(refused, { messageIds: [], texts: [] });
+    expect(rejected).toBeInstanceOf(PlatformMessageNotDispatchedError);
+    expect(rejected).toMatchObject({ cause: refused, retryable: false });
 
     const upstream = new MaxApiError('x', 502);
     expect(toMaxDeliveryError(upstream, { messageIds: [], texts: [] })).toBe(upstream);

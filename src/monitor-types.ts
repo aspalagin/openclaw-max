@@ -5,12 +5,12 @@
 
 import type { ChannelAccountSnapshot, ChannelLogSink } from 'openclaw/plugin-sdk/channel-contract';
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
+import type { registerPluginHttpRoute } from 'openclaw/plugin-sdk/webhook-ingress';
 
 import type { MaxAccountConfig, ResolvedMaxAccount } from './accounts.js';
 import type { MaxApi, MaxUpdateType } from './api.js';
 import type { MaxStateStore } from './state.js';
 import type { MaxUpdateJournal } from './update-journal.js';
-import type { RegisterMaxWebhookRoute } from './webhook.js';
 
 /**
  * Runtime status patches published to the gateway. Activity timestamps are not
@@ -34,7 +34,7 @@ export interface MaxMonitorOptions {
   /** The transport's durable update journal (dedupe keys of handled updates), if any */
   journal?: MaxUpdateJournal;
   /** Gateway route registration; defaults to plugin-sdk registerPluginHttpRoute (tests inject a mock) */
-  registerWebhookRoute?: RegisterMaxWebhookRoute;
+  registerWebhookRoute?: typeof registerPluginHttpRoute;
 }
 
 /**
