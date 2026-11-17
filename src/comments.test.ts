@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { maxMessageActions } from './actions.js';
 import { MaxApi } from './api.js';
+import { maxPlugin } from './channel.js';
 import { maxOutboundAdapter } from './channel-outbound.js';
 
 const to = 'max:-42';
@@ -122,6 +123,8 @@ describe('MAX post comments', () => {
       mediaUrls: [],
       bestEffort: true,
       idempotencyKey: 'sdk-generated',
+      __agentId: 'example',
+      __sessionKey: 'agent:example:max:channel:-42',
       message: 'reply',
     };
     const context = {
@@ -213,8 +216,27 @@ describe('MAX post comments', () => {
     ).rejects.toThrow('presentation');
     expect(calls).toHaveLength(0);
   });
-  it('sends direct SDK text to the post; rejects media before uploading or creating a root message', async () => {
-    const ctx = { cfg, to, threadId, text: 'sdk' };
+  it('resolves the post before queued SDK delivery; never inherits across providers, chats or ambiguous accounts', async () => {
+    const resolve = maxPlugin.threading!.resolveAutoThreadId!;
+    const route = { cfg, to, toolContext: turn } as Parameters<typeof resolve>[0];
+    expect(resolve({ ...route, to: '-43' })).toBeUndefined();
+    expect(
+      resolve({ ...route, toolContext: { ...turn, currentChannelProvider: 'telegram' } }),
+    ).toBeUndefined();
+    expect(() => resolve({ ...route, accountId: 'other' })).toThrow('explicit post threadId');
+    expect(() =>
+      resolve({
+        ...route,
+        cfg: {
+          channels: {
+            max: { botToken: 'mock', accounts: { second: { botToken: 'mock-second' } } },
+          },
+        },
+      }),
+    ).toThrow('explicit post threadId');
+    const resolved = resolve({ ...route, to: '-42' });
+    expect(resolved).toBe(threadId);
+    const ctx = { cfg, to, threadId: resolved, text: 'sdk' };
     await expect(maxOutboundAdapter.sendText!(ctx as never)).resolves.toEqual({
       channel: 'max',
       messageId,

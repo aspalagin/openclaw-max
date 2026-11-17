@@ -287,7 +287,10 @@ const COMMENT_ROUTE_FIELDS = [
   'topLevel',
   'dryRun',
   'bestEffort',
-  'idempotencyKey', // SDK operation envelope, not a MAX comment option
+  // SDK routing/operation metadata, never forwarded to MAX.
+  'idempotencyKey',
+  '__agentId',
+  '__sessionKey',
 ];
 
 async function handleCommentAction(

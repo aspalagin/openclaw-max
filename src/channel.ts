@@ -10,9 +10,9 @@
 
 import type { ChannelMeta } from 'openclaw/plugin-sdk/channel-contract';
 import type { ChannelPlugin } from 'openclaw/plugin-sdk/channel-core';
-import { buildChannelConfigSchema } from 'openclaw/plugin-sdk/core';
+import { buildChannelConfigSchema, normalizeAccountId } from 'openclaw/plugin-sdk/core';
 
-import type { ResolvedMaxAccount } from './accounts.js';
+import { listMaxAccountIds, type ResolvedMaxAccount } from './accounts.js';
 import { maxMessageActions } from './actions.js';
 import { maxAgentPromptAdapter } from './channel-agent-prompt.js';
 import { maxConfigAdapter, maxSetupAdapter } from './channel-config.js';
@@ -20,6 +20,7 @@ import { maxDirectoryAdapter, maxMessagingAdapter } from './channel-directory.js
 import { maxGatewayAdapter, maxStatusAdapter } from './channel-lifecycle.js';
 import { maxOutboundAdapter } from './channel-outbound.js';
 import { maxGroupsAdapter, maxPairingAdapter, maxSecurityAdapter } from './channel-policy.js';
+import { commentMid } from './comments.js';
 import { MaxConfigSchema } from './config-schema.js';
 import {
   buildMaxModelBrowseChannelData,
@@ -99,6 +100,28 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
 
   threading: {
     resolveReplyToMode: () => 'first',
+    // Core resolves this before queueing a send (which can skip handleAction).
+    resolveAutoThreadId: ({ cfg, accountId, to, toolContext }) => {
+      if (!toolContext?.currentThreadTs) return undefined;
+      const origin = toolContext.currentChannelId?.trim() ?? '';
+      if (
+        toolContext.currentChannelProvider
+          ? toolContext.currentChannelProvider !== 'max'
+          : !origin.startsWith('max:')
+      )
+        return undefined;
+      const chat = origin.replace(/^max:/, '');
+      if (!/^-?\d+$/.test(chat) || to.trim().replace(/^max:/, '') !== chat) return undefined;
+      // This SDK hook has the destination account, not the originating one.
+      // Never guess when several accounts can see the same channel.
+      const ids = listMaxAccountIds(cfg);
+      if (ids.length !== 1 || ids[0] !== normalizeAccountId(accountId)) {
+        throw new Error(
+          'MAX comments require an explicit post threadId when the account is ambiguous',
+        );
+      }
+      return commentMid(toolContext.currentThreadTs);
+    },
     buildToolContext: ({ context, hasRepliedRef }) => ({
       currentChannelId: context.To,
       currentMessageId: context.CurrentMessageId,
