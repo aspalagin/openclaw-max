@@ -57,7 +57,8 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
   capabilities: {
     chatTypes: ['direct', 'group', 'channel'],
     reactions: false,
-    threads: false,
+    // Threads are comment sections of channel posts, never topics in group chats.
+    threads: true,
     media: true,
     nativeCommands: true,
     blockStreaming: false,
@@ -98,6 +99,16 @@ export const maxPlugin: ChannelPlugin<ResolvedMaxAccount> = {
 
   threading: {
     resolveReplyToMode: () => 'first',
+    buildToolContext: ({ context, hasRepliedRef }) => ({
+      currentChannelId: context.To,
+      currentMessageId: context.CurrentMessageId,
+      replyToMode: context.ReplyToMode,
+      hasRepliedRef,
+      ...(context.MessageThreadId != null && {
+        currentThreadTs: String(context.MessageThreadId),
+        sameChannelThreadRequired: true,
+      }),
+    }),
   },
   messaging: maxMessagingAdapter,
   directory: maxDirectoryAdapter,

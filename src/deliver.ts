@@ -7,12 +7,12 @@
 
 import type { ChannelLogSink } from 'openclaw/plugin-sdk/channel-contract';
 import { createChannelPartialDeliveryError } from 'openclaw/plugin-sdk/channel-inbound';
-import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
+import type { OpenClawConfig, ReplyPayload } from 'openclaw/plugin-sdk/core';
 import { PlatformMessageNotDispatchedError } from 'openclaw/plugin-sdk/error-runtime';
 import { LocalMediaAccessError } from 'openclaw/plugin-sdk/web-media';
 
 import type { ResolvedMaxAccount } from './accounts.js';
-import { MaxApiError } from './api.js';
+import { type MaxApi, MaxApiError } from './api.js';
 import { resolveMaxTableMode, toMaxMarkdown } from './format.js';
 import {
   isMaxPinEnabled,
@@ -81,6 +81,71 @@ function logSendFailure(
   // A MaxApiError message already carries the MAX error code; the response body
   // stays out of the log, its free-form `message` may echo user data.
   log?.error(`[${account.accountId}] MAX ${what} failed: ${String(err)}`);
+}
+
+/** Comments have no channel-send fallback, keyboard, pin, or media upload.
+ * Keep the capability narrow: this delivery cannot address the channel feed. */
+export async function deliverMaxCommentReply(params: {
+  api: Pick<MaxApi, 'sendComment'>;
+  postId: string;
+  replyToId?: string;
+  payload: ReplyPayload;
+  account: ResolvedMaxAccount;
+  config: OpenClawConfig;
+  kind: 'tool' | 'block' | 'final';
+  statusSink?: (patch: { lastOutboundAt: number }) => void;
+}) {
+  const { api, postId, replyToId, payload, account, config } = params;
+  if (
+    params.kind !== 'final' ||
+    payload.isReasoning ||
+    payload.isCommentary ||
+    payload.isStatusNotice ||
+    payload.isCompactionNotice ||
+    payload.isFallbackNotice ||
+    !payload.text?.trim() ||
+    payload.mediaUrl ||
+    payload.mediaUrls?.length ||
+    payload.attachments?.length ||
+    payload.presentation ||
+    payload.interactive ||
+    payload.location ||
+    payload.audioAsVoice ||
+    payload.videoAsNote ||
+    readMaxChannelButtons(payload.channelData)?.length ||
+    readMaxDeliveryPin(payload.delivery)
+  ) {
+    return { visibleReplySent: false, suppression: { reason: 'channel_transform' } };
+  }
+  const text = getMaxRuntime().channel.text;
+  const chunks = text.chunkMarkdownTextWithMode(
+    payload.text,
+    resolveMaxTextChunkLimit(config, account.accountId),
+    text.resolveChunkMode(config, 'max', account.accountId),
+  );
+  const visible: MaxVisibleDelivery = { texts: [], messageIds: [] };
+  const { disableLinkPreview } = resolveMaxSendFlags(account.config, {
+    channelData: payload.channelData,
+  });
+  try {
+    for (const chunk of chunks) {
+      const { message } = await api.sendComment(
+        postId,
+        {
+          text: chunk,
+          ...(replyToId ? { link: { type: 'reply', mid: replyToId } as const } : {}),
+        },
+        disableLinkPreview,
+      );
+      if (!message.body?.mid) throw new Error('MAX comment response has no message id');
+      visible.messageIds.push(message.body.mid);
+      visible.texts.push(chunk);
+      params.statusSink?.({ lastOutboundAt: Date.now() });
+    }
+  } catch (error) {
+    throw toMaxDeliveryError(error, visible);
+  }
+  return { visibleReplySent: visible.messageIds.length > 0, messageIds: visible.messageIds };
 }
 
 export async function deliverMaxReply(params: {

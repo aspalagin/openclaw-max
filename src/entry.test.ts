@@ -57,6 +57,21 @@ describe('plugin entry', () => {
   });
 });
 
+describe('channel post comment context', () => {
+  it('keeps the target chat separate from the case-sensitive post id', () => {
+    const build = maxPlugin.threading?.buildToolContext;
+    expect(maxPlugin.capabilities.threads).toBe(true);
+    expect(
+      build?.({ cfg: {}, context: { To: 'max:-42', MessageThreadId: 'mid.AbC' } }),
+    ).toMatchObject({
+      currentChannelId: 'max:-42',
+      currentThreadTs: 'mid.AbC',
+      sameChannelThreadRequired: true,
+    });
+    expect(build?.({ cfg: {}, context: { To: 'max:-42' } })).not.toHaveProperty('currentThreadTs');
+  });
+});
+
 describe('TTS voice capability', () => {
   it('asks core for audio-file synthesis and marks MAX audio formats as voice', () => {
     expect(maxPlugin.capabilities.tts?.voice).toEqual({

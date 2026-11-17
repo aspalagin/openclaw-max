@@ -131,6 +131,10 @@ export interface MaxUpdate {
   payload?: string | null;
   title?: string;
   is_channel?: boolean;
+  /** bot_admin_permissions_changed: current admin status and granted permissions. */
+  bot_id?: number;
+  is_admin?: boolean;
+  permissions?: string[] | null;
   user_locale?: string | null;
   [key: string]: unknown;
 }
@@ -249,6 +253,7 @@ export interface MaxSendResult {
 
 export interface MaxSimpleResult {
   success: boolean;
+  code?: string | null;
   message?: string;
 }
 

@@ -10,7 +10,7 @@ import { Readable } from 'node:stream';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { MaxUpdate } from './api.js';
+import { MaxApi, type MaxUpdate } from './api.js';
 import { dispatchUpdate } from './dispatch.js';
 import { setMaxRuntime } from './runtime.js';
 import { runWithMaxTurnAdoption } from './turn-adoption.js';
@@ -109,6 +109,172 @@ function forwardLink(message: Record<string, unknown>, sender: unknown = AUTHOR)
     message: { mid: 'mid.orig', seq: 1, ...message },
   };
 }
+
+describe('channel comments', () => {
+  const recipient = { chat_type: 'channel', chat_id: -7007, post_id: 'mid.Abc' };
+  const body = { mid: 'mid.comment', text: '@test_bot hello' };
+  function comment(overrides: Record<string, unknown> = {}): MaxUpdate {
+    return { ...created({ recipient, body, ...overrides }), update_type: 'comment_created' };
+  }
+  function options(accountConfig: Record<string, unknown> = {}) {
+    return {
+      ...makeOpts({
+        groups: { '-7007': { allowFrom: ['1001'] } },
+        markSeen: true,
+        ...accountConfig,
+      }),
+      api: new MaxApi({ token: 'test-token', baseUrl: 'https://mock.example.test' }),
+    };
+  }
+  type Captured = {
+    ctx: Record<string, unknown>;
+    replyOptions: Record<string, unknown>;
+    dispatcherOptions: {
+      typingCallbacks?: unknown;
+      deliver: (payload: unknown, info: { kind: string }) => Promise<unknown>;
+    };
+  };
+  let runtime: ReturnType<typeof makeRuntime>;
+  beforeEach(() => {
+    runtime = makeRuntime();
+    setMaxRuntime(runtime.core as never);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ message: { recipient, body: { mid: 'mid.answer' } } }),
+    });
+  });
+
+  it('isolates even case-distinct posts while leaving To/OriginatingTo at the channel', async () => {
+    const opts = options();
+    runtime.core.channel.reply.dispatchReplyWithBufferedBlockDispatcher.mockImplementation(
+      async (params) => {
+        runtime.dispatched.push(params.ctx);
+        await (params as unknown as Captured).dispatcherOptions.deliver(
+          { text: 'Answer' },
+          { kind: 'final' },
+        );
+      },
+    );
+    for (const post_id of ['mid.Abc', 'mid.abc', 'mid.Abc']) {
+      await dispatchUpdate(comment({ recipient: { ...recipient, post_id } }), opts as never);
+    }
+    expect(
+      vi.mocked(global.fetch).mock.calls.map(([url]) => new URL(String(url)).pathname),
+    ).toEqual([
+      '/messages/mid.Abc/comments',
+      '/messages/mid.abc/comments',
+      '/messages/mid.Abc/comments',
+    ]);
+    const [a, b, same] = runtime.dispatched;
+    expect(a).toMatchObject({
+      To: 'max:-7007',
+      OriginatingTo: 'max:-7007',
+      ChatType: 'group',
+      MessageThreadId: 'mid.Abc',
+    });
+    expect(b.MessageThreadId).toBe('mid.abc');
+    expect(String(a.SessionKey).toLowerCase()).not.toBe(String(b.SessionKey).toLowerCase());
+    expect(same.SessionKey).toBe(a.SessionKey);
+    expect(runtime.core.channel.routing.resolveAgentRoute).toHaveBeenCalledWith(
+      expect.objectContaining({ peer: { kind: 'group', id: '-7007' } }),
+    );
+  });
+
+  it.each(['progress', 'partial', 'block'])(
+    'delivers only final text under the event post (%s)',
+    async (mode) => {
+      const opts = options({ streamMode: mode, disableLinkPreview: true });
+      runtime.core.channel.reply.dispatchReplyWithBufferedBlockDispatcher.mockImplementation(
+        async (params) => {
+          const { dispatcherOptions, replyOptions } = params as unknown as Captured;
+          expect(dispatcherOptions.typingCallbacks).toBeUndefined();
+          expect(replyOptions.disableBlockStreaming).toBe(true);
+          for (const hook of ['onPartialReply', 'onItemEvent', 'turnAdoptionLifecycle'])
+            expect(replyOptions[hook]).toBeUndefined();
+          for (const [kind, payload] of [
+            ['tool', { text: 'tool output' }],
+            ['block', { text: 'partial' }],
+            ['final', { text: 'photo', mediaUrl: 'https://example.test/p.jpg' }],
+            [
+              'final',
+              {
+                text: 'menu',
+                channelData: { max: { buttons: [[{ text: 'Ok', callback_data: 'ok' }]] } },
+              },
+            ],
+          ] as const) {
+            await expect(dispatcherOptions.deliver(payload, { kind })).resolves.toMatchObject({
+              visibleReplySent: false,
+            });
+          }
+          await dispatcherOptions.deliver(
+            { text: 'Answer', replyToId: 'mid.other' },
+            { kind: 'final' },
+          );
+        },
+      );
+      await runWithMaxTurnAdoption(vi.fn(), () => dispatchUpdate(comment(), opts as never));
+      const requests = vi.mocked(global.fetch).mock.calls;
+      expect(requests).toHaveLength(1);
+      const [url, init] = requests[0];
+      expect(String(url)).toBe(
+        'https://mock.example.test/messages/mid.Abc/comments?disable_link_preview=true',
+      );
+      expect(init?.method).toBe('POST');
+      expect(JSON.parse(String(init?.body))).toEqual({
+        text: 'Answer',
+        link: { type: 'reply', mid: 'mid.comment' },
+      });
+    },
+  );
+
+  it('does not send to the feed when posting a comment fails', async () => {
+    vi.mocked(global.fetch).mockRejectedValue(new Error('comment send failed'));
+    runtime.core.channel.reply.dispatchReplyWithBufferedBlockDispatcher.mockImplementation(
+      async (params) => {
+        await (params as unknown as Captured).dispatcherOptions.deliver(
+          { text: 'Answer' },
+          { kind: 'final' },
+        );
+      },
+    );
+    await expect(dispatchUpdate(comment(), options() as never)).rejects.toThrow();
+    expect(vi.mocked(global.fetch).mock.calls.map(([url]) => String(url))).toEqual([
+      'https://mock.example.test/messages/mid.Abc/comments',
+    ]);
+  });
+
+  it('skips anonymous, malformed, own, unmentioned, disallowed and non-text comments before dispatch', async () => {
+    const opts = options();
+    for (const overrides of [
+      { sender: null },
+      { sender: { ...SENDER, user_id: 9009 } },
+      { sender: AUTHOR },
+      { recipient: { ...recipient, chat_id: null } },
+      { recipient: { ...recipient, post_id: null } },
+      { recipient: { ...recipient, chat_type: 'dialog' } },
+      { recipient: { ...recipient, chat_id: -99 } },
+      { body: { ...body, text: 'no mention' } },
+      { body: { ...body, attachments: [IMAGE] } },
+    ])
+      await dispatchUpdate(comment(overrides), opts as never);
+    await dispatchUpdate(comment(), options({ groupPolicy: 'disabled' }) as never);
+    await dispatchUpdate({ ...comment(), update_type: 'comment_edited' }, opts as never);
+    await dispatchUpdate(
+      {
+        update_type: 'comment_removed',
+        timestamp: 1,
+        chat_id: -7007,
+        post_id: 'mid.Abc',
+        message_id: 'mid.comment',
+        user_id: 1001,
+      },
+      opts as never,
+    );
+    expect(runtime.dispatched).toHaveLength(0);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
 
 describe('forwarded messages', () => {
   let runtime: ReturnType<typeof makeRuntime>;

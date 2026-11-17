@@ -84,6 +84,36 @@ export async function dispatchUpdate(update: MaxUpdate, opts: MaxMonitorOptions)
       break;
     }
 
+    case 'comment_created': {
+      // Never recover an incomplete comment as a chat message. Only the
+      // recipient of this event identifies the post we are allowed to answer.
+      const message = update.message;
+      const postId = message?.recipient?.post_id;
+      if (
+        !message ||
+        message.recipient?.chat_type !== 'channel' ||
+        !Number.isSafeInteger(message.recipient.chat_id) ||
+        !Number.isSafeInteger(message.sender?.user_id) ||
+        message.sender?.user_id === opts.botUserId ||
+        typeof postId !== 'string' ||
+        !/^(?:mid\.)?[A-Za-z0-9_-]+$/.test(postId) ||
+        typeof message.body?.text !== 'string' ||
+        !message.body.text.trim() ||
+        message.body.attachments?.length ||
+        message.link?.type === 'forward'
+      ) {
+        break;
+      }
+      statusSink?.({ lastInboundAt: Date.now() });
+      await processIncomingMessage(message, update.user_locale, opts, postId);
+      break;
+    }
+
+    // No per-comment retraction/edit in core: do not open a second turn.
+    case 'comment_edited':
+    case 'comment_removed':
+      break;
+
     case 'message_callback': {
       if (!update.callback) break;
       statusSink?.({ lastInboundAt: Date.now() });
@@ -177,6 +207,27 @@ export async function dispatchUpdate(update: MaxUpdate, opts: MaxMonitorOptions)
           type: update.is_channel ? 'channel' : 'chat',
           addedAt: Date.now(),
         });
+      }
+      break;
+    }
+
+    case 'bot_admin_permissions_changed': {
+      const target = update.is_channel ? 'channel' : 'chat';
+      const prefix = `[${account.accountId}] MAX bot_admin_permissions_changed in ${target} ${update.chat_id ?? '?'}`;
+      if (update.is_admin === false) {
+        log?.warn(`${prefix}: bot lost admin rights`);
+      } else if (update.is_channel && update.is_admin) {
+        if (!Array.isArray(update.permissions)) {
+          log?.warn(
+            `${prefix}: admin retained; write permission not confirmed (no permissions list)`,
+          );
+        } else if (!update.permissions.includes('write')) {
+          log?.warn(`${prefix}: admin retained but write permission lost`);
+        } else {
+          log?.info(`${prefix}: admin and write permissions retained`);
+        }
+      } else {
+        log?.info(`${prefix}: admin=${update.is_admin ?? 'unknown'}`);
       }
       break;
     }

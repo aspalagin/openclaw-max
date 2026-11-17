@@ -14,7 +14,7 @@ import { admitMaxGroupChat, admitMaxGroupSender, readMaxDmAllowFrom } from './ac
 import type { ResolvedMaxAccount } from './accounts.js';
 import type { MaxAttachment, MaxLinkedMessage, MaxMessage, MaxUpdate, MaxUser } from './api.js';
 import { resolveMaxCommandMenu } from './command-menu.js';
-import { deliverMaxReply } from './deliver.js';
+import { deliverMaxCommentReply, deliverMaxReply } from './deliver.js';
 import {
   echoMaxVoiceTranscript,
   type MaxVoiceMention,
@@ -60,6 +60,7 @@ export async function processIncomingMessage(
   message: MaxMessage,
   userLocale: string | null | undefined,
   opts: MaxMonitorOptions,
+  commentPostId?: string,
 ): Promise<void> {
   const { account, config, log, statusSink } = opts;
   const core = getMaxRuntime();
@@ -82,7 +83,7 @@ export async function processIncomingMessage(
     messageBody?.mid ??
     `link_${chatId ?? senderId}_${message.timestamp}_${message.link?.message?.mid ?? ''}`;
   const isCallbackCommand =
-    (message as MaxMessage & { __maxCallback?: boolean }).__maxCallback === true;
+    !commentPostId && (message as MaxMessage & { __maxCallback?: boolean }).__maxCallback === true;
   const isCommandMenuPress =
     isCallbackCommand &&
     (message as MaxMessage & { __maxCommandMenu?: boolean }).__maxCommandMenu === true;
@@ -134,6 +135,13 @@ export async function processIncomingMessage(
       id: routePeerId,
     },
   });
+
+  // Core case-folds MAX session keys; post ids are opaque and case-sensitive.
+  // The session discriminator is not an address: delivery always uses the
+  // original MessageThreadId and the unchanged channel To/OriginatingTo.
+  const sessionKey = commentPostId
+    ? `${route.sessionKey}:post:${Buffer.from(commentPostId).toString('hex')}`
+    : route.sessionKey;
 
   // Check for bot mention in group chats
   let wasMentioned: boolean | undefined;
@@ -333,7 +341,7 @@ export async function processIncomingMessage(
   };
   const timestampParams = {
     storePath,
-    sessionKey: route.sessionKey,
+    sessionKey,
   };
   const previousTimestamp = session.readSessionUpdatedAtAsync
     ? await session.readSessionUpdatedAtAsync(timestampParams)
@@ -380,7 +388,8 @@ export async function processIncomingMessage(
     CommandBody: rawText || (forward ? '' : attachmentText),
     From: `max:${senderId}`,
     To: `max:${chatIdStr}`,
-    SessionKey: route.sessionKey,
+    SessionKey: sessionKey,
+    ...(commentPostId ? { MessageThreadId: commentPostId, ChatId: chatIdStr } : {}),
     AccountId: route.accountId,
     ChatType: isGroup ? 'group' : 'direct',
     ConversationLabel: fromLabel,
@@ -423,14 +432,14 @@ export async function processIncomingMessage(
   // buttons. A menu press is answered here when the sender has no command
   // rights or core no longer offers the choice; otherwise it goes to core as
   // the typed command would.
-  if (isTextSlashCommand) {
+  if (isTextSlashCommand && !commentPostId) {
     const menu = await resolveMaxCommandMenu({
       text: rawTextTrimmed,
       press: isCommandMenuPress,
       ctx: ctxPayload,
       cfg: config,
       agentId: route.agentId,
-      sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+      sessionKey: ctxPayload.SessionKey ?? sessionKey,
       botUsername: opts.botUsername,
     });
     if (menu.kind === 'menu') {
@@ -465,7 +474,7 @@ export async function processIncomingMessage(
   void core.channel.session
     .recordSessionMetaFromInbound({
       storePath,
-      sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+      sessionKey: ctxPayload.SessionKey ?? sessionKey,
       ctx: ctxPayload,
     })
     .catch((err) => {
@@ -483,7 +492,7 @@ export async function processIncomingMessage(
   // Typing indicator for the whole turn: core starts it per typingMode and
   // stops the keepalive when the run completes, fails or is aborted.
   const typingCallbacks =
-    chatId != null
+    !commentPostId && chatId != null
       ? createMaxTypingCallbacks({
           api: opts.api,
           chatId,
@@ -496,10 +505,12 @@ export async function processIncomingMessage(
   // Streaming modes: "partial" = edit single message, "block" = each block as
   // separate message, "progress" = one turn-status message (progress-draft.ts).
   // Core's streaming.mode wins over the older streamMode; default off.
-  const streamMode = resolveChannelPreviewStreamMode(
-    account.config as Parameters<typeof resolveChannelPreviewStreamMode>[0],
-    account.config.streamMode ?? 'off',
-  );
+  const streamMode = commentPostId
+    ? 'off'
+    : resolveChannelPreviewStreamMode(
+        account.config as Parameters<typeof resolveChannelPreviewStreamMode>[0],
+        account.config.streamMode ?? 'off',
+      );
   const useEditStreaming = streamMode === 'partial';
   const useBlockStreaming = streamMode === 'block';
 
@@ -511,13 +522,15 @@ export async function processIncomingMessage(
   };
 
   // Draft stream for edit-streaming (like Telegram's partial reply approach)
-  const draft = createMaxDraftStream({
-    account,
-    chatId: chatIdStr,
-    replyToId: replyMid,
-    log,
-    statusSink,
-  });
+  const draft = useEditStreaming
+    ? createMaxDraftStream({
+        account,
+        chatId: chatIdStr,
+        replyToId: replyMid,
+        log,
+        statusSink,
+      })
+    : undefined;
 
   // Turn status: one message edited while the agent works, deleted once the
   // final answer landed; its failures never fail the turn.
@@ -537,6 +550,18 @@ export async function processIncomingMessage(
         ...prefixOptions,
         typingCallbacks,
         deliver: async (rawPayload, info) => {
+          if (commentPostId) {
+            return deliverMaxCommentReply({
+              api: opts.api,
+              postId: commentPostId,
+              replyToId: messageBody?.mid,
+              payload: rawPayload,
+              kind: info.kind,
+              account,
+              config,
+              statusSink,
+            });
+          }
           // This funnel consumes ReplyPayload directly, so it must apply the same
           // presentation fallback/render policy as core's outbound path.
           const payload = await materializeMaxPresentation(rawPayload);
@@ -571,7 +596,7 @@ export async function processIncomingMessage(
       },
       replyOptions: {
         onModelSelected,
-        ...(useEditStreaming
+        ...(draft
           ? {
               onPartialReply: (payload: { text?: string }) => {
                 if (payload.text) draft.update(payload.text);
@@ -581,7 +606,10 @@ export async function processIncomingMessage(
         ...(useBlockStreaming ? { disableBlockStreaming: false } : {}),
         ...(groupEntry?.skills ? { skillFilter: groupEntry.skills } : {}),
         ...(progress ? progress.replyOptions : {}),
-        ...maxTurnAdoptionReplyOptions(),
+        // A recovered/adopted turn would no longer own the post-only deliverer.
+        ...(commentPostId
+          ? { disableBlockStreaming: true, suppressToolProgressMessages: true }
+          : maxTurnAdoptionReplyOptions()),
       },
     });
   } catch (err) {
@@ -592,8 +620,8 @@ export async function processIncomingMessage(
     // A partial draft no final answer replaced (NO_REPLY, an aborted turn, an
     // answer sent by the message tool) is not the answer: remove it. After a
     // failed dispatch it stays as the record of the turn.
-    if (!dispatchFailed && draft.messageId && !draft.finalized) await draft.discard();
-    else await draft.clear();
+    if (!dispatchFailed && draft?.messageId && !draft.finalized) await draft.discard();
+    else await draft?.clear();
   }
 }
 

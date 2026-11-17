@@ -16,7 +16,7 @@ import { parse } from 'yaml';
 
 import type { ResolvedMaxAccount } from './accounts.js';
 import { MaxApi } from './api.js';
-import { MAX_SUBSCRIBED_UPDATE_TYPES } from './monitor.js';
+import { MAX_SUBSCRIBED_UPDATE_TYPES, MAX_WEBHOOK_UPDATE_TYPES } from './monitor-types.js';
 import {
   detectMaxMediaType,
   MAX_SEND_BUTTON_TYPES,
@@ -107,7 +107,8 @@ describe(`MAX schema snapshot`, () => {
 
 describe('update types', () => {
   it('subscribes only to update types from Update.discriminator.mapping', () => {
-    expectSubset(MAX_SUBSCRIBED_UPDATE_TYPES, updateMapping, 'subscribed update_types');
+    expectSubset(MAX_SUBSCRIBED_UPDATE_TYPES, updateMapping, 'polling update types');
+    expectSubset(MAX_WEBHOOK_UPDATE_TYPES, updateMapping, 'webhook update types');
   });
 
   it('the webhook subscribe default list matches the subscribed update types', async () => {
@@ -116,7 +117,7 @@ describe('update types', () => {
       api: new MaxApi({ token: 't' }),
       webhookUrl: 'https://bot.example/max/webhook',
     });
-    expect(calls[0].body?.update_types).toEqual(MAX_SUBSCRIBED_UPDATE_TYPES);
+    expect(calls[0].body?.update_types).toEqual(MAX_WEBHOOK_UPDATE_TYPES);
   });
 
   it('MaxUpdateType and the dispatch switch know only schema update types', () => {
@@ -128,11 +129,7 @@ describe('update types', () => {
     expectSubset(declared, updateMapping, 'MaxUpdateType');
     expectSubset(handled, updateMapping, 'dispatchUpdate cases');
     // Every subscribed type has its own branch in dispatchUpdate.
-    expectSubset(
-      MAX_SUBSCRIBED_UPDATE_TYPES,
-      new Set(handled),
-      'subscribed without a dispatch case',
-    );
+    expectSubset(MAX_WEBHOOK_UPDATE_TYPES, new Set(handled), 'subscribed without a dispatch case');
   });
 
   it('message_callback carries message next to callback; audio carries transcription', () => {

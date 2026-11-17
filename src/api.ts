@@ -320,6 +320,18 @@ export class MaxApiError extends Error {
   }
 }
 
+/** A completed request refused by MAX, not an HTTP failure eligible for a send fallback. */
+export class MaxApiResultError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public code?: string | null,
+  ) {
+    super(message);
+    this.name = 'MaxApiResultError';
+  }
+}
+
 /** A MAX error code as it may appear in the log: a short dotted identifier. */
 const LOGGABLE_ERROR_CODE = /^[A-Za-z0-9][\w.-]{0,63}$/;
 /** A localization key MAX puts in `message`, e.g. "Key: errors.process.attachment.movie.not.owner". */
@@ -377,7 +389,7 @@ export class MaxRequestTimeoutError extends Error {
  * duplicate the message — only a definite 429 (never applied) is retried.
  */
 function isRetryableError(err: unknown, idempotent: boolean): boolean {
-  if (err instanceof MaxNetworkConfigError) return false;
+  if (err instanceof MaxNetworkConfigError || err instanceof MaxApiResultError) return false;
   // A client-side timeout is safe to retry only for idempotent methods here; the
   // send path handles its own single, duplicate-safe retry for POST /messages.
   if (err instanceof MaxRequestTimeoutError) return idempotent;
@@ -493,13 +505,22 @@ export class MaxApi {
         );
       }
 
-      if (!res.ok) {
+      const result = json as Partial<MaxSimpleResult> | null;
+      const refused = res.ok && result?.success === false;
+      if (!res.ok || refused) {
         // Never log the request body: it may carry the webhook secret (POST
         // /subscriptions) or private message text. Log only method+path+status
         // and the MAX error code (describeMaxErrorBody).
         const detail = describeMaxErrorBody(json);
-        const summary = `${method} ${path} → ${res.status}${detail ? ` (${detail})` : ''}`;
+        const status = refused ? `${res.status} success=false` : String(res.status);
+        const summary = `${method} ${path} → ${status}${detail ? ` (${detail})` : ''}`;
         getMaxLogger().error(`[MAX API] ${summary}`);
+        if (refused) {
+          // Do not retain the free-form response message, even on the error object.
+          const code =
+            typeof result.code === 'string' || result.code === null ? result.code : undefined;
+          throw new MaxApiResultError(`MAX API ${summary}`, res.status, code);
+        }
         const error = new MaxApiError(`MAX API ${summary}`, res.status, json);
         const retryAfter = res.headers?.get?.('retry-after');
         if (retryAfter) {
@@ -523,7 +544,7 @@ export class MaxApi {
         );
         throw new MaxRequestTimeoutError(method, path, elapsedMs, phase);
       }
-      if (!isAbort && !(err instanceof MaxApiError)) {
+      if (!isAbort && !(err instanceof MaxApiError) && !(err instanceof MaxApiResultError)) {
         // Network-level failure (DNS/TCP/TLS/reset): record timing so a connect
         // stall is distinguishable from a response-wait stall in the log.
         getMaxLogger().error(
@@ -624,6 +645,57 @@ export class MaxApi {
   /** Get a single message by its mid (GET /messages/{messageId}); 404 if gone or inaccessible. */
   async getMessageById(messageId: string): Promise<MaxMessage> {
     return this.request<MaxMessage>('GET', `/messages/${encodeURIComponent(messageId)}`);
+  }
+
+  // ── Channel post comments (text only) ──
+
+  async getComments(
+    postId: string,
+    params?: { comment_ids?: string[]; before?: number; after?: number; count?: number },
+  ): Promise<{ messages: MaxMessage[] }> {
+    return this.request('GET', `/messages/${encodeURIComponent(postId)}/comments`, {
+      ...params,
+      comment_ids: params?.comment_ids?.join(','),
+    });
+  }
+
+  async getCommentById(postId: string, commentId: string): Promise<MaxMessage> {
+    return this.request(
+      'GET',
+      `/messages/${encodeURIComponent(postId)}/comments/${encodeURIComponent(commentId)}`,
+    );
+  }
+
+  async sendComment(
+    postId: string,
+    body: { text: string; format?: 'markdown' | 'html'; link?: { type: 'reply'; mid: string } },
+    disableLinkPreview?: boolean,
+  ): Promise<{ message: MaxMessage }> {
+    return this.request(
+      'POST',
+      `/messages/${encodeURIComponent(postId)}/comments`,
+      { disable_link_preview: disableLinkPreview },
+      body,
+    );
+  }
+
+  async editComment(
+    postId: string,
+    commentId: string,
+    body: Parameters<MaxApi['sendComment']>[1],
+  ): Promise<MaxSimpleResult> {
+    return this.request(
+      'PUT',
+      `/messages/${encodeURIComponent(postId)}/comments`,
+      { comment_id: commentId },
+      body,
+    );
+  }
+
+  async deleteComment(postId: string, commentId: string): Promise<MaxSimpleResult> {
+    return this.request('DELETE', `/messages/${encodeURIComponent(postId)}/comments`, {
+      comment_id: commentId,
+    });
   }
 
   // ── Chats ──

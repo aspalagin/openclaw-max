@@ -143,6 +143,41 @@ describe('MaxApi', () => {
     });
   });
 
+  describe('HTTP success with a refused MAX result', () => {
+    it.each([
+      { run: (client: MaxApi) => client.editMessage('m', { text: 'hi' }), code: 'denied' },
+      { run: (client: MaxApi) => client.deleteMessage('m'), code: null },
+      { run: (client: MaxApi) => client.pinMessage(-1, 'm'), code: undefined },
+    ])('rejects without retrying or exposing the message (code=$code)', async ({ run, code }) => {
+      const client = new MaxApi({ token: MOCK_TOKEN, baseUrl: MOCK_BASE_URL, retryAttempts: 3 });
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: false,
+          message: 'private echoed text',
+          ...(code === undefined ? {} : { code }),
+        }),
+      });
+
+      const err = await run(client).catch((e: unknown) => e);
+      expect(err).toMatchObject({ name: 'MaxApiResultError', status: 200, code });
+      expect(String(err)).toContain('200 success=false');
+      expect(String(err)).not.toContain('private echoed text');
+      expect(JSON.stringify(err)).not.toContain('private echoed text');
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(log.mock.calls.flat().join(' ')).not.toContain('private echoed text');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns successful results unchanged and does not inspect nested success flags', async () => {
+      const body = { success: true, code: null, extra: { success: false } };
+      global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => body });
+      await expect(api.unpinMessage(-1)).resolves.toEqual(body);
+    });
+  });
+
   describe('editMessage', () => {
     it('should edit existing message', async () => {
       global.fetch = vi.fn().mockResolvedValueOnce({

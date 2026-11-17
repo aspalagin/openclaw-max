@@ -14,7 +14,20 @@ import { readStringParam } from 'openclaw/plugin-sdk/param-readers';
 import { jsonResult } from 'openclaw/plugin-sdk/tool-results';
 
 import { listMaxAccountIds, resolveMaxAccount } from './accounts.js';
-import { assertMaxActionInScope } from './action-scope.js';
+import {
+  assertCommentAuthorInScope,
+  assertMaxActionInScope,
+  currentMaxChatForAccount,
+} from './action-scope.js';
+import { MaxApi } from './api.js';
+import {
+  assertCommentFields,
+  assertCommentPost,
+  commentMid,
+  commentText,
+  resolveCommentPost,
+  sendTextComment,
+} from './comments.js';
 import { resolveMaxTableMode, toMaxMarkdown } from './format.js';
 import { sanitizeMaxFileName } from './media-temp.js';
 import {
@@ -262,7 +275,77 @@ function readContactParams(
   };
 }
 
+const COMMENT_ROUTE_FIELDS = [
+  'action',
+  'channel',
+  'accountId',
+  'to',
+  'target',
+  'chatId',
+  'channelId',
+  'threadId',
+  'topLevel',
+  'dryRun',
+  'bestEffort',
+  'idempotencyKey', // SDK operation envelope, not a MAX comment option
+];
+
+async function handleCommentAction(
+  ctx: ChannelMessageActionContext,
+  account: ReturnType<typeof resolveMaxAccount>,
+  postId: string,
+  to: string,
+) {
+  const { action, params } = ctx;
+  if (action !== 'read' && action !== 'send' && action !== 'edit' && action !== 'delete') {
+    throw new Error(`MAX comments do not support action ${action}`);
+  }
+  const isMutation = action === 'edit' || action === 'delete';
+  assertCommentFields(params, [
+    ...COMMENT_ROUTE_FIELDS,
+    ...(action === 'read' || isMutation ? ['messageId'] : []),
+    ...(action === 'read' && params.messageId == null ? ['limit'] : []),
+    ...(action === 'send' || action === 'edit' ? ['message'] : []),
+    ...(action === 'send' ? ['replyTo'] : []),
+  ]);
+  const commentId =
+    isMutation || params.messageId != null ? commentMid(params.messageId) : undefined;
+  await assertMaxActionInScope(ctx, account, { to });
+  const api = new MaxApi({ token: account.token });
+  await assertCommentPost(api, to, postId);
+  if (isMutation && commentId)
+    await assertCommentAuthorInScope(ctx, account, api, to, postId, commentId);
+  if (action === 'read') {
+    if (commentId) return jsonResult({ message: await api.getCommentById(postId, commentId) });
+    const count = params.limit == null ? undefined : Number(params.limit);
+    if (count != null && (!Number.isInteger(count) || count < 1 || count > 100))
+      throw new Error('MAX comment limit must be 1–100');
+    return jsonResult(await api.getComments(postId, { count }));
+  }
+  const text = action === 'delete' ? '' : readStringParam(params, 'message', { required: true });
+  if (action === 'send') {
+    const replyTo = params.replyTo == null ? ctx.reply?.replyToId : commentMid(params.replyTo);
+    const messageId = await sendTextComment(
+      api,
+      account,
+      postId,
+      text,
+      replyTo,
+      ctx.assertDirectAdapterHandoff,
+    );
+    return jsonResult({ ok: true, to, threadId: postId, messageId });
+  }
+  ctx.assertDirectAdapterHandoff?.();
+  const result =
+    action === 'delete'
+      ? await api.deleteComment(postId, commentId!)
+      : await api.editComment(postId, commentId!, commentText(account, text));
+  if (!result.success) throw new Error(result.message || `MAX comment ${action} failed`);
+  return jsonResult({ ok: true, to, threadId: postId, messageId: commentId });
+}
+
 const MAX_MESSAGE_ACTIONS = [
+  'read',
   'send',
   'edit',
   'delete',
@@ -294,9 +377,25 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
   // sendPayload), never reaching handleAction: the action gate and scope are
   // checked here first, then core delivers the payload unchanged. Any other
   // send declines (null) and keeps the handleAction path, which checks them.
-  prepareSendPayload: async ({ ctx, to, payload, replyToId }) => {
-    if (!payload.presentation) return null;
+  prepareSendPayload: async ({ ctx, to, payload, replyToId, threadId }) => {
     const account = resolveMaxAccount({ cfg: ctx.cfg, accountId: ctx.accountId });
+    const postId = resolveCommentPost(ctx, account, to);
+    if (threadId != null || postId) {
+      if (threadId != null && threadId !== postId) throw new Error('MAX comment threadId mismatch');
+      if (!createActionGate(account.config.actions)('send'))
+        throw new Error('MAX action "send" is disabled by channels.max.actions');
+      assertCommentFields(payload, ['text', 'replyToId']);
+      if (
+        payload.replyToId != null &&
+        payload.replyToId !== (ctx.params.replyTo ?? ctx.reply?.replyToId)
+      ) {
+        throw new Error('MAX comment replyTo mismatch');
+      }
+      // Decline core presentation delivery: handleAction validates scope and sends
+      // to the post, including an implicit currentThreadTs not known to core.
+      return null;
+    }
+    if (!payload.presentation) return null;
     if (!createActionGate(account.config.actions)('send')) {
       throw new Error('MAX action "send" is disabled by channels.max.actions');
     }
@@ -333,7 +432,11 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
     // Strip provider prefix (e.g. "max:123456789" → "123456789")
     if (to.startsWith('max:')) to = to.slice(4);
     const accountId = typeof args.accountId === 'string' ? args.accountId.trim() : undefined;
-    return { to, accountId };
+    return {
+      to,
+      accountId,
+      ...(typeof args.threadId === 'string' ? { threadId: args.threadId } : {}),
+    };
   },
 
   handleAction: async (ctx) => {
@@ -348,6 +451,15 @@ export const maxMessageActions: ChannelMessageActionAdapter = {
     if (!createActionGate(account.config.actions)(action)) {
       throw new Error(`MAX action "${action}" is disabled by channels.max.actions`);
     }
+
+    const target = readTargetParam(params, false);
+    const postId = resolveCommentPost(ctx, account, target);
+    if (postId) {
+      const to = target ?? currentMaxChatForAccount(ctx, account);
+      if (!to) throw new Error('MAX comments require a target channel');
+      return handleCommentAction(ctx, account, postId, to);
+    }
+    if (action === 'read') throw new Error('MAX read requires a channel post threadId');
 
     // Notification and link-preview options of sends: core's `silent` flag
     // beats the account defaults (channels.max.notify / disableLinkPreview).

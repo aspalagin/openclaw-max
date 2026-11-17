@@ -46,6 +46,9 @@ export const MAX_SUBSCRIBED_UPDATE_TYPES: MaxUpdateType[] = [
   'message_callback',
   'message_edited',
   'message_removed',
+  'comment_created',
+  'comment_edited',
+  'comment_removed',
   'bot_started',
   'bot_stopped',
   'bot_added',
@@ -53,6 +56,12 @@ export const MAX_SUBSCRIBED_UPDATE_TYPES: MaxUpdateType[] = [
   'dialog_cleared',
   'dialog_removed',
   'chat_title_changed',
+];
+
+/** MAX delivers changes to the bot's admin rights via webhook only. */
+export const MAX_WEBHOOK_UPDATE_TYPES: MaxUpdateType[] = [
+  ...MAX_SUBSCRIBED_UPDATE_TYPES,
+  'bot_admin_permissions_changed',
 ];
 
 export type MaxTransport = 'polling' | 'webhook';

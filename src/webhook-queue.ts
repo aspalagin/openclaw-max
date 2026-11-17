@@ -32,6 +32,7 @@ export const MAX_EVENT_MAX_AGE_MINUTES = 60;
 /** Updates a late answer would confuse; registry updates (bot_added, …) are always handled. */
 const AGE_FENCED_UPDATE_TYPES = new Set([
   'message_created',
+  'comment_created',
   'message_edited',
   'message_callback',
   'bot_started',

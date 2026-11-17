@@ -13,8 +13,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { MaxAccountConfig, ResolvedMaxAccount } from './accounts.js';
 import type { MaxApi } from './api.js';
+import { dispatchUpdate } from './dispatch.js';
+import * as inbound from './inbound.js';
 import {
   MAX_SUBSCRIBED_UPDATE_TYPES,
+  MAX_WEBHOOK_UPDATE_TYPES,
   type MaxStatusPatch,
   resolveMaxTransport,
   startMaxPolling,
@@ -172,7 +175,7 @@ describe('webhook mode lifecycle', () => {
     expect(api.unsubscribe).toHaveBeenCalledWith('https://old.example/hook');
     expect(api.subscribe).toHaveBeenCalledWith({
       url: 'https://max.example/max/webhook',
-      update_types: MAX_SUBSCRIBED_UPDATE_TYPES,
+      update_types: [...MAX_SUBSCRIBED_UPDATE_TYPES, 'bot_admin_permissions_changed'],
       secret: 'hook-secret-1',
     });
 
@@ -319,6 +322,11 @@ describe('polling mode', () => {
       log,
     });
 
+    expect(api.getUpdates).toHaveBeenCalledWith(
+      expect.objectContaining({
+        types: expect.not.arrayContaining(['bot_admin_permissions_changed']),
+      }),
+    );
     expect(api.unsubscribe).toHaveBeenCalledWith('https://stale.example/hook');
     expect(api.unsubscribe.mock.invocationCallOrder[0]).toBeLessThan(
       api.getUpdates.mock.invocationCallOrder[0],
@@ -350,6 +358,51 @@ describe('polling mode', () => {
     });
     expect(api.unsubscribe).not.toHaveBeenCalled();
     expect(log.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('bot_admin_permissions_changed', () => {
+  it.each([
+    { admin: false, permissions: null, level: 'warn', diagnostic: 'bot lost admin rights' },
+    { admin: true, permissions: ['edit'], level: 'warn', diagnostic: 'write permission lost' },
+    { admin: true, permissions: null, level: 'warn', diagnostic: 'write permission not confirmed' },
+    {
+      admin: true,
+      permissions: ['write'],
+      level: 'info',
+      diagnostic: 'admin and write permissions retained',
+    },
+  ] as const)('reports $diagnostic locally', async ({ admin, permissions, level, diagnostic }) => {
+    const log = mockLog();
+    const sendMessage = vi.fn();
+    const agent = vi.spyOn(inbound, 'processIncomingMessage').mockResolvedValue(undefined);
+    try {
+      await dispatchUpdate(
+        {
+          update_type: 'bot_admin_permissions_changed',
+          timestamp: 100,
+          chat_id: -12,
+          user_id: 3,
+          bot_id: 2,
+          is_channel: true,
+          is_admin: admin,
+          permissions: permissions ? [...permissions] : null,
+        },
+        {
+          api: { sendMessage } as unknown as MaxApi,
+          account: account({}),
+          config: {},
+          abortSignal: new AbortController().signal,
+          log,
+        },
+      );
+      expect(log[level]).toHaveBeenCalledWith(expect.stringContaining('channel -12'));
+      expect(log[level]).toHaveBeenCalledWith(expect.stringContaining(diagnostic));
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(agent).not.toHaveBeenCalled();
+    } finally {
+      agent.mockRestore();
+    }
   });
 });
 
@@ -390,7 +443,7 @@ describe('webhook subscription watch', () => {
     await vi.advanceTimersByTimeAsync(MAX_SUBSCRIPTION_CHECK_INTERVAL_MS);
     expect(api.subscribe).toHaveBeenCalledWith({
       url,
-      update_types: MAX_SUBSCRIBED_UPDATE_TYPES,
+      update_types: MAX_WEBHOOK_UPDATE_TYPES,
       secret: 'watch-secret',
     });
     expect(api.unsubscribe).not.toHaveBeenCalled();

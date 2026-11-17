@@ -54,15 +54,8 @@ export async function assertMaxActionInScope(
   const scope: MaxActionScope = account.config.actionScope ?? 'admitted';
   if (scope === 'off' || ctx.senderIsOwner === true) return;
 
-  const turnChatId = readCurrentMaxChatId(ctx);
   const requesterId = ctx.requesterSenderId?.trim() || undefined;
-  // The turn's chat is current only for the account the turn came in on:
-  // another bot of the same group is held to its own policy.
-  const turnAccountId = ctx.requesterAccountId?.trim();
-  const currentChatId =
-    !turnAccountId || normalizeAccountId(turnAccountId) === account.accountId
-      ? turnChatId
-      : undefined;
+  const currentChatId = currentMaxChatForAccount(ctx, account);
 
   const api = new MaxApi({ token: account.token });
   const { chat: located, authorId } = await failClosed(ctx.action, target, () =>
@@ -136,6 +129,26 @@ async function assertReplyInChat(
   refuse(`belongs to another chat (${describeChat(replyChat)})`);
 }
 
+/** After target admission and binding the post to its channel, apply the same
+ * authorship restriction to a comment as to an ordinary edit/delete. */
+export async function assertCommentAuthorInScope(
+  ctx: ChannelMessageActionContext,
+  account: ResolvedMaxAccount,
+  api: MaxApi,
+  to: string,
+  postId: string,
+  commentId: string,
+) {
+  if (
+    account.config.actionScope === 'off' ||
+    ctx.senderIsOwner === true ||
+    currentMaxChatForAccount(ctx, account) === to.trim().replace(/^max:/, '')
+  )
+    return;
+  const comment = await api.getCommentById(postId, commentId);
+  await assertBotMessage(ctx.action, api, commentId, comment.sender?.user_id);
+}
+
 /** The author comes from the same GET /messages/{mid} as the chat; the bot id is remembered. */
 async function assertBotMessage(
   action: string,
@@ -167,12 +180,21 @@ function deny(action: string, chat: string, reason: string): never {
 }
 
 /** Chat id of the current MAX turn (toolContext.currentChannelId is `max:<chatId>`). */
+export function currentMaxChatForAccount(
+  ctx: ChannelMessageActionContext,
+  account: ResolvedMaxAccount,
+): string | undefined {
+  const originAccount = ctx.requesterAccountId?.trim();
+  if (originAccount && normalizeAccountId(originAccount) !== account.accountId) return undefined;
+  return readCurrentMaxChatId(ctx);
+}
+
 function readCurrentMaxChatId(ctx: ChannelMessageActionContext): string | undefined {
   const tool = ctx.toolContext;
   if (!tool) return undefined;
   if (tool.currentChannelProvider && tool.currentChannelProvider !== 'max') return undefined;
   const raw = tool.currentChannelId?.trim() || tool.currentMessagingTarget?.trim();
-  if (!raw) return undefined;
+  if (!raw || (!tool.currentChannelProvider && !raw.startsWith('max:'))) return undefined;
   const id = raw.replace(/^max:/, '');
   return /^-?\d+$/.test(id) ? id : undefined;
 }

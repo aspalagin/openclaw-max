@@ -12,11 +12,7 @@ import { channelReadyPatch } from 'openclaw/plugin-sdk/gateway-runtime';
 import { readSecretFile, type ResolvedMaxAccount } from './accounts.js';
 import type { MaxApi, MaxSubscription, MaxUpdate } from './api.js';
 import { dispatchUpdate } from './dispatch.js';
-import {
-  MAX_SUBSCRIBED_UPDATE_TYPES,
-  type MaxMonitorOptions,
-  type MaxStatusPatch,
-} from './monitor-types.js';
+import type { MaxMonitorOptions, MaxStatusPatch } from './monitor-types.js';
 import type { MaxStateStore } from './state.js';
 import { type MaxUpdateJournal, openMaxUpdateJournal } from './update-journal.js';
 import {
@@ -108,7 +104,6 @@ export async function syncMaxWebhookSubscription(params: {
     api,
     webhookUrl,
     secret,
-    updateTypes: MAX_SUBSCRIBED_UPDATE_TYPES,
   });
 }
 
@@ -155,7 +150,6 @@ export function startMaxSubscriptionWatch(params: {
           api,
           webhookUrl,
           secret,
-          updateTypes: MAX_SUBSCRIBED_UPDATE_TYPES,
         });
         log?.info(`[${accountId}] MAX webhook re-subscribed: ${webhookUrl}`);
       } catch (err) {

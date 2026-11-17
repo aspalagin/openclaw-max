@@ -18,6 +18,7 @@ import { startMaxWebhook } from './webhook-runner.js';
 
 export {
   MAX_SUBSCRIBED_UPDATE_TYPES,
+  MAX_WEBHOOK_UPDATE_TYPES,
   type MaxMonitorOptions,
   type MaxStatusPatch,
   type MaxTransport,

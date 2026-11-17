@@ -6,7 +6,7 @@ A channel plugin that connects an [OpenClaw](https://openclaw.ai) assistant to t
 
 It is for OpenClaw users who need their assistant reachable in MAX. You need a MAX bot token (bots are created by organisations on [business.max.ru](https://business.max.ru/self)) and an OpenClaw gateway you run yourself.
 
-Version 0.9.6. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md) (in Russian).
+Version 0.10.0. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max/blob/main/CHANGELOG.md) (in Russian).
 
 ## Contents
 
@@ -48,6 +48,7 @@ Version 0.9.6. Changes: [CHANGELOG.md](https://github.com/aspalagin/openclaw-max
 | Contact | Name and phones parsed from the VCard, MAX profile | `sendAttachment` with `type="contact"` |
 | Location | Coordinates and a map link | `sendAttachment` with `type="location"` |
 | Share card | Title, description and link | — |
+| Channel post comments | New comments follow group access and mention rules; each post has its own conversation | Text replies under the same post, not new channel posts |
 | Forwarded message | Text and attachments with the original author; the sender's own comment comes first | — |
 | Reply | Quote of the replied-to message (up to 1000 characters) and its author | Yes, as a MAX reply (`replyTo`) |
 | Inline keyboard | Button presses: callbacks, approvals, command menus | 7 button types (callback, link, message, clipboard, open_app, request_contact, request_geo_location); OpenClaw `presentation` blocks rendered as text and keyboards |
@@ -97,7 +98,7 @@ A reply is formatted before it is split into 4000-character parts: parts are mea
 - OpenClaw ≥ 2026.9.6 (`peerDependencies.openclaw`, `openclaw.compat.minGatewayVersion`). Older releases do not work, checked against 2026.9.3–2026.9.5 by typecheck and the test suite: 2026.9.5 lacks `createLivePreviewLifecycle` in `openclaw/plugin-sdk/channel-outbound`, so the plugin module fails to load (turn status is built on it); 2026.9.3 and 2026.9.4 also lack the sender check for answering agent questions with buttons (`authorize` in `resolveOption`), the guarded heartbeat typing hook and the plan-explanation format. Upgrade OpenClaw to use this plugin.
 - CI checks the locked SDK, OpenClaw 2026.11.1, 2026.11.3 and `latest`; `beta` remains an optional early check.
 - Node.js ≥ 22.
-- MAX Bot API as described by schema 0.0.33 and [dev.max.ru/docs-api](https://dev.max.ru/docs-api).
+- MAX Bot API as described by schema 0.0.34 and [dev.max.ru/docs-api](https://dev.max.ru/docs-api).
 - For webhook mode: a public HTTPS address on port 443 with a trusted certificate that reaches the gateway's HTTP server.
 
 **Verification status.** Version 0.8.0 has been in production use since 27 September 2026 with OpenClaw 2026.9.6 in webhook mode. Verified live: start and webhook subscription, channel status (`mode`, `tokenStatus`), text in a direct chat, long answers in parts, core commands, sends through the `message` tool, including a file from the agent workspace and the refusal of a file of a type that is not allowed, and recovery of the durable queue after a real gateway restart — a message core refused while the gateway was shutting down waited for the next start and was answered. Versions 0.7.x were in production use before that with text, media, buttons, both transports and incoming voice transcription over webhook. The rest of what is new in 0.8.0 is covered by the automated test suite and has passed an independent code review, but has not been checked live yet — among it the HTTP proxy and `apiBaseUrl`, SecretRef resolution at gateway start, turn status, command menus, voice replies, forwarded messages, groups and long polling.
@@ -207,7 +208,7 @@ All options live under `channels.max`; the same keys (except `accounts` and `com
 | `responsePrefix` | string | — | Prefix of agent replies, applied by OpenClaw core (`"auto"` — agent name) |
 | `historyLimit` | integer ≥ 0 | core default | Read by OpenClaw core: recent turns of a group session the embedded agent runtime keeps in the prompt (native CLI runtimes keep their own history) |
 | `dmHistoryLimit`, `dms.<userId>.historyLimit` | integer ≥ 0 | no limit | Read by OpenClaw core: the same for private dialogs with a per-channel session (`session.dmScope`), per user first |
-| `actions` | object `{ <action>: boolean }` | all on | `false` turns a `message` tool action off (`send`, `edit`, `delete`, `sticker`, `sendAttachment`, `pin`, `unpin`): hidden from the tool and refused. `pin: false` also forbids pinning through `pin=true` / `delivery.pin`: on `send`, in core delivery and in agent replies. `sticker: false` also forbids a sticker through `send` with `stickerId`. `sendAttachment: false` turns off only the separate action: attachments, location and contact in `send` are part of `send`, as in core channels |
+| `actions` | object `{ <action>: boolean }` | all on | `false` turns a `message` tool action off (`read`, `send`, `edit`, `delete`, `sticker`, `sendAttachment`, `pin`, `unpin`): hidden from the tool and refused. `pin: false` also forbids pinning through `pin=true` / `delivery.pin`: on `send`, in core delivery and in agent replies. `sticker: false` also forbids a sticker through `send` with `stickerId`. `sendAttachment: false` turns off only the separate action: attachments, location and contact in `send` are part of `send`, as in core channels |
 | `apiBaseUrl` | string | `https://platform-api2.max.ru` | Bot API base URL; `https` only, `http` just for loopback |
 | `httpProxy` | string or SecretRef | — | HTTP(S) proxy for all MAX traffic; `""` in an account turns an inherited proxy off |
 | `logMessagePreview` | boolean | `false` | Add a 50-character text preview to debug logs |
@@ -255,7 +256,7 @@ A named account that inherits an `open` policy logs a warning at start with the 
 
 ## `message` tool actions and their scope
 
-Actions: `send`, `sendAttachment`, `sticker`, `edit`, `delete`, `pin`, `unpin`.
+Actions: `read`, `send`, `sendAttachment`, `sticker`, `edit`, `delete`, `pin`, `unpin`.
 
 Targets: `user:<id>` for a private dialog, a numeric chat id for a group or channel (for example `-70000000000001`). `@username` and max.ru links are not supported by the MAX Bot API and are rejected with a clear error. A bare positive number that MAX answers with `dialog.not.found` is retried once as a user id.
 
@@ -277,6 +278,8 @@ message(action="pin", target="CHAT_ID", messageId="MID")
 - `attachments=[…]` sends several files; images and videos go as albums of up to 12, audio and files one by one. The result has `messageIds`; failed items are listed in `mediaErrors`.
 - `silent=true` sends without a push notification; MAX channels always notify.
 - `pin=true` or `delivery.pin` pins the sent message. MAX has no pinning in private dialogs: the plugin skips the call and returns `pinned: false` with a reason. With `actions.pin: false` such a `send` is refused before anything is sent, with `MAX action "pin" is disabled by channels.max.actions`; for an agent reply the pin is skipped with a warning in the log.
+
+**Channel comments.** Set `target` to the channel ID and `threadId` to the post mid. `read` lists comments; with `messageId` it gets one. `send` writes text under the post; `edit` and `delete` require the comment mid in `messageId`. MAX does not accept attachments in comments. To read, the bot needs the `read_all_messages` admin right; to reply it also needs `write` and comments enabled on the channel. Changes to the bot’s admin rights are recorded in the gateway log (webhook only).
 
 **Scope (`actionScope`).** In a turn started by someone other than the owner, actions work only in the current chat and in chats the inbound policy admits (dialogs with senders in `allowFrom` or paired, groups in `groups` and, when a group has a sender list, only if the requester is on it). Only calls OpenClaw marks as the owner's (`senderIsOwner: true`) are not limited: the owner's own turns, `openclaw message` from the CLI, an admin's chat in the Control UI. Every other call — including runs without a conversation whose owner mark is missing or false, as heartbeat, subagent, scheduled and plugin- or hook-started runs may be — is limited to the admitted chats; in a group with a sender list it is refused, as there is no requester to check. Core deliveries (agent replies, reminders, automation announcements) do not go through the `message` tool and are not affected. A `send` with `presentation` (cards, buttons), which core delivers without the plugin's action handler, is checked the same way, and `actions.send: false` applies to it too. The current chat counts only for the account the turn came through: an action in it through another MAX account (`accountId`) is checked against that account's policy. A refused action is a tool error raised before anything changes in MAX; if the plugin cannot determine the chat of a message, it refuses. Outside the chat of the current turn, `edit` and `delete` work only on messages the bot sent itself (the author comes from the same lookup as the chat); in the current chat and for the owner they work as before. A `send`, `sendAttachment` or `sticker` with `replyTo` (and a `send` with `presentation`) may reply only to a message of the chat it goes to (checked with one lookup, made only when `replyTo` is set); a reply to a message of another chat, or one whose chat cannot be determined, is refused.
 
@@ -512,7 +515,7 @@ npm audit --omit=dev --omit=peer   # runtime dependencies shipped with the packa
 
 CI also runs `typecheck` and the tests against `openclaw@latest` (with the locked and the minimum supported zod) and `openclaw@beta`; a failure on `beta` is reported but does not fail the build.
 
-- `src/__fixtures__/max-schema-0.0.33.yaml` is a snapshot of the MAX Bot API schema; `npm run schema:update [ref]` refreshes it.
+- `src/__fixtures__/max-schema-0.0.34.yaml` is a snapshot of the MAX Bot API schema; `npm run schema:update [ref]` refreshes it.
 - `npm run test:api` calls the live API with `MAX_BOT_TOKEN` (`GET /me`, `GET /updates`); the helper scripts in `scripts/` are in the repository only, not in the package.
 - Tests must use made-up tokens and ids.
 

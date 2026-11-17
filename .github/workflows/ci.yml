@@ -27,6 +27,16 @@ jobs:
       - run: npm run check:cycles
       - run: npm run typecheck
       - run: npm test
+      # A manual release run produces one tested archive for both registries.
+      - if: github.event_name == 'workflow_dispatch'
+        run: npm pack --pack-destination "$RUNNER_TEMP"
+      - if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-package
+          path: ${{ runner.temp }}/aspalagin-openclaw-max-*.tgz
+          if-no-files-found: error
+          retention-days: 7
 
   # Same checks against the newest published OpenClaw, so SDK drift (removed
   # subpaths, changed helpers) shows up before a gateway upgrade does. The zod

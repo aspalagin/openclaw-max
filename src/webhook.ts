@@ -23,6 +23,7 @@ import {
 import type { ResolvedMaxAccount } from './accounts.js';
 import type { MaxUpdate } from './api.js';
 import type { MaxApi } from './api.js';
+import { MAX_WEBHOOK_UPDATE_TYPES } from './monitor-types.js';
 
 /** Plugin id from openclaw.plugin.json — the owner of the gateway route. */
 export const MAX_PLUGIN_ID = 'openclaw-max';
@@ -260,19 +261,7 @@ export async function subscribeMaxWebhook(params: {
 
   await api.subscribe({
     url: webhookUrl,
-    update_types: updateTypes ?? [
-      'message_created',
-      'message_callback',
-      'message_edited',
-      'message_removed',
-      'bot_started',
-      'bot_stopped',
-      'bot_added',
-      'bot_removed',
-      'dialog_cleared',
-      'dialog_removed',
-      'chat_title_changed',
-    ],
+    update_types: updateTypes ?? MAX_WEBHOOK_UPDATE_TYPES,
     secret,
   });
 }

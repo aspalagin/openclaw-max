@@ -3,11 +3,14 @@
  * presentation rendering and delivery pins for core's outbound path.
  */
 
+import { createActionGate } from 'openclaw/plugin-sdk/channel-actions';
 import type { ChannelPlugin } from 'openclaw/plugin-sdk/channel-core';
 import type { OpenClawConfig } from 'openclaw/plugin-sdk/core';
 import { getAgentScopedMediaLocalRoots } from 'openclaw/plugin-sdk/media-local-roots';
 
 import { type ResolvedMaxAccount, resolveMaxAccount } from './accounts.js';
+import { MaxApi } from './api.js';
+import { assertCommentFields, assertCommentPost, commentMid, sendTextComment } from './comments.js';
 import { resolveMaxTableMode, toMaxMarkdown } from './format.js';
 import {
   isMaxPinEnabled,
@@ -55,6 +58,30 @@ function resolveOutboundLocalMedia(
   return { mediaLocalRoots: getAgentScopedMediaLocalRoots(cfg) };
 }
 
+type Outbound = NonNullable<MaxChannelPlugin['outbound']>;
+type TextContext = Parameters<NonNullable<Outbound['sendText']>>[0];
+
+async function deliverComment(ctx: TextContext, payload?: Record<string, unknown>) {
+  const postId = commentMid(ctx.threadId);
+  if (ctx.silent || ctx.mediaUrl || ctx.audioAsVoice || ctx.forceDocument || ctx.gifPlayback) {
+    throw new Error('MAX comments support text only, without silent delivery');
+  }
+  if (payload) assertCommentFields(payload, ['text', 'replyToId']);
+  const account = resolveMaxAccount({ cfg: ctx.cfg, accountId: ctx.accountId });
+  if (!account.token) throw new Error('MAX bot token not configured');
+  if (!createActionGate(account.config.actions)('send'))
+    throw new Error('MAX action "send" is disabled by channels.max.actions');
+  const api = new MaxApi({ token: account.token });
+  await assertCommentPost(api, ctx.to, postId);
+  const replyTo =
+    ctx.replyToId ?? (payload?.replyToId == null ? undefined : commentMid(payload.replyToId));
+  const messageId = await sendTextComment(api, account, postId, ctx.text, replyTo, () => {
+    ctx.signal?.throwIfAborted();
+    ctx.assertDirectAdapterHandoff?.();
+  });
+  return { channel: 'max' as const, messageId };
+}
+
 /** Direct delivery with markdown chunks of at most 4000 characters. */
 export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
   deliveryMode: 'direct',
@@ -75,8 +102,12 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
   // pinDeliveredMessage after the first delivered message.
   presentationCapabilities: MAX_PRESENTATION_CAPABILITIES,
   deliveryCapabilities: { pin: true },
-  renderPresentation: ({ payload, presentation }) => renderMaxPresentation(payload, presentation),
+  renderPresentation: ({ payload, presentation, ctx }) => {
+    if (ctx?.threadId != null) throw new Error('MAX comments do not support presentation');
+    return renderMaxPresentation(payload, presentation);
+  },
   pinDeliveredMessage: async ({ cfg, target, messageId, pin, assertDirectAdapterHandoff }) => {
+    if (target.threadId != null) throw new Error('MAX comments do not support pin');
     const account = resolveMaxAccount({ cfg, accountId: target.accountId });
     if (!account.token) throw new Error('MAX bot token not configured');
     // channels.max.actions.pin gates this pin too: core keeps the delivered
@@ -93,6 +124,7 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
   },
 
   sendPayload: async (ctx) => {
+    if (ctx.threadId != null) return deliverComment(ctx, ctx.payload);
     const { to, text, payload: rawPayload, mediaUrl, accountId, replyToId } = ctx;
     const cfg = await loadMaxConfig();
     const account = resolveMaxAccount({ cfg, accountId });
@@ -164,7 +196,9 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
     };
   },
 
-  sendText: async ({ to, text, accountId, replyToId, silent }) => {
+  sendText: async (ctx) => {
+    if (ctx.threadId != null) return deliverComment(ctx);
+    const { to, text, accountId, replyToId, silent } = ctx;
     const cfg = await loadMaxConfig();
     const account = resolveMaxAccount({ cfg, accountId });
     if (!account.token) throw new Error('MAX bot token not configured');
@@ -183,6 +217,7 @@ export const maxOutboundAdapter: NonNullable<MaxChannelPlugin['outbound']> = {
   },
 
   sendMedia: async (ctx) => {
+    if (ctx.threadId != null) return deliverComment(ctx);
     const { to, mediaUrl, accountId, replyToId } = ctx;
     const cfg = await loadMaxConfig();
     const account = resolveMaxAccount({ cfg, accountId });
